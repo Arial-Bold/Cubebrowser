@@ -13,9 +13,12 @@ include $(DEVKITPPC)/gamecube_rules
 
 MBEDTLS		:=	third_party/mbedtls
 
+# Only check from the top-level folder; the second pass runs inside build/
+ifneq (build,$(notdir $(CURDIR)))
 ifeq ($(wildcard $(MBEDTLS)/library/ssl_tls.c),)
 ifneq ($(MAKECMDGOALS),clean)
 $(error "mbedTLS not found in $(MBEDTLS). Run ./get-mbedtls.sh first (see README.md)")
+endif
 endif
 endif
 
