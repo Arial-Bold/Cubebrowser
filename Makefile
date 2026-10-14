@@ -34,8 +34,7 @@ CXXFLAGS	=	$(CFLAGS)
 LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
 # libfat must come before libogc
-LIBS	:=	-lfat -lasnd -logc -lm
-LIBDIRS	:=	$(PORTLIBS)
+   LIBS	:=	-lfat -lasnd -lbba -logc -lmLIBDIRS	:=	$(PORTLIBS)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 
