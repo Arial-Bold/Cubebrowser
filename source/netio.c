@@ -173,6 +173,8 @@ int netio_resolve(const char *host, u32 *ip_be) {
     }
     return -1;
 }
+
+int netio_connect(u32 ip_be, u16 port) {
     int fd = net_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (fd < 0) return -1;
     struct sockaddr_in sa;
