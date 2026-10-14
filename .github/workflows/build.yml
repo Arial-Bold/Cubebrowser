@@ -1,4 +1,5 @@
 # Builds cubebrowser.dol on GitHub's servers - nothing to install locally.
+# Uses libogc2, which supports the official BBA and WIZnet adapters (ETH2GC).
 name: Build CubeBrowser
 
 on:
@@ -16,7 +17,7 @@ jobs:
         run: sh get-mbedtls.sh
 
       - name: Build the .dol
-        run: docker run --rm -v "$PWD:/src" -w /src devkitpro/devkitppc make
+        run: docker run --rm -v "$PWD:/src" -w /src ghcr.io/extremscorner/libogc2:latest make
 
       - name: Gather files for the SD card
         run: |
