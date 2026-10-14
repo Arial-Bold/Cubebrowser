@@ -51,7 +51,7 @@ bool netio_bringup(void) {
         snprintf(netmask, sizeof(netmask), "%s", g_set.netmask);
         snprintf(gateway, sizeof(gateway), "%s", g_set.gateway);
     }
-    s32 r = if_config(local_ip, netmask, gateway, g_set.dhcp ? true : false, 20);
+    s32 r = if_config(local_ip, netmask, gateway, g_set.dhcp ? true : false);
     if (r < 0) {
         state = NET_FAILED;
         snprintf(status, sizeof(status), "No network (error %d). Check the Broadband Adapter cable.", (int)r);
