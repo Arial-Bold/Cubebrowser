@@ -155,20 +155,24 @@ static int dns_query(u32 server_be, const char *host, u32 *ip_be) {
 
 int netio_resolve(const char *host, u32 *ip_be) {
     if (parse_ipv4(host, ip_be)) return 0;
-    u32 server;
-    const char *dns = g_set.dns[0] ? g_set.dns : (g_set.dhcp ? NULL : "1.1.1.1");
-    if (dns && parse_ipv4(dns, &server)) return dns_query(server, host, ip_be);
-    struct hostent *he = net_gethostbyname(host);
-    if (!he || !he->h_addr_list || !he->h_addr_list[0]) {
-        /* router DNS failed; fall back to a public resolver */
-        if (parse_ipv4("1.1.1.1", &server)) return dns_query(server, host, ip_be);
-        return -1;
+    /* The GameCube network library has no built-in name lookup, so we ask a
+     * DNS server ourselves: the DNS setting if filled in, then the router
+     * (most home routers answer DNS), then public servers as a backup. */
+    const char *servers[4];
+    int n = 0;
+    if (g_set.dns[0]) servers[n++] = g_set.dns;
+    if (gateway[0]) servers[n++] = gateway;
+    servers[n++] = "1.1.1.1";
+    servers[n++] = "8.8.8.8";
+    for (int i = 0; i < n; i++) {
+        u32 server;
+        if (!parse_ipv4(servers[i], &server)) continue;
+        int r = dns_query(server, host, ip_be);
+        if (r == 0) return 0;
+        if (r == -2) return -1;   /* the server says this name doesn't exist */
     }
-    memcpy(ip_be, he->h_addr_list[0], 4);
-    return 0;
+    return -1;
 }
-
-int netio_connect(u32 ip_be, u16 port) {
     int fd = net_socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (fd < 0) return -1;
     struct sockaddr_in sa;
