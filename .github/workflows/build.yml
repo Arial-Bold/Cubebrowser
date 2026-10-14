@@ -1,0 +1,38 @@
+# Builds cubebrowser.dol on GitHub's servers - nothing to install locally.
+# Runs on every upload/push, or manually from the Actions tab ("Run workflow").
+name: Build CubeBrowser
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitppc:latest
+    steps:
+      - name: Get the source code
+        uses: actions/checkout@v4
+
+      - name: Install download tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl bzip2 ca-certificates make
+
+      - name: Download mbedTLS
+        run: sh get-mbedtls.sh
+
+      - name: Build the .dol
+        run: make
+
+      - name: Gather files for the SD card
+        run: |
+          mkdir -p package
+          cp cubebrowser.dol package/
+          cp -r sd/gcbrowser package/
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: cubebrowser
+          path: package/
