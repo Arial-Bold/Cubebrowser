@@ -6,10 +6,12 @@
 .SUFFIXES:
 
 ifeq ($(strip $(DEVKITPPC)),)
-$(error "DEVKITPPC is not set. Install devkitPro (gamecube-dev) or use the Docker command in README.md")
+$(error "DEVKITPPC is not set. Use the GitHub build or the Docker command in README.md")
 endif
 
-include $(DEVKITPPC)/gamecube_rules
+# libogc2 (Swiss developers' fork): supports the official BBA and WIZnet-based
+# adapters such as ETH2GC, plus SD2SP2 and other modern accessories.
+include $(DEVKITPRO)/libogc2/gamecube_rules
 
 MBEDTLS		:=	third_party/mbedtls
 
@@ -33,9 +35,10 @@ CFLAGS	=	-g -O2 -Wall -std=gnu11 $(MACHDEP) $(INCLUDE) \
 CXXFLAGS	=	$(CFLAGS)
 LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-# libfat must come before libogc
+# libfat and libbba (GameCube network stack) must come before libogc
 LIBS	:=	-lfat -lasnd -lbba -logc -lm
 LIBDIRS	:=	$(PORTLIBS)
+
 ifneq ($(BUILD),$(notdir $(CURDIR)))
 
 export OUTPUT	:=	$(CURDIR)/$(TARGET)
