@@ -28,7 +28,19 @@
 #define BOOKMARK_MAX 64
 #define BOOKMARK_FILE STORAGE_DIR "/bookmarks.txt"
 
-typedef struct { char url[URL_MAX]; float scroll; } HistEntry;
+/* A history entry remembers how to get the page back: its address, any form
+ * data it was submitted with, and (for recent pages) the page itself. */
+typedef struct {
+    char url[URL_MAX];
+    float scroll;
+    char *post;          /* form data for pages that came from a POST, or NULL */
+    char *src;           /* cached page source, or NULL */
+    size_t len;
+    bool plain, secure, verified;
+} HistEntry;
+
+#define HIST_CACHE_PAGES 4
+#define HIST_CACHE_BYTES (2u * 1024u * 1024u)
 typedef struct { char title[96]; char url[URL_MAX]; } Bookmark;
 
 static Page page;
@@ -172,17 +184,95 @@ static void show_error(const char *url, const char *msg) {
     sound_play(SFX_ERROR);
 }
 
+static char *cur_post;       /* form data the current page was loaded with */
+static char *pending_post;   /* form data of the page being loaded */
+
+static void hist_free(HistEntry *e) {
+    free(e->post);
+    free(e->src);
+    e->post = e->src = NULL;
+}
+
+/* Keep only the most recent few pages in memory. */
+static void hist_trim_cache(void) {
+    size_t bytes = 0;
+    int count = 0;
+    /* newest first: forward stack top, then back stack top */
+    HistEntry *order[HIST_MAX * 2];
+    int n = 0;
+    for (int i = nback - 1; i >= 0; i--) order[n++] = &back_stack[i];
+    for (int i = nfwd - 1; i >= 0; i--) order[n++] = &fwd_stack[i];
+    for (int i = 0; i < n; i++) {
+        HistEntry *e = order[i];
+        if (!e->src) continue;
+        if (count >= HIST_CACHE_PAGES || bytes + e->len > HIST_CACHE_BYTES) { free(e->src); e->src = NULL; continue; }
+        count++;
+        bytes += e->len;
+    }
+}
+
+/* Saves the current page into an entry. The page's source moves into the
+ * entry (the page on screen no longer needs it once it has been read). */
+static void hist_capture(HistEntry *e) {
+    memset(e, 0, sizeof(*e));
+    snprintf(e->url, URL_MAX, "%s", page.url);
+    e->scroll = page.scroll_target;
+    e->post = cur_post ? strdup(cur_post) : NULL;
+    e->src = page.src;
+    e->len = page.src_len;
+    e->plain = page.plain;
+    e->secure = page.secure;
+    e->verified = page.verified;
+    page.src = NULL;
+}
+
 static void push_history(void) {
     if (!has_page) return;
-    if (nback == HIST_MAX) { memmove(back_stack, back_stack + 1, sizeof(HistEntry) * (HIST_MAX - 1)); nback--; }
-    snprintf(back_stack[nback].url, URL_MAX, "%s", page.url);
-    back_stack[nback].scroll = page.scroll_target;
-    nback++;
+    if (nback == HIST_MAX) {
+        hist_free(&back_stack[0]);
+        memmove(back_stack, back_stack + 1, sizeof(HistEntry) * (HIST_MAX - 1));
+        nback--;
+    }
+    hist_capture(&back_stack[nback++]);
+    hist_trim_cache();
+}
+
+static void clear_forward(void) {
+    for (int i = 0; i < nfwd; i++) hist_free(&fwd_stack[i]);
+    nfwd = 0;
+}
+
+static void start_load(const char *url, const char *post);
+
+/* Shows a history entry: instantly from memory if cached, otherwise by
+ * fetching it again (re-sending its form data if it had any). */
+static void restore_entry(HistEntry *e) {
+    if (loading) { queued = false; fetch_cancel(); loading = false; }
+    free(cur_post);
+    cur_post = e->post;
+    e->post = NULL;
+    if (e->src) {
+        page_set_source(&page, e->src, e->len, e->plain, e->url);
+        e->src = NULL;
+        page.secure = e->secure;
+        page.verified = e->verified;
+        has_page = true;
+        page_gen++;
+        last_layout_w = 0;
+        restore_scroll = e->scroll;
+        return;
+    }
+    restore_scroll = e->scroll;
+    char url[URL_MAX];
+    snprintf(url, sizeof(url), "%s", e->url);
+    start_load(url, cur_post);
 }
 
 static void start_load(const char *url, const char *post) {
     if (!strncasecmp(url, "about:", 6)) {
         if (loading) { queued = false; fetch_cancel(); loading = false; }
+        free(cur_post);
+        cur_post = NULL;
         if (!strcasecmp(url, "about:home") || !strcasecmp(url, "about:blank") || !strcasecmp(url, "about:"))
             show_html(home_html, "about:home", false);
         else if (!strcasecmp(url, "about:help"))
@@ -195,6 +285,10 @@ static void start_load(const char *url, const char *post) {
     if (netio_state() == NET_FAILED) fetch_retry_network();
     loading = true;
     snprintf(loading_url, sizeof(loading_url), "%s", url);
+    if (post != pending_post) {
+        free(pending_post);
+        pending_post = post ? strdup(post) : NULL;
+    }
     if (fetch_state() != FETCH_IDLE) {
         /* stop the current download; this one starts as soon as it finishes */
         fetch_cancel();
@@ -211,7 +305,7 @@ static void navigate(const char *url, const char *post, bool record) {
     if (!url[0]) return;
     if (record) {
         push_history();
-        nfwd = 0;
+        clear_forward();
     }
     start_load(url, post);
 }
@@ -232,25 +326,31 @@ static void save_link(const char *url) {
 
 static void go_back(void) {
     if (nback == 0) { sound_play(SFX_ERROR); return; }
-    if (has_page && nfwd < HIST_MAX) {
-        snprintf(fwd_stack[nfwd].url, URL_MAX, "%s", page.url);
-        fwd_stack[nfwd++].scroll = page.scroll_target;
-    }
+    if (has_page && nfwd < HIST_MAX) hist_capture(&fwd_stack[nfwd++]);
     HistEntry e = back_stack[--nback];
-    restore_scroll = e.scroll;
     sound_play(SFX_BACK);
-    start_load(e.url, NULL);
+    restore_entry(&e);
+    hist_free(&e);
+    hist_trim_cache();
 }
 
 static void go_forward(void) {
     if (nfwd == 0) return;
-    push_history();
+    if (has_page) {
+        if (nback == HIST_MAX) { hist_free(&back_stack[0]); memmove(back_stack, back_stack + 1, sizeof(HistEntry) * (HIST_MAX - 1)); nback--; }
+        hist_capture(&back_stack[nback++]);
+    }
     HistEntry e = fwd_stack[--nfwd];
-    restore_scroll = e.scroll;
-    start_load(e.url, NULL);
+    restore_entry(&e);
+    hist_free(&e);
+    hist_trim_cache();
 }
 
-void browser_clear_history(void) { nback = nfwd = 0; }
+void browser_clear_history(void) {
+    for (int i = 0; i < nback; i++) hist_free(&back_stack[i]);
+    nback = 0;
+    clear_forward();
+}
 
 
 /* ------------------------------------------------------------- downloads */
@@ -341,7 +441,11 @@ static void offer_download(const HttpResult *r) {
     dl_confirm_cancel = false;
     dl_state = DL_OFFER;
     /* the link didn't lead to a new page, so don't add one to Back */
-    if (nback > 0 && has_page && !strcmp(back_stack[nback - 1].url, page.url)) nback--;
+    if (nback > 0 && has_page && !strcmp(back_stack[nback - 1].url, page.url)) {
+        HistEntry *e = &back_stack[--nback];
+        if (e->src && !page.src) { page.src = e->src; page.src_len = e->len; e->src = NULL; }   /* hand the source back */
+        hist_free(e);
+    }
     sound_play(SFX_OPEN);
 }
 
@@ -706,6 +810,9 @@ static void handle_fetch_result(void) {
     }
     diag_note(DIAG_PAGE, "%.150s", r.url);
     diag_note(DIAG_MAIN, "reading page (%u bytes)", (unsigned)r.body_len);
+    free(cur_post);
+    cur_post = pending_post;   /* redirects after a POST end up as GET, but re-sending is harmless here */
+    pending_post = NULL;
     page_set_source(&page, r.body, r.body_len, plain, r.url);
     page.secure = r.secure;
     page.verified = r.verified;

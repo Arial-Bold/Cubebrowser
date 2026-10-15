@@ -42,24 +42,38 @@ static bool contains(const Target *t, float px, float py) {
     return px >= t->x && px < t->x + t->w && py >= t->y && py < t->y + t->h;
 }
 
+/* D-pad navigation: move to the nearest row (or column) in that direction,
+ * then to the closest button within it. Scoring distance and sideways offset
+ * together lets a far-away but aligned button beat a nearer one in a
+ * staggered layout like the keyboard, which skips rows. */
 static void snap_dpad(const Target *list, int n, int dir) {
     float px = input_cursor_x(), py = input_cursor_y();
-    int best = -1;
-    float best_score = 1e9f;
+    float along[MAX_TARGETS], across[MAX_TARGETS];
+    float min_along = 1e9f;
     for (int i = 0; i < n; i++) {
         const Target *t = &list[i];
+        along[i] = -1;
         if (contains(t, px, py)) continue;
         float cx = t->x + t->w * 0.5f, cy = t->y + t->h * 0.5f;
-        float along, across;
+        float a, c, gap;
         switch (dir) {
-        case DIR_UP:    along = py - cy; across = fabsf(cx - px); break;
-        case DIR_DOWN:  along = cy - py; across = fabsf(cx - px); break;
-        case DIR_LEFT:  along = px - cx; across = fabsf(cy - py); break;
-        default:        along = cx - px; across = fabsf(cy - py); break;
+        case DIR_UP:    a = py - cy; c = fabsf(cx - px); gap = py - (t->y + t->h); break;
+        case DIR_DOWN:  a = cy - py; c = fabsf(cx - px); gap = t->y - py; break;
+        case DIR_LEFT:  a = px - cx; c = fabsf(cy - py); gap = px - (t->x + t->w); break;
+        default:        a = cx - px; c = fabsf(cy - py); gap = t->x - px; break;
         }
-        if (along < 6) continue;
-        float score = along + across * 2.5f;
-        if (score < best_score) { best_score = score; best = i; }
+        if (a < 6 || gap < -2) continue;   /* must lie beyond the pointer in that direction */
+        along[i] = a;
+        across[i] = c;
+        if (a < min_along) min_along = a;
+    }
+    int best = -1;
+    float best_across = 1e9f;
+    for (int i = 0; i < n; i++) {
+        if (along[i] < 0) continue;
+        float band = fmaxf(12.0f, ((dir == DIR_UP || dir == DIR_DOWN) ? list[i].h : list[i].w) * 0.6f);
+        if (along[i] > min_along + band) continue;   /* not in the nearest row/column */
+        if (across[i] < best_across) { best_across = across[i]; best = i; }
     }
     if (best >= 0) {
         const Target *t = &list[best];
