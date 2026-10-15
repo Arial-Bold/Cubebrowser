@@ -15,6 +15,7 @@
 #include "page.h"
 #include "theme.h"
 #include "settings.h"
+#include "bigstack.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -117,7 +118,7 @@ static int field_add(Page *p, int form, int type, const char *name, const char *
     return p->nfields++;
 }
 
-static int image_add(Page *p, const Node *n) {
+static __attribute__((noinline)) int image_add(Page *p, const Node *n) {
     if (p->nimages >= PAGE_MAX_IMAGES) return -1;
     PageImage *im = &p->images[p->nimages];
     memset(im, 0, sizeof(*im));
@@ -148,9 +149,10 @@ static int image_add(Page *p, const Node *n) {
     return p->nimages++;
 }
 
-static void prepass(Page *p, Node *n, int *form) {
-    for (Node *c = n->first; c; c = c->next) {
-        if (c->type != NT_ELEM) continue;
+static char scratch_url[URL_MAX];   /* prepass helpers run one at a time */
+
+/* Handles one element. Kept out of line so the recursive prepass() stays tiny. */
+static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) {
         const char *v;
         if (dom_attr(c, "style") || dom_attr(c, "bgcolor") || (c->tag == TAG_FONT && dom_attr(c, "color")))
             p->has_author_styles = true;
@@ -161,9 +163,8 @@ static void prepass(Page *p, Node *n, int *form) {
         case TAG_A:
             if ((v = dom_attr(c, "href")) && *v && strncasecmp(v, "javascript:", 11) && strncasecmp(v, "mailto:", 7) &&
                 strncasecmp(v, "tel:", 4)) {
-                char abs[URL_MAX];
-                url_resolve(p->base, v, abs, sizeof(abs));
-                c->index = link_add(p, abs);
+                url_resolve(p->base, v, scratch_url, sizeof(scratch_url));
+                c->index = link_add(p, scratch_url);
             }
             break;
         case TAG_IMG:
@@ -172,9 +173,8 @@ static void prepass(Page *p, Node *n, int *form) {
         case TAG_FRAME:
         case TAG_IFRAME:
             if (c->tag == TAG_FRAME && (v = dom_attr(c, "src")) && *v && strncasecmp(v, "javascript:", 11)) {
-                char abs[URL_MAX];
-                url_resolve(p->base, v, abs, sizeof(abs));
-                c->index = link_add(p, abs);
+                url_resolve(p->base, v, scratch_url, sizeof(scratch_url));
+                c->index = link_add(p, scratch_url);
                 c->sub = ++p->nframes;
             }
             break;
@@ -250,6 +250,12 @@ static void prepass(Page *p, Node *n, int *form) {
             break;
         }
         }
+}
+
+static void prepass(Page *p, Node *n, int *form) {
+    for (Node *c = n->first; c; c = c->next) {
+        if (c->type != NT_ELEM) continue;
+        prepass_elem(p, c, form);
         if (c->tag == TAG_SELECT || c->tag == TAG_BUTTON || c->tag == TAG_TEXTAREA) continue;
         int saved = *form;
         prepass(p, c, form);
@@ -558,7 +564,7 @@ static void transform_word(char *w, int n, int tt, bool word_start) {
     }
 }
 
-static void add_word(L *c, Flow *f, const char *w, int n, const Style *s, bool can_break) {
+static __attribute__((noinline)) void add_word(L *c, Flow *f, const char *w, int n, const Style *s, bool can_break) {
     if (n <= 0) return;
     FontId font = font_for(s);
     float size = s->fsize * c->fscale;
@@ -607,7 +613,7 @@ static void add_word(L *c, Flow *f, const char *w, int n, const Style *s, bool c
     f->empty_lh = h;
 }
 
-static void emit_text(L *c, Flow *f, const Node *tn, const Style *s) {
+static __attribute__((noinline)) void emit_text(L *c, Flow *f, const Node *tn, const Style *s) {
     const char *t = tn->text;
     int n = tn->len;
     int ws = s->ws;
@@ -706,7 +712,7 @@ static void measure(L *c, Node *n, const Style *s, float *minw, float *maxw) {
     *maxw = m.max_line;
 }
 
-static void emit_image(L *c, Flow *f, Node *n, const Style *s) {
+static __attribute__((noinline)) void emit_image(L *c, Flow *f, Node *n, const Style *s) {
     Page *p = c->p;
     PageImage *im = (n->index >= 0) ? &p->images[n->index] : NULL;
     if (!g_set.load_images || !im || im->state == IMG_FAILED || im->state == IMG_SKIPPED) {
@@ -790,7 +796,7 @@ static void emit_image(L *c, Flow *f, Node *n, const Style *s) {
     f->space = false;
 }
 
-static void emit_widget(L *c, Flow *f, Node *n, const Style *s) {
+static __attribute__((noinline)) void emit_widget(L *c, Flow *f, Node *n, const Style *s) {
     Page *p = c->p;
     if (n->index < 0) return;
     Field *fd = &p->fields[n->index];
@@ -850,7 +856,7 @@ static void emit_widget(L *c, Flow *f, Node *n, const Style *s) {
 
 /* ------------------------------------------------------------- floats */
 
-static void layout_float(L *c, Flow *f, Node *n, const Style *s) {
+static __attribute__((noinline)) void layout_float(L *c, Flow *f, Node *n, const Style *s) {
     Page *p = c->p;
     float cw = f->right - f->left;
     Edges pd = pad_of(s, cw), bd = border_of(s);
@@ -929,7 +935,7 @@ static void collect_rows(Node *t, Node **rows, int *nrows, Node **caps, int *nca
 static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, float avail, float y,
                           float table_w, float *out_w);
 
-static void layout_table(L *c, Flow *f, Node *t, const Style *ts) {
+static __attribute__((noinline)) void layout_table(L *c, Flow *f, Node *t, const Style *ts) {
     finish_line(c, f);
     float cw = f->right - f->left;
     float ml = css_len(ts->margin[3], cw, ts->fsize, 0), mr = css_len(ts->margin[1], cw, ts->fsize, 0);
@@ -1010,10 +1016,10 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
             if (ch->style->display != D_CELL && ch->tag != TAG_TD && ch->tag != TAG_TH) continue;
             if (col >= MAX_TABLE_COLS) break;
             if (ncells == cap) {
-                cap *= 2;
-                Cell *nc = realloc(cells, sizeof(Cell) * (size_t)cap);
+                Cell *nc = realloc(cells, sizeof(Cell) * (size_t)cap * 2);
                 if (!nc) break;
                 cells = nc;
+                cap *= 2;
             }
             Cell *ce = &cells[ncells++];
             memset(ce, 0, sizeof(*ce));
@@ -1292,7 +1298,7 @@ static void emit_text_str(L *c, Flow *f, const char *str, const Style *s) {
     emit_text(c, f, &tmp, s);
 }
 
-static void emit_frame_link(L *c, Flow *f, Node *n, const Style *s) {
+static __attribute__((noinline)) void emit_frame_link(L *c, Flow *f, Node *n, const Style *s) {
     if (n->index < 0) return;
     finish_line(c, f);
     const char *src = dom_attr(n, "src"), *name = dom_attr(n, "name");
@@ -1341,17 +1347,26 @@ static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
             layout_table(c, f, ch, cs);
             break;
         case D_INLINE: {
+            if (c->depth > 100) { flow_children(c, f, ch, cs); break; }
             int saved = c->link;
             if (ch->tag == TAG_A && ch->index >= 0) c->link = ch->index;
             float pl = css_len(cs->padding[3], 0, cs->fsize, 0) + css_len(cs->margin[3], 0, cs->fsize, 0) + cs->border[3];
             float pr = css_len(cs->padding[1], 0, cs->fsize, 0) + css_len(cs->margin[1], 0, cs->fsize, 0) + cs->border[1];
             if (pl > 0 && pl < 40 && !f->at_start) f->x += pl;
+            c->depth++;
             flow_children(c, f, ch, cs);
+            c->depth--;
             if (pr > 0 && pr < 40 && !f->at_start) f->x += pr;
             c->link = saved;
             break;
         }
         default:
+            if (c->depth > 100) {   /* absurdly deep nesting: flatten instead of recursing further */
+                finish_line(c, f);
+                flow_children(c, f, ch, cs);
+                finish_line(c, f);
+                break;
+            }
             if (ch->tag == TAG_A && ch->index >= 0) {
                 int saved = c->link;
                 c->link = ch->index;
@@ -1384,6 +1399,18 @@ static void free_links(Page *p) {
     p->nlinks = 0;
 }
 
+static void parse_job(void *arg) {
+    Page *p = arg;
+    p->dom = dom_parse(p->src ? p->src : "", p->src_len, p->plain);
+    p->title[0] = 0;
+    if (p->dom) {
+        snprintf(p->title, sizeof(p->title), "%s", p->dom->title);
+        int form = -1;
+        prepass(p, p->dom->root, &form);
+        sheets_init(p);
+    }
+}
+
 void page_set_source(Page *p, char *src, size_t len, bool plain, const char *url) {
     page_free_images(p);
     free_links(p);
@@ -1403,18 +1430,22 @@ void page_set_source(Page *p, char *src, size_t len, bool plain, const char *url
     p->has_author_styles = false;
     p->nframes = 0;
     p->scroll = p->scroll_target = 0;
-    p->dom = dom_parse(src ? src : "", len, plain);
-    p->title[0] = 0;
-    if (p->dom) {
-        snprintf(p->title, sizeof(p->title), "%s", p->dom->title);
-        int form = -1;
-        prepass(p, p->dom->root, &form);
-        sheets_init(p);
-    }
+    p->dom = NULL;
+    run_with_big_stack(parse_job, p);
     p->restyle = true;
 }
 
+static void layout_job(void *arg);
+
 void page_layout(Page *p, float width, float text_scale) {
+    p->width = width;
+    p->scale = text_scale;
+    run_with_big_stack(layout_job, p);
+}
+
+static void layout_job(void *arg) {
+    Page *p = arg;
+    float width = p->width, text_scale = p->scale;
     p->nboxes = 0;
     p->arena_len = 0;
     p->nfloats = 0;

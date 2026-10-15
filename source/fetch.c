@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define WORKER_STACK (128 * 1024)
+#define WORKER_STACK (256 * 1024)
 #define WORKER_PRIO 40   /* below the UI thread, which yields every vsync */
 /* Largest image decoded directly (proxy images are already small). */
 #define MAX_SRC_PIXELS (1600L * 1000L)
