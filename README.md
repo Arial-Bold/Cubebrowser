@@ -172,6 +172,9 @@ Press **START** to open Settings. Changes apply immediately and are saved when
 you leave the Settings screen. Hold **L + R + START** while the browser starts
 to reset everything to defaults.
 
+<img width="3826" height="2236" alt="IMG_20261014_224805015_HDR" src="https://github.com/user-attachments/assets/2a3eb88e-b5ea-40eb-a4c2-d772f327e381" />
+
+
 | Section | What you can change |
 |---|---|
 | **Network** | Automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server. Network changes apply the next time you launch the browser. |
