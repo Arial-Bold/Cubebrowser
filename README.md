@@ -4,9 +4,14 @@ A small HTTPS web browser for the Nintendo GameCube, built as a `.dol` you
 launch from Swiss. It needs a Broadband Adapter (BBA) for networking and an
 SD2SP2 (or SD Gecko) for settings, bookmarks and certificates.
 
-It shows text, links, headings, lists, simple tables, basic forms (so search
-boxes work) and pictures (JPEG, PNG, GIF, BMP). It does not run JavaScript or
-apply page styles. Lightweight sites work best; the start page links to several.
+It renders pages with a real (if small) layout engine: the page's own styles
+(CSS colours, fonts, spacing, borders, backgrounds, hidden elements, CSS
+variables and media queries), tables with side-by-side columns, floating
+pictures with text wrapping around them, lists, and forms (text boxes,
+checkboxes, radio buttons and submit buttons). It tells sites it has a
+phone-sized screen, so many use their simpler mobile layouts. It does not run
+JavaScript or support flexbox/grid multi-column layouts, which are shown as a
+single column. Settings > Browsing > Page styles switches to plain pages.
 
 Pictures load after the text, one at a time. By default they go through the
 free images.weserv.nl service, which shrinks them and converts formats the
@@ -181,7 +186,10 @@ source/        browser source code (C)
   netio.c        Broadband Adapter, DNS, clock sync
   conn.c http.c  TLS (mbedTLS) and HTTP
   fetch.c        background download thread
-  page.c         HTML renderer and forms
+  dom.c          HTML -> document tree
+  css.c          stylesheets: parsing, selectors, cascade
+  page.c         layout engine (blocks, text, floats, tables), drawing, forms
+  image.c        picture decoding (stb_image) to GameCube textures
   browser.c      browser screen, history, bookmarks
   font_data.h    baked fonts (regenerate with tools/make_font.py)
 tools/         font baking script
