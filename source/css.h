@@ -29,7 +29,7 @@ static inline bool color_is_default(Color c) { return c.a == 0; }
 
 typedef struct Style {
     unsigned char display, bold, italic, mono, underline, strike, align, ws, transform;
-    unsigned char fl, clear, list, valign, has_bg, collapse, bfc;
+    unsigned char fl, clear, list, valign, has_bg, collapse, bfc, abspos;
     Color color, bg, bcolor, eff_bg;
     float fsize;             /* CSS px */
     float border[4];         /* px: top right bottom left */

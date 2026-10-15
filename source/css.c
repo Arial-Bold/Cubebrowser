@@ -17,7 +17,7 @@ enum {
     P_DISPLAY, P_COLOR, P_BG, P_FWEIGHT, P_FSTYLE, P_FSIZE, P_FFAMILY, P_TALIGN, P_TDECO, P_TTRANSFORM, P_WS,
     P_MT, P_MR, P_MB, P_ML, P_PT, P_PR, P_PB, P_PL, P_BWT, P_BWR, P_BWB, P_BWL, P_BST, P_BSR, P_BSB, P_BSL,
     P_BC, P_WIDTH, P_MAXW, P_HEIGHT, P_FLOAT, P_CLEAR, P_LIST, P_VIS, P_POS, P_OVERFLOW, P_CLIP, P_VALIGN,
-    P_SPACING, P_COLLAPSE, P_COUNT
+    P_SPACING, P_COLLAPSE, P_LEFT, P_TEXTINDENT, P_COUNT
 };
 
 static const struct { const char *name; int prop; } longhands[] = {
@@ -37,7 +37,7 @@ static const struct { const char *name; int prop; } longhands[] = {
     { "float", P_FLOAT }, { "clear", P_CLEAR }, { "list-style-type", P_LIST }, { "visibility", P_VIS },
     { "position", P_POS }, { "overflow", P_OVERFLOW }, { "overflow-x", P_OVERFLOW }, { "clip", P_CLIP },
     { "clip-path", P_CLIP }, { "vertical-align", P_VALIGN }, { "border-spacing", P_SPACING },
-    { "border-collapse", P_COLLAPSE },
+    { "border-collapse", P_COLLAPSE }, { "left", P_LEFT }, { "text-indent", P_TEXTINDENT },
 };
 
 /* ---------------------------------------------------------------- sheets */
@@ -980,7 +980,7 @@ typedef struct {
     const Style *parent;
     float bw[4];
     bool bs[4];
-    bool color_set, pos_abs, overflow_hidden, clipped, visible;
+    bool color_set, pos_abs, overflow_hidden, clipped, visible, far_left, far_indent;
     const CssSheet *const *var_sheets;
     int nvar_sheets;
 } Ctx;
@@ -1223,6 +1223,14 @@ static void apply_value(Ctx *c, int prop, const char *raw) {
         if (parse_len(raw, &l) && l.u != U_AUTO) s->spacing = css_len(l, 0, s->fsize, 0);
         break;
     case P_COLLAPSE: s->collapse = ieq(raw, "collapse"); break;
+    case P_LEFT:
+        /* "left: -9999px" is a common way to hide things off-screen */
+        if (parse_len(raw, &l) && l.u != U_AUTO) c->far_left = css_len(l, 1000, s->fsize, 0) <= -900;
+        break;
+    case P_TEXTINDENT:
+        /* "text-indent: -9999px" hides text, usually replaced by a background image */
+        if (parse_len(raw, &l) && l.u != U_AUTO) c->far_indent = css_len(l, 1000, s->fsize, 0) <= -900;
+        break;
     }
 }
 
@@ -1445,6 +1453,15 @@ static void style_node(Run *r, Node *n, const Style *parent) {
     if (c.pos_abs && c.overflow_hidden) {
         float w = css_len(s->width, 100, s->fsize, 100), h = css_len(s->height, 100, s->fsize, 100);
         if (w <= 2 || h <= 2) s->display = D_NONE;   /* "screen reader only" text */
+    }
+    if (c.pos_abs && c.far_left) s->display = D_NONE;
+    if (c.far_indent) s->display = D_NONE;
+    if (c.pos_abs) {
+        /* positioned boxes sit outside the normal flow in real browsers;
+         * we keep their content in place but never let them reserve space */
+        s->abspos = 1;
+        s->fl = FL_NONE;
+        if (s->display == D_INLINE && n->tag != TAG_IMG && n->tag != TAG_A && n->tag != TAG_SPAN) s->display = D_BLOCK;
     }
     if (s->fl != FL_NONE && s->display == D_INLINE && n->tag != TAG_IMG) s->display = D_BLOCK;
     if (n->tag == TAG_HTML || n->tag == TAG_BODY) {

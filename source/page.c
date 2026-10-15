@@ -1229,7 +1229,7 @@ static float block_box(L *c, Node *n, const Style *s, float bx, float bw, float 
         if (fb > bottom) bottom = fb;
     }
     float height = bottom + pd.b + bd.b - y;
-    if ((s->height.u == U_PX || s->height.u == U_EM) && n->tag != TAG_IMG) {
+    if ((s->height.u == U_PX || s->height.u == U_EM) && n->tag != TAG_IMG && !s->abspos) {
         float hh = css_len(s->height, 0, s->fsize, 0) + pd.t + pd.b + bd.t + bd.b;
         if (hh > height && hh < 4000) height = hh;
     }
@@ -1318,6 +1318,24 @@ static __attribute__((noinline)) void emit_frame_link(L *c, Flow *f, Node *n, co
     f->pending_margin = 6;
 }
 
+/* Does this element contain anything visible (text, pictures, form controls)? */
+static bool has_content(const Node *n, int depth) {
+    if (depth > 64) return true;
+    for (const Node *c = n->first; c; c = c->next) {
+        if (c->type == NT_TEXT) {
+            for (int i = 0; i < c->len; i++)
+                if (!isspace((unsigned char)c->text[i]) && c->text[i] != 1) return true;
+            continue;
+        }
+        if (!c->style || c->style->display == D_NONE) continue;
+        if (c->tag == TAG_IMG || c->tag == TAG_INPUT || c->tag == TAG_SELECT || c->tag == TAG_BUTTON ||
+            c->tag == TAG_TEXTAREA || c->tag == TAG_FRAME)
+            return true;
+        if (has_content(c, depth + 1)) return true;
+    }
+    return false;
+}
+
 static bool is_widget(int tag) {
     return tag == TAG_INPUT || tag == TAG_BUTTON || tag == TAG_SELECT || tag == TAG_TEXTAREA;
 }
@@ -1327,6 +1345,8 @@ static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
         if (ch->type == NT_TEXT) { emit_text(c, f, ch, s); continue; }
         const Style *cs = ch->style;
         if (!cs || cs->display == D_NONE) continue;
+        /* empty positioned layers (decorative gradients, overlays) take no space */
+        if (cs->abspos && ch->tag != TAG_IMG && !has_content(ch, 0)) continue;
         if (ch->tag == TAG_BR) { forced_break(c, f); continue; }
         if (ch->tag == TAG_WBR) continue;
         if (ch->tag == TAG_IMG) { emit_image(c, f, ch, cs); continue; }
