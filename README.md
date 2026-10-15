@@ -5,7 +5,7 @@ network connection, including secure (HTTPS) sites, with pictures, page
 styles, tables and forms, all controlled with a standard GameCube controller.
 It runs as a `.dol` program launched from Swiss.
 
-<img width="1920" height="1080" alt="spacejampage" src="https://github.com/user-attachments/assets/eae5da08-510a-4239-82d6-e5250908ea1f" />
+<img width="4096" height="2382" alt="IMG_20261014_224514833_HDR" src="https://github.com/user-attachments/assets/d7e0aa8a-04e0-4928-a00d-bbc2821b4f7e" />
 
 ---
 
