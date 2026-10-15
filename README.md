@@ -8,6 +8,8 @@ files straight to your SD card, and control everything with a GameCube
 controller or a keyboard. It runs as a `.dol` program launched from Swiss,
 with menus designed to feel like they belong on the console.
 
+<img width="4096" height="2382" alt="IMG_20261014_224514833_HDR" src="https://github.com/user-attachments/assets/e2ffd974-0f7a-4d9f-a837-4448daee501a" />
+
 ---
 
 ## What you need
