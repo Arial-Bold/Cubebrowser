@@ -85,6 +85,7 @@ typedef struct {
     int arena_len, arena_cap;
     char **links;
     int nlinks, caplinks;
+    int nframes;
     Field fields[PAGE_MAX_FIELDS];
     int nfields;
     Form forms[PAGE_MAX_FORMS];

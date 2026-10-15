@@ -169,6 +169,15 @@ static void prepass(Page *p, Node *n, int *form) {
         case TAG_IMG:
             c->index = image_add(p, c);
             break;
+        case TAG_FRAME:
+        case TAG_IFRAME:
+            if (c->tag == TAG_FRAME && (v = dom_attr(c, "src")) && *v && strncasecmp(v, "javascript:", 11)) {
+                char abs[URL_MAX];
+                url_resolve(p->base, v, abs, sizeof(abs));
+                c->index = link_add(p, abs);
+                c->sub = ++p->nframes;
+            }
+            break;
         case TAG_FORM:
             if (p->nforms < PAGE_MAX_FORMS) {
                 Form *f = &p->forms[p->nforms];
@@ -1273,6 +1282,36 @@ static void layout_block(L *c, Flow *pf, Node *n, const Style *s) {
     pf->space = false;
 }
 
+/* Frames aren't supported, so each <frame> becomes a link to open it. */
+static void emit_text_str(L *c, Flow *f, const char *str, const Style *s) {
+    Node tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    tmp.type = NT_TEXT;
+    tmp.text = str;
+    tmp.len = (int)strlen(str);
+    emit_text(c, f, &tmp, s);
+}
+
+static void emit_frame_link(L *c, Flow *f, Node *n, const Style *s) {
+    if (n->index < 0) return;
+    finish_line(c, f);
+    const char *src = dom_attr(n, "src"), *name = dom_attr(n, "name");
+    const char *file = src ? src : "";
+    const char *slash = strrchr(file, '/');
+    if (slash && slash[1]) file = slash + 1;
+    char label[200];
+    snprintf(label, sizeof(label), "Open part %d: %s", n->sub, name && *name ? name : file);
+    Style ls = *s;
+    ls.underline = 1;
+    ls.color = (Color){ DEFAULT_LINK_R, 0, 0, 0 };
+    int saved = c->link;
+    c->link = n->index;
+    emit_text_str(c, f, label, &ls);
+    c->link = saved;
+    finish_line(c, f);
+    f->pending_margin = 6;
+}
+
 static bool is_widget(int tag) {
     return tag == TAG_INPUT || tag == TAG_BUTTON || tag == TAG_SELECT || tag == TAG_TEXTAREA;
 }
@@ -1285,6 +1324,16 @@ static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
         if (ch->tag == TAG_BR) { forced_break(c, f); continue; }
         if (ch->tag == TAG_WBR) continue;
         if (ch->tag == TAG_IMG) { emit_image(c, f, ch, cs); continue; }
+        if (ch->tag == TAG_FRAME) { emit_frame_link(c, f, ch, cs); continue; }
+        if (ch->tag == TAG_FRAMESET && n->tag != TAG_FRAMESET && c->p->nframes) {
+            finish_line(c, f);
+            Style hs = *cs;
+            hs.bold = 1;
+            hs.fsize = cs->fsize * 1.2f;
+            emit_text_str(c, f, "This page is split into frames, which are shown one at a time here.", &hs);
+            finish_line(c, f);
+            f->pending_margin = 10;
+        }
         if (is_widget(ch->tag)) { emit_widget(c, f, ch, cs); continue; }
         if (cs->fl != FL_NONE) { layout_float(c, f, ch, cs); continue; }
         switch (cs->display) {
@@ -1352,6 +1401,7 @@ void page_set_source(Page *p, char *src, size_t len, bool plain, const char *url
     p->nforms = 0;
     p->nboxes = 0;
     p->has_author_styles = false;
+    p->nframes = 0;
     p->scroll = p->scroll_target = 0;
     p->dom = dom_parse(src ? src : "", len, plain);
     p->title[0] = 0;

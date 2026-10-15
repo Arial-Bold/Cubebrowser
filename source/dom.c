@@ -63,7 +63,8 @@ static const char *const tag_names[TAG_COUNT] = {
     "label", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote", "center", "font", "noscript", "svg",
     "math", "template", "iframe", "object", "embed", "wbr", "area", "source", "param", "track", "xmp",
     "listing", "plaintext", "section", "article", "header", "footer", "nav", "main", "aside", "figure",
-    "address", "fieldset", "details", "menu", "picture", "video", "audio", "canvas", "dialog",
+    "address", "fieldset", "details", "menu", "picture", "video", "audio", "canvas", "dialog", "frameset",
+    "frame", "noframes",
 };
 
 int dom_tag_id(const char *n) {
@@ -76,6 +77,7 @@ static bool is_void(int t) {
     switch (t) {
     case TAG_IMG: case TAG_BR: case TAG_HR: case TAG_INPUT: case TAG_META: case TAG_LINK: case TAG_BASE:
     case TAG_COL: case TAG_WBR: case TAG_AREA: case TAG_SOURCE: case TAG_PARAM: case TAG_TRACK: case TAG_EMBED:
+    case TAG_FRAME:
         return true;
     default: return false;
     }
