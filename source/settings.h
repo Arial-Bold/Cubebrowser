@@ -16,7 +16,7 @@ typedef struct {
     int  deadzone, cursor_speed, accel, scroll_speed, rumble, magnet;
     int  bind[ACT_COUNT];
     /* Keyboard */
-    int  key_repeat, osk_layout, kbd_layout;
+    int  key_repeat, osk_layout;
     /* Display */
     int  video_mode, widescreen, margin, text_size, theme, animations, sounds, volume, full_width;
     /* Browsing */

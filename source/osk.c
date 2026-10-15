@@ -8,7 +8,6 @@
 #include "input.h"
 #include "settings.h"
 #include "sound.h"
-#include "keyboard.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +22,6 @@ static bool shift, caps, sym;
 static OskDone done_cb;
 static void *done_user;
 static int open_frame;
-static bool force_onscreen;   /* the user chose the on-screen keyboard for this box */
 
 static const char *const rows_qwerty[2][4] = {
     { "1234567890-=", "qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./" },
@@ -53,8 +51,6 @@ void osk_open(const char *t, const char *initial, int maxl, int m, OskDone done,
     done_user = user;
     active = true;
     open_frame = ui_frame();
-    force_onscreen = false;
-    kbd_clear();   /* don't type keys pressed before the box opened */
     sound_play(SFX_OPEN);
 }
 
@@ -78,70 +74,6 @@ static void backspace(void) {
     caret--;
     len--;
     sound_play(SFX_KEY);
-}
-
-static void delete_forward(void) {
-    if (caret >= len) return;
-    memmove(text + caret, text + caret + 1, (size_t)(len - caret));
-    len--;
-    sound_play(SFX_KEY);
-}
-
-static void finish(bool accepted);
-static void draw_field(float x, float y, float w, float h, float ts);
-
-/* Keys from a real keyboard. Returns true if the box was closed. */
-static bool keyboard_input(void) {
-    KeyEvent ev;
-    while (kbd_next(&ev)) {
-        switch (ev.key) {
-        case KEY_ENTER: finish(true); return true;
-        case KEY_ESC: finish(false); return true;
-        case KEY_BACKSPACE: backspace(); break;
-        case KEY_DELETE: delete_forward(); break;
-        case KEY_LEFT: if (caret > 0) caret--; break;
-        case KEY_RIGHT: if (caret < len) caret++; break;
-        case KEY_HOME: case KEY_UP: caret = 0; break;
-        case KEY_END: case KEY_DOWN: caret = len; break;
-        default:
-            if (ev.key >= 32 && ev.key < 127 && !ev.ctrl && !ev.alt) {
-                if (mode == OSK_IP && !(ev.key == '.' || (ev.key >= '0' && ev.key <= '9'))) break;
-                char ch[2] = { (char)ev.key, 0 };
-                bool saved = shift;
-                shift = false;
-                insert(ch);
-                shift = saved;
-            } else if (ev.ctrl && (ev.key == 'a' || ev.key == 'A')) {
-                caret = len;
-            } else if (ev.ctrl && (ev.key == 'u' || ev.key == 'U')) {
-                text[0] = 0; len = caret = 0;   /* clear the box */
-            }
-            break;
-        }
-    }
-    return false;
-}
-
-/* With a keyboard connected: just the text box, no on-screen keys. */
-static void compact_frame(void) {
-    const Theme *t = theme();
-    float sx, sy, sw, sh;
-    ui_safe_area(&sx, &sy, &sw, &sh);
-    float open = ui_anim(ui_id("osk-open", open_frame), 1.0f, 0.22f);
-    gfx_rect(0, 0, gfx_width(), 480, color_alpha(t->shadow, 0.5f * open));
-    float pw = fminf(sw, 640), ph = 170;
-    float px = sx + (sw - pw) * 0.5f, py = sy + 60 - (1.0f - open) * 40;
-    ui_panel(px, py, pw, ph, 18);
-    gfx_text(FONT_UI, 20, px + 20, py + 12, t->text, title, -1);
-    const char *hint = "Type on your keyboard.  Enter: OK  Esc: Cancel  Y: on-screen keys";
-    gfx_text(FONT_UI, 14, px + pw - 20 - gfx_text_width(FONT_UI, 14, hint, -1), py + 18, t->text_dim, hint, -1);
-    draw_field(px + 16, py + 44, pw - 32, 46, 22);
-    float bw = 140, by = py + ph - 54;
-    if (ui_button(ui_id("osk-c", 0), px + pw - 2 * bw - 28, by, bw, 38, "Cancel", 17, UIB_NORMAL)) { finish(false); return; }
-    if (ui_button(ui_id("osk-c", 1), px + pw - bw - 16, by, bw, 38, "OK", 17, UIB_ACCENT)) { finish(true); return; }
-    if (keyboard_input()) return;
-    if (ui_frame() != open_frame && (input_raw_pressed() & PAD_BUTTON_START)) { finish(true); return; }
-    if (ui_frame() != open_frame && (input_raw_pressed() & PAD_BUTTON_Y)) { force_onscreen = true; sound_play(SFX_OPEN); }
 }
 
 static void finish(bool accepted) {
@@ -177,7 +109,6 @@ static void draw_field(float x, float y, float w, float h, float ts) {
 void osk_frame(void) {
     if (!active) return;
     ui_set_input(true);
-    if (kbd_connected() && !force_onscreen) { compact_frame(); return; }
     const Theme *t = theme();
     float sx, sy, sw, sh;
     ui_safe_area(&sx, &sy, &sw, &sh);

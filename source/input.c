@@ -4,10 +4,8 @@
 #include "settings.h"
 #include "gfx.h"
 #include "gc_entropy.h"
-#include "keyboard.h"
 #include <math.h>
 #include <stdlib.h>
-#include <string.h>
 
 const char *const action_names[ACT_COUNT] = {
     "Click", "Back", "Address bar", "Bookmarks", "Settings menu", "Slow pointer", "Page up", "Page down"
@@ -48,50 +46,16 @@ static float stick_axis(int v) {
     return v < 0 ? -n : n;
 }
 
-/* Controllers are read directly rather than with PAD_ScanPads(), because
- * ScanPads resets every port that doesn't hold a standard controller, every
- * frame. That keeps knocking a keyboard (or BlueRetro's keyboard) offline
- * before it can even be identified. Here, a keyboard's port is never reset,
- * and empty ports are only retried once a second. */
-static PADStatus pads[4];
-static u16 pad_prev[4];
-static int scan_frames;
-
-static void scan_pads(void) {
-    PAD_Read(pads);   /* raw readings: same full stick range as before (no PAD_Clamp, which shrinks it) */
-    scan_frames++;
-    u32 reset = 0;
-    for (int c = 0; c < 4; c++) {
-        if (c == kbd_port() - 1) {   /* keyboard data isn't controller data */
-            memset(&pads[c], 0, sizeof(pads[c]));
-            pad_prev[c] = 0;
-            continue;
-        }
-        if (pads[c].err == PAD_ERR_NO_CONTROLLER) {
-            if (c != kbd_port() - 1 && (scan_frames % 60) == 15) reset |= (PAD_CHAN0_BIT >> c);
-            memset(&pads[c], 0, sizeof(pads[c]));
-            pads[c].err = PAD_ERR_NO_CONTROLLER;
-        } else if (pads[c].err != PAD_ERR_NONE) {
-            /* not ready / transfer error: keep last frame's buttons */
-            pads[c].button = pad_prev[c];
-            pads[c].stickX = pads[c].stickY = pads[c].substickX = pads[c].substickY = 0;
-        }
-    }
-    if (reset) PAD_Reset(reset);
-}
-
 void input_update(void) {
-    scan_pads();
-    kbd_update();
+    PAD_ScanPads();
     prev_held = held;
     /* a controller on any port works (Bluetooth adapters may use any of them) */
     held = down = 0;
     s8 sx = 0, sy = 0;
     for (int c = 0; c < 4; c++) {
-        u32 h = pads[c].button, d = h & ~pad_prev[c];
-        pad_prev[c] = (u16)h;
-        s8 x = pads[c].stickX, y = pads[c].stickY, cy2 = pads[c].substickY;
-        if (h || abs(x) > 20 || abs(y) > 20 || abs(cy2) > 20) active_chan = c;
+        u32 h = PAD_ButtonsHeld(c), d = PAD_ButtonsDown(c);
+        s8 x = PAD_StickX(c), y = PAD_StickY(c), cy2 = PAD_SubStickY(c);
+        if (h || d || abs(x) > 20 || abs(y) > 20 || abs(cy2) > 20) active_chan = c;
         held |= h;
         down |= d;
         if (abs(x) > abs(sx)) sx = x;
@@ -188,7 +152,7 @@ bool input_pointer_moved(void) { return moved; }
 float input_scroll_delta(void) {
     float k = 1.5f + g_set.scroll_speed * 1.2f;
     s8 cy = 0;
-    for (int c = 0; c < 4; c++) { s8 v = pads[c].substickY; if (abs(v) > abs(cy)) cy = v; }
+    for (int c = 0; c < 4; c++) { s8 v = PAD_SubStickY(c); if (abs(v) > abs(cy)) cy = v; }
     float d = -stick_axis(cy) * k * 1.6f;
     if (input_raw_repeat(action_mask(ACT_PAGE_DOWN))) d += 300;
     if (input_raw_repeat(action_mask(ACT_PAGE_UP))) d -= 300;

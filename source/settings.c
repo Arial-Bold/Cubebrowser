@@ -20,7 +20,6 @@ static const char *const width_names[] = { "Standard (640)", "Full (704)", NULL 
 static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platinum", "Spice", NULL };
 static const char *const osk_layout_names[] = { "QWERTY", "ABC", NULL };
 static const char *const img_size_names[] = { "Small", "Medium", "Large", NULL };
-static const char *const kbd_layout_names[] = { "US", "Japanese", NULL };
 static const char *const exit_names[] = { "Load Swiss .dol", "Restart console", NULL };
 const char *const search_engine_names[] = { "DuckDuckGo Lite", "FrogFind", "Wiby", "Custom", NULL };
 static const char *const search_engine_prefixes[] = {
@@ -79,8 +78,6 @@ const SetDef g_setdefs[] = {
     /* Keyboard */
     { CAT_KEYBOARD, "osk.layout", "Key layout", ST_CHOICE, O(osk_layout), 0, 1, 1, osk_layout_names, NULL,
       "Arrangement of letters on the on-screen keyboard." },
-    { CAT_KEYBOARD, "kbd.layout", "Physical keyboard layout", ST_CHOICE, O(kbd_layout), 0, 1, 1, kbd_layout_names, NULL,
-      "For a real keyboard (or Bluetooth via BlueRetro). Change if symbols come out wrong." },
     { CAT_KEYBOARD, "osk.repeat", "Key repeat speed", ST_INT, O(key_repeat), 1, 10, 1, NULL, NULL,
       "How fast held Backspace and arrow shortcuts repeat." },
     /* Display */

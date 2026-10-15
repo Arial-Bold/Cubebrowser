@@ -12,7 +12,6 @@
 #include "netio.h"
 #include "storage.h"
 #include "conn.h"
-#include "keyboard.h"
 #include "dolload.h"
 #include <math.h>
 #include <stdint.h>
@@ -142,21 +141,12 @@ static void draw_toggle(UiId id, float x, float y, bool on) {
 static void draw_info_line(float x, float y, float w) {
     const Theme *t = theme();
     char info[160];
-    char kb[32] = "";
-    if (kbd_connected()) snprintf(kb, sizeof(kb), "  |  Keyboard: port %d", kbd_port());
-    snprintf(info, sizeof(info), "%s  %s  |  %s  |  SD: %s%s", gfx_mode_name(),
+    snprintf(info, sizeof(info), "%s  %s  |  %s  |  SD: %s", gfx_mode_name(),
              g_set.widescreen ? "16:9" : "4:3", netio_state() == NET_UP ? netio_ip() : "offline",
-             storage_ok() ? storage_device_name() : "none", kb);
+             storage_ok() ? storage_device_name() : "none");
     float ts = 14;
     float iw = gfx_text_width(FONT_UI, ts, info, -1);
     gfx_text(FONT_UI, ts, x + w - iw, y, t->text_dim, info, -1);
-}
-
-static bool esc_pressed(void) {
-    KeyEvent ev;
-    bool esc = false;
-    while (!osk_active() && kbd_next(&ev)) if (ev.key == KEY_ESC) esc = true;
-    return esc;
 }
 
 /* Lists the .dol files found; choosing one sets it as the Swiss program. */
@@ -352,27 +342,6 @@ bool settings_ui_frame(bool interactive) {
         gfx_rrect(ox + ow - 8, by2, 4, bh2, 2, t->accent);
     }
 
-    /* Keyboard page: show what each controller port reports */
-    if (category == CAT_KEYBOARD) {
-        char ports[200];
-        kbd_describe_ports(ports, sizeof(ports));
-        float py2 = rows_y + n * row_h + 14 - scroll;
-        if (py2 < rows_y + rows_h - 40) {
-            gfx_text(FONT_UI, 15, ox + 20, py2, t->text, kbd_connected() ? "Keyboard connected" : "No keyboard found yet", -1);
-            gfx_text(FONT_BODY, 13, ox + 20, py2 + 24, t->text_dim, ports, gfx_text_fit(FONT_BODY, 13, ports, -1, ow - 40));
-            if (kbd_connected()) {
-                char st[160];
-                kbd_stats(st, sizeof(st));
-                gfx_text(FONT_BODY, 13, ox + 20, py2 + 44, t->text_dim, st, gfx_text_fit(FONT_BODY, 13, st, -1, ow - 40));
-            }
-            if (kbd_last_code()) {
-                char lc[48];
-                snprintf(lc, sizeof(lc), "Last key code: 0x%02X", kbd_last_code());
-                gfx_text(FONT_BODY, 13, ox + 20, py2 + 64, t->text_dim, lc, -1);
-            }
-        }
-    }
-
     /* help line */
     float hy = oy + oh - help_h;
     gfx_rect(ox + 14, hy - 2, ow - 28, 1.5f, color_alpha(t->panel_edge, 0.6f));
@@ -398,7 +367,7 @@ bool settings_ui_frame(bool interactive) {
                 input_consume(ACT_MENU);
             }
         }
-    } else if (input_ok && (input_pressed(ACT_BACK) || input_pressed(ACT_MENU) || esc_pressed())) {
+    } else if (input_ok && (input_pressed(ACT_BACK) || input_pressed(ACT_MENU))) {
         input_consume(ACT_BACK);
         input_consume(ACT_MENU);
         leave = true;
