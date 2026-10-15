@@ -101,8 +101,12 @@ const SetDef g_setdefs[] = {
       "Your words are added to the end, e.g. https://site/search?q=" },
     { CAT_BROWSING, "web.ua", "Identify as", ST_CHOICE, O(user_agent), 0, 2, 1, user_agent_names, NULL,
       "Some sites send simpler pages to text browsers." },
+    { CAT_BROWSING, "web.images", "Load images", ST_BOOL, O(load_images), 0, 1, 1, NULL, NULL,
+      "Show pictures on pages. Turn off for faster loading." },
+    { CAT_BROWSING, "web.imgproxy", "Image helper", ST_BOOL, O(image_proxy), 0, 1, 1, NULL, NULL,
+      "Shrinks pictures on images.weserv.nl. Faster, but that site sees image addresses." },
     { CAT_BROWSING, "web.alt", "Show image labels", ST_BOOL, O(show_alt), 0, 1, 1, NULL, NULL,
-      "Images aren't drawn; show their descriptions instead." },
+      "Show descriptions for pictures that can't be shown." },
     { CAT_BROWSING, "web.maxkb", "Max page size", ST_INT, O(max_page_kb), 256, 4096, 256, NULL, "KB",
       "Larger pages are cut off to protect memory." },
     /* Security */
@@ -164,6 +168,8 @@ void settings_defaults(Settings *s) {
     strcpy(s->search_custom, "https://html.duckduckgo.com/html/?q=");
     s->user_agent = 0;
     s->show_alt = 1;
+    s->load_images = 1;
+    s->image_proxy = 1;
     s->max_page_kb = 1024;
     s->verify_certs = 1;
     strcpy(s->ca_path, "sd:/gcbrowser/cacert.pem");

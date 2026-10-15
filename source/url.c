@@ -114,7 +114,7 @@ void url_resolve(const char *base, const char *rel, char *out, size_t outlen) {
     }
     if (r[0] == '/' && r[1] == '/') { snprintf(out, outlen, "%s:%s", b.scheme, r); strip_fragment(out); return; }
 
-    char prefix[300];
+    char prefix[320];
     bool default_port = (b.port == 443 && !strcmp(b.scheme, "https")) || (b.port == 80 && !strcmp(b.scheme, "http"));
     if (default_port) snprintf(prefix, sizeof(prefix), "%s://%s", b.scheme, b.host);
     else snprintf(prefix, sizeof(prefix), "%s://%s:%u", b.scheme, b.host, b.port);

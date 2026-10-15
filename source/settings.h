@@ -23,7 +23,7 @@ typedef struct {
     char home[256];
     int  search_engine;
     char search_custom[256];
-    int  user_agent, show_alt, max_page_kb;
+    int  user_agent, show_alt, max_page_kb, load_images, image_proxy;
     /* Security */
     int  verify_certs;
     char ca_path[128];

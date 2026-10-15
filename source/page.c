@@ -205,6 +205,7 @@ typedef struct {
     char word[WORD_MAX];
     int wlen;
     bool show_alt;
+    int img_index;
 } LS;
 
 static float left(LS *s) { return s->left_base + s->indent; }
@@ -221,7 +222,7 @@ static void newline(LS *s) {
     float lh = s->line_h > 0 ? s->line_h : gfx_line_height(FONT_BODY, s->base);
     for (int i = s->line_start; i < p->nboxes; i++) {
         Box *b = &p->boxes[i];
-        if (b->type == BOX_TEXT || b->type == BOX_BULLET) b->y = s->y + lh - b->h;
+        if (b->type == BOX_TEXT || b->type == BOX_BULLET || b->type == BOX_IMAGE) b->y = s->y + lh - b->h;
         else b->y = s->y + (lh - b->h) * 0.5f;
     }
     s->y += lh;
@@ -447,6 +448,65 @@ static void add_submit_box(LS *s, int field, const char *label) {
     s->space_pending = true;
 }
 
+/* --------------------------------------------------------------- images */
+
+static int dim_attr(const char *a, int alen, const char *name) {
+    char v[16];
+    if (!get_attr(a, alen, name, v, sizeof(v)) || strchr(v, '%')) return 0;
+    int n = atoi(v);
+    return (n > 0 && n < 10000) ? n : 0;
+}
+
+/* Images are numbered in document order, so a later layout finds the same entry. */
+static PageImage *image_slot(LS *s, int idx, const char *attrs, int alen) {
+    Page *p = s->p;
+    if (!g_set.load_images || idx >= PAGE_MAX_IMAGES) return NULL;
+    if (idx < p->nimages) return &p->images[idx];
+    if (idx != p->nimages) return NULL;
+    PageImage *im = &p->images[p->nimages++];
+    memset(im, 0, sizeof(*im));
+    char src[URL_MAX] = "";
+    /* lazy-loading sites keep the real address in data-src */
+    if (!get_attr(attrs, alen, "data-src", src, sizeof(src)) || !src[0])
+        if (!get_attr(attrs, alen, "data-original", src, sizeof(src)) || !src[0])
+            get_attr(attrs, alen, "src", src, sizeof(src));
+    im->decl_w = (short)dim_attr(attrs, alen, "width");
+    im->decl_h = (short)dim_attr(attrs, alen, "height");
+    if (!src[0] || !strncasecmp(src, "data:", 5) ||
+        (im->decl_w && im->decl_w <= 2) || (im->decl_h && im->decl_h <= 2)) {
+        im->state = IMG_SKIPPED;   /* missing, inline data, or a tracking pixel */
+        return im;
+    }
+    char abs[URL_MAX];
+    url_resolve(p->base, src, abs, sizeof(abs));
+    im->url = strdup(abs);
+    if (!im->url) im->state = IMG_SKIPPED;
+    return im;
+}
+
+static void add_image_box(LS *s, PageImage *im, int idx) {
+    float avail = s->right - left(s);
+    float w, h;
+    if (im->state == IMG_READY) { w = im->img.w; h = im->img.h; }
+    else if (im->decl_w && im->decl_h) { w = im->decl_w; h = im->decl_h; }
+    else if (im->decl_w) { w = im->decl_w; h = im->decl_w * 0.66f; }
+    else { w = 96; h = 72; }
+    if (w > avail) { h *= avail / w; w = avail; }
+    if (h > 1024) { w *= 1024 / h; h = 1024; }
+    bool big = w > avail * 0.5f;
+    if (big) block_break(s, 6);
+    float x = place(s, w, h);
+    Box *b = box_new(s->p);
+    if (b) {
+        b->type = BOX_IMAGE;
+        b->x = x; b->y = s->y; b->w = w; b->h = h;
+        b->link = s->link;
+        b->text = idx;
+    }
+    if (big) block_break(s, 6);
+    else s->space_pending = true;
+}
+
 /* ----------------------------------------------------------------- tags */
 
 static bool is_block(const char *n) {
@@ -580,6 +640,12 @@ static size_t handle_tag(LS *s, const char *src, size_t len, size_t after, const
         return after;
     }
     if (!strcmp(name, "img") && !closing) {
+        int idx = s->img_index++;
+        PageImage *im = image_slot(s, idx, attrs, alen);
+        if (im && im->state != IMG_FAILED && im->state != IMG_SKIPPED) {
+            add_image_box(s, im, idx);
+            return after;
+        }
         char alt[200] = "";
         get_attr(attrs, alen, "alt", alt, sizeof(alt));
         char shown[220];
@@ -718,6 +784,17 @@ void page_set_source(Page *p, char *src, size_t len, bool plain, const char *url
     p->width = 0;
     p->nfields = 0;
     p->scroll = p->scroll_target = 0;
+    page_free_images(p);
+}
+
+void page_free_images(Page *p) {
+    for (int i = 0; i < p->nimages; i++) {
+        free(p->images[i].url);
+        gfx_image_free(&p->images[i].img);
+    }
+    p->nimages = 0;
+    p->image_bytes = 0;
+    p->relayout = false;
 }
 
 void page_layout(Page *p, float width, float text_scale) {
@@ -734,6 +811,7 @@ void page_layout(Page *p, float width, float text_scale) {
     p->title[0] = 0;
     p->width = width;
     p->scale = text_scale;
+    p->relayout = false;
     snprintf(p->base, sizeof(p->base), "%s", p->url);
 
     LS s;
@@ -817,6 +895,7 @@ void page_layout(Page *p, float width, float text_scale) {
 }
 
 void page_free(Page *p) {
+    page_free_images(p);
     free(p->src);
     free(p->boxes);
     free(p->arena);
@@ -872,6 +951,26 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
             clip_inter(x, y, w, h, bx + 4, by, b->w - 8, b->h);
             gfx_text(FONT_BODY, b->size, bx + 8, by + 5, t->field_text, shown, n);
             gfx_set_clip(x, y, w, h);
+            break;
+        }
+        case BOX_IMAGE: {
+            PageImage *im = &p->images[b->text];
+            if (im->state == IMG_READY) {
+                gfx_image_draw(&im->img, bx, by, b->w, b->h, rgba(255, 255, 255, 255));
+            } else {
+                /* placeholder: a little landscape picture */
+                gfx_rrect(bx, by, b->w, b->h, 6, color_alpha(t->page_rule, 0.55f));
+                float s = (b->w < b->h ? b->w : b->h) * 0.35f;
+                if (s > 40) s = 40;
+                float cx = bx + b->w * 0.5f, cy = by + b->h * 0.5f;
+                if (s > 6) {
+                    gfx_tri(cx - s, cy + s * 0.6f, cx - s * 0.3f, cy - s * 0.3f, cx + s * 0.3f, cy + s * 0.6f, t->page_dim);
+                    gfx_tri(cx, cy + s * 0.6f, cx + s * 0.5f, cy, cx + s, cy + s * 0.6f, t->page_dim);
+                    gfx_circle(cx + s * 0.55f, cy - s * 0.45f, s * 0.18f, t->page_dim);
+                }
+            }
+            if (b->link >= 0 && b->link == hover_link)
+                gfx_rrect_outline(bx - 3, by - 3, b->w + 6, b->h + 6, 6, 3, t->accent);
             break;
         }
         case BOX_SUBMIT: {

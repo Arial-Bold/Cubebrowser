@@ -58,5 +58,11 @@ float gfx_line_height(FontId f, float size);
 float gfx_text_width(FontId f, float size, const char *s, int len);
 float gfx_text(FontId f, float size, float x, float y, Color c, const char *s, int len);
 void  gfx_text_centered(FontId f, float size, float cx, float y, Color c, const char *s);
+/* Textures for web page images (RGB5A3 tiled data, see image.c). */
+typedef struct { GXTexObj obj; void *data; u16 w, h, tex_w, tex_h; } GfxImage;
+void  gfx_image_init(GfxImage *img, void *data, int w, int h, int tex_w, int tex_h);
+void  gfx_image_free(GfxImage *img);
+void  gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color tint);
+
 /* Index of the character boundary closest to x (for caret placement). */
 int   gfx_text_fit(FontId f, float size, const char *s, int len, float maxw);

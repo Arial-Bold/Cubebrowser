@@ -21,6 +21,10 @@ typedef struct {
     void (*stage)(const char *msg);
 } HttpHooks;
 
-/* post_body may be NULL (GET). Returns true if a response was received. */
-bool http_fetch(const char *url, const char *post_body, HttpResult *res, const HttpHooks *hooks);
+/* post_body may be NULL (GET); accept may be NULL for the default page types.
+ * Connections are kept open and reused for the next request to the same site.
+ * Returns true if a response was received. */
+bool http_fetch(const char *url, const char *post_body, const char *accept, HttpResult *res,
+                const HttpHooks *hooks);
+void http_close_idle(void);
 void http_result_free(HttpResult *res);

@@ -11,6 +11,7 @@
 #include "storage.h"
 #include "sound.h"
 #include "url.h"
+#include "image.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
@@ -232,17 +233,101 @@ static void go_forward(void) {
 
 void browser_clear_history(void) { nback = nfwd = 0; }
 
+/* ---------------------------------------------------------------- images */
+
+#define IMAGE_BUDGET (8u * 1024u * 1024u)   /* texture memory per page */
+
+static void apply_image(ImageResult *ir) {
+    int gen = ir->tag >> 8, idx = ir->tag & 0xFF;
+    if (gen != (page_gen & 0xFFFFFF) || idx >= page.nimages) { image_free(&ir->img); return; }
+    PageImage *im = &page.images[idx];
+    if (!ir->ok) {
+        im->state = IMG_FAILED;
+    } else if (page.image_bytes + ir->img.bytes > IMAGE_BUDGET) {
+        image_free(&ir->img);
+        im->state = IMG_SKIPPED;
+    } else {
+        gfx_image_init(&im->img, ir->img.tex, ir->img.w, ir->img.h, ir->img.tex_w, ir->img.tex_h);
+        page.image_bytes += ir->img.bytes;
+        im->state = IMG_READY;
+    }
+    page.relayout = true;
+}
+
+static void image_request_url(const char *src, int max_w, char *out, size_t n) {
+    if (!g_set.image_proxy) { snprintf(out, n, "%s", src); return; }
+    static char enc[URL_MAX];
+    url_encode_component(src, enc, sizeof(enc));
+    const Theme *t = theme();
+    /* weserv fetches the picture, shrinks it and sends a small JPEG; bg fills transparency */
+    int w = snprintf(out, n, "https://images.weserv.nl/?url=%s&w=%d&h=1024&fit=inside&we&output=jpg&q=70"
+                     "&bg=%02x%02x%02x", enc, max_w, t->page_bg.r, t->page_bg.g, t->page_bg.b);
+    if (w >= (int)n) out[0] = 0;
+}
+
+/* Starts the next image download: ones on screen first, then the rest. */
+static void schedule_images(float view_top, float view_h, float max_w) {
+    if (!g_set.load_images || loading || queued || fetch_state() != FETCH_IDLE || !fetch_net_ready()) return;
+    if (page.image_bytes >= IMAGE_BUDGET) {
+        bool changed = false;
+        for (int i = 0; i < page.nimages; i++)
+            if (page.images[i].state == IMG_NONE) { page.images[i].state = IMG_SKIPPED; changed = true; }
+        if (changed) page.relayout = true;
+        return;
+    }
+    int pick = -1;
+    for (int pass = 0; pass < 2 && pick < 0; pass++) {
+        for (int i = 0; i < page.nboxes; i++) {
+            Box *b = &page.boxes[i];
+            if (b->type != BOX_IMAGE || page.images[b->text].state != IMG_NONE) continue;
+            if (pass == 0 && (b->y + b->h < view_top - 100 || b->y > view_top + view_h + 400)) continue;
+            pick = b->text;
+            break;
+        }
+    }
+    if (pick < 0) return;
+    PageImage *im = &page.images[pick];
+    static char req[URL_MAX];
+    image_request_url(im->url, (int)max_w, req, sizeof(req));
+    int tag = ((page_gen & 0xFFFFFF) << 8) | pick;
+    if (req[0] && fetch_start_image(req, (int)max_w, 1024, tag)) im->state = IMG_LOADING;
+    else if (!req[0]) { im->state = IMG_SKIPPED; page.relayout = true; }
+}
+
+static int images_pending(void) {
+    int n = 0;
+    for (int i = 0; i < page.nimages; i++)
+        if (page.images[i].state == IMG_NONE || page.images[i].state == IMG_LOADING) n++;
+    return n;
+}
+
 static void handle_fetch_result(void) {
-    HttpResult r;
-    if (!fetch_take(&r)) return;
+    if (fetch_state() != FETCH_DONE) return;
     if (queued) {
+        /* a new page was requested while something was downloading */
         queued = false;
-        http_result_free(&r);
+        if (fetch_job_kind() == JOB_IMAGE) {
+            ImageResult ir;
+            if (fetch_take_image(&ir)) {
+                int idx = ir.tag & 0xFF;
+                if (idx < page.nimages && page.images[idx].state == IMG_LOADING) page.images[idx].state = IMG_NONE;
+                image_free(&ir.img);
+            }
+        } else {
+            fetch_discard();
+        }
         fetch_start(queued_url, queued_post);
         free(queued_post);
         queued_post = NULL;
         return;
     }
+    if (fetch_job_kind() == JOB_IMAGE) {
+        ImageResult ir;
+        if (fetch_take_image(&ir)) apply_image(&ir);
+        return;
+    }
+    HttpResult r;
+    if (!fetch_take(&r)) return;
     if (!loading) { http_result_free(&r); return; }   /* user moved on */
     loading = false;
     if (!r.body) {
@@ -457,7 +542,11 @@ void browser_frame(bool interactive) {
     gfx_rrect(cx, cy, cw, ch, 14, t->page_bg);
 
     float scale = g_set.text_size / 100.0f;
-    if (has_page && (last_layout_w != cw || last_layout_scale != scale)) {
+    static int last_layout_frame, last_load_images = -1;
+    if (last_load_images != g_set.load_images) { last_load_images = g_set.load_images; page.relayout = true; }
+    bool image_relayout = page.relayout && ui_frame() - last_layout_frame >= 20;
+    if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout)) {
+        last_layout_frame = ui_frame();
         page_layout(&page, cw, scale);
         last_layout_w = cw;
         last_layout_scale = scale;
@@ -478,6 +567,7 @@ void browser_frame(bool interactive) {
         if (page.scroll_target > max_scroll) page.scroll_target = max_scroll;
         if (page.scroll_target < 0) page.scroll_target = 0;
         page.scroll += (page.scroll_target - page.scroll) * (g_set.animations ? 0.3f : 1.0f);
+        schedule_images(page.scroll, ch, fminf(cw - 32, 640));
 
         /* register visible links/fields as targets and find the hovered one */
         float px = input_cursor_x(), py = input_cursor_y();
@@ -534,6 +624,10 @@ void browser_frame(bool interactive) {
         sbx += 24;
     } else if (hover_link >= 0) {
         snprintf(status, sizeof(status), "%s", page_link_url(&page, hover_link));
+    } else if (has_page && g_set.load_images && images_pending() > 0 && netio_state() == NET_UP) {
+        snprintf(status, sizeof(status), "Loading pictures (%d left)", images_pending());
+        ui_spinner(sbx + 8, sby + 10, 14);
+        sbx += 24;
     } else if (netio_state() != NET_UP) {
         snprintf(status, sizeof(status), "%s", fetch_stage()[0] ? fetch_stage() : netio_status());
     } else {

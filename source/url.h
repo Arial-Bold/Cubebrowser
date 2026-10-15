@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define URL_MAX 1024
+#define URL_MAX 2048
 
 typedef struct {
     char scheme[8];      /* "http", "https", "about" */

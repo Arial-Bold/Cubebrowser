@@ -3,6 +3,7 @@
 #include "font_data.h"
 #include <malloc.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define FIFO_SIZE (256 * 1024)
@@ -15,7 +16,8 @@ static GXRModeObj *rmode;
 static bool wide;
 static float vw = 640.0f;
 static float t_sx = 1, t_sy = 1, t_tx = 0, t_ty = 0;
-static int cur_mode = -1;     /* 0 = color, 1 = textured */
+static int cur_mode = -1;     /* 0 = color, 1 = text, 2 = image */
+static bool tex_invalidate;
 static int cur_font = -1;
 static GXTexObj font_tex[2];
 
@@ -165,6 +167,7 @@ void gfx_begin_frame(void) {
     gfx_clear_clip();
     cur_mode = -1;
     cur_font = -1;
+    if (tex_invalidate) { GX_InvalidateTexAll(); tex_invalidate = false; }
 }
 
 void gfx_end_frame(void) {
@@ -482,4 +485,43 @@ float gfx_text(FontId f, float size, float x, float y, Color c, const char *s, i
 void gfx_text_centered(FontId f, float size, float cx, float y, Color c, const char *s) {
     float w = gfx_text_width(f, size, s, -1);
     gfx_text(f, size, cx - w * 0.5f, y, c, s, -1);
+}
+
+/* ----------------------------------------------------------------- images */
+
+void gfx_image_init(GfxImage *img, void *data, int w, int h, int tex_w, int tex_h) {
+    img->data = data;
+    img->w = (u16)w; img->h = (u16)h; img->tex_w = (u16)tex_w; img->tex_h = (u16)tex_h;
+    GX_InitTexObj(&img->obj, data, (u16)tex_w, (u16)tex_h, GX_TF_RGB5A3, GX_CLAMP, GX_CLAMP, GX_FALSE);
+    GX_InitTexObjLOD(&img->obj, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+    tex_invalidate = true;   /* memory may have held an older texture */
+}
+
+void gfx_image_free(GfxImage *img) {
+    free(img->data);
+    img->data = NULL;
+}
+
+void gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color c) {
+    if (!img->data) return;
+    if (cur_mode != 2) {
+        cur_mode = 2;
+        GX_ClearVtxDesc();
+        GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
+        GX_SetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+        GX_SetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+        GX_SetNumTexGens(1);
+        GX_SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
+        GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+        GX_SetTevOp(GX_TEVSTAGE0, GX_MODULATE);
+    }
+    cur_font = -1;
+    GX_LoadTexObj(&img->obj, GX_TEXMAP0);
+    float u1 = (float)img->w / img->tex_w, v1 = (float)img->h / img->tex_h;
+    GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+    GX_Position2f32(x, y);         GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(0, 0);
+    GX_Position2f32(x + w, y);     GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(u1, 0);
+    GX_Position2f32(x + w, y + h); GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(u1, v1);
+    GX_Position2f32(x, y + h);     GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(0, v1);
+    GX_End();
 }
