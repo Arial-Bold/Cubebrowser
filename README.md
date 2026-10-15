@@ -16,7 +16,6 @@ It runs as a `.dol` program launched from Swiss.
 | A GameCube that runs Swiss | Swiss loads the browser like any other homebrew program. |
 | A network adapter | The official Nintendo Broadband Adapter, or a WIZnet-based adapter such as the ETH2GC. Plug it into your router with an Ethernet cable. |
 | An SD card adapter | SD2SP2 (recommended) or SD Gecko. Holds the browser, its certificates, settings and bookmarks. |
-| A GameCube controller | In port 1. |
 
 Component cables are optional; they unlock 480p video.
 
@@ -26,9 +25,7 @@ Component cables are optional; they unlock 480p video.
 
 ### 1. Get the files
 
-Download the latest build from your GitHub repository: open the **Actions**
-tab, click the newest run with a green check, scroll to **Artifacts**, and
-download **cubebrowser**. Unzip it. Inside you'll find:
+Download the latest .zip build from the GitHub repository
 
 - `cubebrowser.dol`, the browser itself
 - a `gcbrowser` folder with `cacert.pem`, the list of trusted certificates
