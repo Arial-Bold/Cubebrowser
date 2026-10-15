@@ -16,6 +16,10 @@
 #define STBI_NO_HDR
 #define STBI_NO_SIMD
 #define STBI_MAX_DIMENSIONS 8192
+/* stb_image keeps its "flip vertically" switch in thread-local storage, which
+ * isn't set up for libogc worker threads, so it could read garbage and flip
+ * every picture upside down. Use a plain global instead. */
+#define STBI_NO_THREAD_LOCALS
 #include "stb_image.h"
 
 /* RGB5A3: opaque pixels use 1-RRRRR-GGGGG-BBBBB, translucent 0-AAA-RRRR-GGGG-BBBB */
@@ -27,6 +31,7 @@ static inline unsigned short enc_rgb5a3(unsigned r, unsigned g, unsigned b, unsi
 bool image_decode(const unsigned char *data, size_t len, int max_w, int max_h, long max_src_pixels,
                   DecodedImage *out, char *err, size_t errlen) {
     memset(out, 0, sizeof(*out));
+    stbi_set_flip_vertically_on_load(0);
     int sw, sh, comp;
     if (!stbi_info_from_memory(data, (int)len, &sw, &sh, &comp)) {
         snprintf(err, errlen, "unsupported image format");
