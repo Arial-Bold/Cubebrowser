@@ -58,8 +58,7 @@ static u16 pad_prev[4];
 static int scan_frames;
 
 static void scan_pads(void) {
-    PAD_Read(pads);
-    PAD_Clamp(pads);
+    PAD_Read(pads);   /* raw readings: same full stick range as before (no PAD_Clamp, which shrinks it) */
     scan_frames++;
     u32 reset = 0;
     for (int c = 0; c < 4; c++) {
