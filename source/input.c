@@ -62,6 +62,11 @@ static void scan_pads(void) {
     scan_frames++;
     u32 reset = 0;
     for (int c = 0; c < 4; c++) {
+        if (c == kbd_port() - 1) {   /* keyboard data isn't controller data */
+            memset(&pads[c], 0, sizeof(pads[c]));
+            pad_prev[c] = 0;
+            continue;
+        }
         if (pads[c].err == PAD_ERR_NO_CONTROLLER) {
             if (c != kbd_port() - 1 && (scan_frames % 60) == 15) reset |= (PAD_CHAN0_BIT >> c);
             memset(&pads[c], 0, sizeof(pads[c]));

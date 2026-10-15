@@ -149,14 +149,46 @@ void kbd_describe_ports(char *out, int n) {
 #include <gccore.h>
 #include <ogc/si.h>
 
-#define SI_KEYBOARD_ID   0x08200000u
 #define SI_KEYBOARD_POLL 0x54000000u
 
+/* Device identity, asked directly. SI_GetType() can't be used here: once a
+ * port is being polled it keeps returning the type it first saw, so a port
+ * that started out as a controller is never reported as a keyboard, even
+ * after BlueRetro switches it. Sending the identity command (0x00) ourselves
+ * always gets the device's current answer: two ID bytes and a status byte. */
+static u8 id_cmd __attribute__((aligned(32))) = 0x00;
+static u8 id_resp[4][32] __attribute__((aligned(32)));
+static volatile bool id_ready[4], id_failed[4];
 static int frames, misses;
 
-static bool is_keyboard(u32 type) {
-    return (type & 0xFFFF0000u) == SI_KEYBOARD_ID;
+static void id_callback(s32 chan, u32 status) {
+    if (chan < 0 || chan > 3) return;
+    if (status & 0x0F) id_failed[chan] = true;   /* no response / collision / overrun */
+    else id_ready[chan] = true;
 }
+
+static void ask_identity(int c) {
+    id_ready[c] = id_failed[c] = false;
+    memset(id_resp[c], 0, 4);
+    SI_Transfer(c, &id_cmd, 1, id_resp[c], 3, id_callback, 0);
+}
+
+/* Reads back the answers to the last identity requests. */
+static void collect_identities(void) {
+    for (int c = 0; c < 4; c++) {
+        if (id_ready[c]) {
+            port_types[c] = ((unsigned)id_resp[c][0] << 24) | ((unsigned)id_resp[c][1] << 16) | ((unsigned)id_resp[c][2] << 8);
+            port_seen[c] = true;
+            id_ready[c] = false;
+        } else if (id_failed[c]) {
+            port_types[c] = 0;   /* nothing answered: empty port */
+            port_seen[c] = true;
+            id_failed[c] = false;
+        }
+    }
+}
+
+static bool is_keyboard(unsigned type) { return (type & 0xFFFF0000u) == 0x08200000u; }
 
 static void start_polling(int chan) {
     SI_SetCommand(chan, SI_KEYBOARD_POLL);
@@ -170,19 +202,20 @@ static void start_polling(int chan) {
 
 void kbd_update(void) {
     frames++;
-    if (port < 0) {
-        /* look for a keyboard once a second, away from the moment empty
-         * controller ports get retried (frame 15 of each second) */
-        if (frames % 60 != 45) return;
-        for (int c = 0; c < 4; c++) {
-            u32 t = SI_GetType(c);
-            if (t & 0x80) continue;   /* still being identified: check again next time */
-            port_types[c] = t;
-            port_seen[c] = true;
-            if (is_keyboard(t)) { start_polling(c); return; }
+    collect_identities();
+    /* every two seconds, ask every port what's plugged in */
+    if (frames % 120 == 45) for (int c = 0; c < 4; c++) ask_identity(c);
+    if (frames % 120 == 75) {
+        if (port < 0) {
+            for (int c = 0; c < 4; c++)
+                if (port_seen[c] && is_keyboard(port_types[c])) { start_polling(c); break; }
+        } else if (port_seen[port] && !is_keyboard(port_types[port]) && port_types[port] != 0) {
+            /* the device on our port changed into something else */
+            SI_DisablePolling((u32)(0x80000000u >> port));
+            port = -1;
         }
-        return;
     }
+    if (port < 0) return;
     u32 resp[2] = { 0, 0 };
     if (SI_GetResponse(port, resp)) {
         misses = 0;
@@ -190,15 +223,11 @@ void kbd_update(void) {
                                  (unsigned char)(resp[1] >> 8) };
         unsigned char sum = (unsigned char)(now[0] ^ now[1] ^ now[2] ^ (resp[0] >> 24));
         if (sum == (unsigned char)resp[1]) process(now);   /* ignore garbled reads */
-    } else if (++misses > 120) {
-        /* nothing for two seconds: check it's still there */
-        u32 t = SI_GetType(port);
-        if (!(t & 0x80) && !is_keyboard(t)) {
-            SI_DisablePolling((u32)(0x80000000u >> port));
-            port = -1;
-            memset(held, 0, sizeof(held));
-        }
-        misses = 0;
+    } else if (++misses > 180 && port_seen[port] && port_types[port] == 0) {
+        /* no data and nothing answers on that port: keyboard was unplugged */
+        SI_DisablePolling((u32)(0x80000000u >> port));
+        port = -1;
+        memset(held, 0, sizeof(held));
     }
 }
 #else
