@@ -13,10 +13,12 @@
 #include "storage.h"
 #include "conn.h"
 #include "keyboard.h"
+#include "dolload.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static int category;
 static bool dirty;
@@ -24,6 +26,12 @@ static float scroll, scroll_target;
 static int capture = -1;          /* def index waiting for a button press */
 static bool capture_armed;
 static int confirm_action = -1;   /* def index pressed once */
+
+/* .dol picker */
+#define PICK_MAX 48
+static char (*pick_list)[256];
+static int pick_count = -1;       /* -1 = closed */
+static int pick_scroll;
 
 void settings_apply_all(void) {
     theme_set(g_set.theme);
@@ -85,6 +93,14 @@ static void run_action(int idx) {
         dirty = true;
         ui_toast("All settings reset");
         break;
+    case SA_FIND_DOL:
+        if (!storage_ok()) { ui_toast("No SD card found"); break; }
+        if (!pick_list) pick_list = malloc(sizeof(*pick_list) * PICK_MAX);
+        if (!pick_list) break;
+        pick_count = dol_find("sd:/", pick_list, PICK_MAX);
+        pick_scroll = 0;
+        if (!pick_count) { ui_toast("No .dol files found on the SD card"); pick_count = -1; }
+        break;
     case SA_SAVE_NOW:
         if (settings_save()) { dirty = false; ui_toast("Settings saved"); }
         else ui_toast("Couldn't save - is the SD card inserted?");
@@ -143,9 +159,54 @@ static bool esc_pressed(void) {
     return esc;
 }
 
+/* Lists the .dol files found; choosing one sets it as the Swiss program. */
+static void draw_picker(bool interactive) {
+    const Theme *t = theme();
+    float sx, sy, sw, sh;
+    ui_safe_area(&sx, &sy, &sw, &sh);
+    gfx_rect(0, 0, gfx_width(), 480, color_alpha(t->shadow, 0.6f));
+    float pw = fminf(600, sw - 20), ph = 380;
+    float px = sx + (sw - pw) * 0.5f, py = sy + (sh - ph) * 0.5f;
+    ui_set_input(interactive);
+    ui_panel(px, py, pw, ph, 20);
+    gfx_text(FONT_UI, 22, px + 24, py + 14, t->text, "Choose the Swiss program", -1);
+    const int visible = 6;
+    float row_h = 40, ly = py + 56;
+    int dir = ui_dpad_unhandled();
+    float sd = input_scroll_delta();
+    if ((dir == DIR_DOWN || sd > 20) && pick_scroll + visible < pick_count) pick_scroll++;
+    if ((dir == DIR_UP || sd < -20) && pick_scroll > 0) pick_scroll--;
+    for (int i = pick_scroll; i < pick_count && i < pick_scroll + visible; i++) {
+        const char *shown = pick_list[i] + (strncmp(pick_list[i], "sd:", 3) ? 0 : 3);
+        bool current = !strcmp(pick_list[i], g_set.swiss_dol);
+        if (ui_button(ui_id("pick", i), px + 20, ly + (i - pick_scroll) * (row_h + 6), pw - 40, row_h, shown, 16,
+                      current ? UIB_ACCENT : UIB_FLAT)) {
+            char err[200];
+            if (dol_check(pick_list[i], err, sizeof(err))) {
+                snprintf(g_set.swiss_dol, sizeof(g_set.swiss_dol), "%s", pick_list[i]);
+                dirty = true;
+                pick_count = -1;
+                ui_toast("Exit button will start this program");
+                return;
+            }
+            ui_toast(err);
+        }
+    }
+    if (pick_count > visible) {
+        char more[48];
+        snprintf(more, sizeof(more), "%d-%d of %d", pick_scroll + 1, pick_scroll + visible, pick_count);
+        gfx_text_centered(FONT_UI, 14, px + pw * 0.5f, py + ph - 76, t->text_dim, more);
+    }
+    if (ui_button(ui_id("pick-cancel", 0), px + pw * 0.3f, py + ph - 54, pw * 0.4f, 40, "Cancel", 17, UIB_NORMAL) ||
+        (interactive && input_pressed(ACT_BACK))) {
+        input_consume(ACT_BACK);
+        pick_count = -1;
+    }
+}
+
 bool settings_ui_frame(bool interactive) {
     const Theme *t = theme();
-    bool modal = osk_active();
+    bool modal = osk_active() || pick_count >= 0;
     bool input_ok = interactive && !modal;
     ui_set_input(input_ok);
     bool leave = false;
@@ -337,6 +398,8 @@ bool settings_ui_frame(bool interactive) {
         input_consume(ACT_MENU);
         leave = true;
     }
+
+    if (pick_count >= 0) draw_picker(interactive && !osk_active());
 
     if (leave) {
         capture = -1;

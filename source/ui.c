@@ -289,6 +289,10 @@ void ui_draw_icon(int icon, float cx, float cy, float s, Color c) {
         if (icon == ICON_LOCK) gfx_ring(cx, cy - h * 0.1f, h * 0.38f, h * 0.15f, (float)M_PI, 2 * (float)M_PI, c);
         else gfx_ring(cx + h * 0.35f, cy - h * 0.25f, h * 0.38f, h * 0.15f, (float)M_PI, 1.9f * (float)M_PI, c);
         break;
+    case ICON_POWER:   /* a ring with a gap at the top and a bar through it */
+        gfx_ring(cx, cy + h * 0.05f, h * 0.6f, h * 0.18f, -0.33f * (float)M_PI, 1.33f * (float)M_PI, c);
+        gfx_rect(cx - h * 0.09f, cy - h * 0.75f, h * 0.18f, h * 0.7f, c);
+        break;
     case ICON_PLUS:
         gfx_rect(cx - h * 0.6f, cy - h * 0.12f, h * 1.2f, h * 0.24f, c);
         gfx_rect(cx - h * 0.12f, cy - h * 0.6f, h * 0.24f, h * 1.2f, c);

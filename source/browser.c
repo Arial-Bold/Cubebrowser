@@ -15,6 +15,7 @@
 #include "diag.h"
 #include "unzip.h"
 #include "keyboard.h"
+#include "dolload.h"
 #include <sys/stat.h>
 #include <ctype.h>
 #include <math.h>
@@ -944,6 +945,43 @@ static void draw_clock(float right_x, float y) {
     gfx_text(FONT_UI, 15, right_x - w, y, t->text, buf, -1);
 }
 
+/* Exit button: press twice (within 3 seconds) to leave the browser. */
+static int exit_armed_until;
+
+static void exit_pressed(void) {
+    if (ui_frame() > exit_armed_until) {
+        exit_armed_until = ui_frame() + 180;
+        ui_toast(g_set.exit_action == 1 ? "Press again to restart the console" : "Press again to exit to Swiss");
+        return;
+    }
+    exit_armed_until = 0;
+    settings_save();
+    if (g_set.exit_action == 1) { system_restart(); return; }
+    char err[256];
+    if (!dol_check(g_set.swiss_dol, err, sizeof(err))) {
+        /* not where it was set: look for a Swiss .dol and remember it */
+        static char found[48][256];
+        int n = storage_ok() ? dol_find("sd:/", found, 48) : 0;
+        int pick = -1;
+        for (int i = 0; i < n && pick < 0; i++) {
+            const char *name = strrchr(found[i], '/');
+            name = name ? name + 1 : found[i];
+            if (!strncasecmp(name, "swiss", 5) && dol_check(found[i], err, sizeof(err))) pick = i;
+        }
+        if (pick < 0) {
+            ui_toast("Swiss .dol not found - choose it in Settings > Data");
+            sound_play(SFX_ERROR);
+            return;
+        }
+        snprintf(g_set.swiss_dol, sizeof(g_set.swiss_dol), "%s", found[pick]);
+        settings_save();
+    }
+    if (!dol_launch(g_set.swiss_dol, err, sizeof(err))) {
+        ui_toast(err);
+        sound_play(SFX_ERROR);
+    }
+}
+
 void browser_init(void) {
     page_init(&page);
     bookmarks_load();
@@ -980,10 +1018,11 @@ void browser_frame(bool interactive) {
     if (ui_icon_button(ui_id("tb", 3), bx + 132, by, r, ICON_HOME, true)) browser_navigate(g_set.home);
     float right = sx + sw - 30;
     if (ui_icon_button(ui_id("tb", 5), right, by, r, ICON_GEAR, true)) settings_request = true;
+    if (ui_icon_button(ui_id("tb", 6), right - 88, by, r, ICON_POWER, true)) exit_pressed();
     if (ui_icon_button(ui_id("tb", 4), right - 44, by, r, ICON_STAR, true)) { bm_open = true; bm_scroll = 0; confirm_delete = -1; sound_play(SFX_OPEN); }
 
     /* address field */
-    float ax = bx + 160, aw = (right - 70) - ax, ah = 34, ay = by - ah * 0.5f;
+    float ax = bx + 160, aw = (right - 114) - ax, ah = 34, ay = by - ah * 0.5f;
     bool addr_hover = ui_hover(ui_id("addr", 0), ax, ay, aw, ah);
     float ahv = ui_anim(ui_id("addr", 1), addr_hover ? 1.0f : 0.0f, 0.25f);
     if (ahv > 0.01f) gfx_rrect(ax - 4, ay - 4, aw + 8, ah + 8, 21, color_alpha(t->accent, 0.45f * ahv));

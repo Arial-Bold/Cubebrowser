@@ -21,6 +21,7 @@ static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platin
 static const char *const osk_layout_names[] = { "QWERTY", "ABC", NULL };
 static const char *const img_size_names[] = { "Small", "Medium", "Large", NULL };
 static const char *const kbd_layout_names[] = { "US", "Japanese", NULL };
+static const char *const exit_names[] = { "Load Swiss .dol", "Restart console", NULL };
 const char *const search_engine_names[] = { "DuckDuckGo Lite", "FrogFind", "Wiby", "Custom", NULL };
 static const char *const search_engine_prefixes[] = {
     "https://lite.duckduckgo.com/lite/?q=", "http://frogfind.com/?q=", "https://wiby.me/?q=", ""
@@ -126,6 +127,12 @@ const SetDef g_setdefs[] = {
     { CAT_SECURITY, "sec.ca", "Certificate file", ST_STR, O(ca_path), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
       "Trusted root certificates (PEM). Applies next launch." },
     /* Data */
+    { CAT_DATA, "exit.action", "Exit button", ST_CHOICE, O(exit_action), 0, 1, 1, exit_names, NULL,
+      "Restart console suits setups where Swiss starts automatically at power-on." },
+    { CAT_DATA, "exit.dol", "Swiss .dol file", ST_STR, O(swiss_dol), OSK_TEXTMODE_URL, 256, 0, NULL, NULL,
+      "The program the Exit button starts. Use Find .dol files to pick it." },
+    { CAT_DATA, NULL, "Find .dol files on SD card", ST_ACTION, 0, SA_FIND_DOL, 0, 0, NULL, NULL,
+      "Lists the programs on your card so you can choose Swiss." },
     { CAT_DATA, "dl.folder", "Download folder", ST_STR, O(dl_folder), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
       "Where downloaded files are saved. Swiss can open them from here." },
     { CAT_DATA, "dl.delzip", "Delete zip after unzipping", ST_BOOL, O(dl_delete_zip), 0, 1, 1, NULL, NULL,
@@ -192,6 +199,8 @@ void settings_defaults(Settings *s) {
     s->verify_certs = 1;
     strcpy(s->ca_path, "sd:/gcbrowser/cacert.pem");
     strcpy(s->dl_folder, "sd:/downloads");
+    s->exit_action = 0;
+    strcpy(s->swiss_dol, "sd:/ipl.dol");
 }
 
 static bool valid_ipv4(const char *s) {
@@ -233,6 +242,7 @@ void settings_validate(Settings *s) {
     if (!s->home[0]) strcpy(s->home, def.home);
     if (!s->ca_path[0]) strcpy(s->ca_path, def.ca_path);
     if (strncmp(s->dl_folder, "sd:/", 4) != 0) strcpy(s->dl_folder, def.dl_folder);
+    if (!s->swiss_dol[0]) strcpy(s->swiss_dol, def.swiss_dol);
     /* Click and Back must stay on distinct buttons or the UI becomes unusable */
     if (s->bind[ACT_CLICK] == s->bind[ACT_BACK]) {
         s->bind[ACT_CLICK] = BTN_A;
