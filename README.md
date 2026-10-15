@@ -5,6 +5,8 @@ network connection, including secure (HTTPS) sites, with pictures, page
 styles, tables and forms, all controlled with a standard GameCube controller.
 It runs as a `.dol` program launched from Swiss.
 
+<img width="4096" height="2382" alt="IMG_20261014_224514833_HDR" src="https://github.com/user-attachments/assets/2ef54948-d5dc-43be-a0e3-c18770a2b286" />
+
 ---
 
 ## What you need
@@ -24,9 +26,7 @@ Component cables are optional; they unlock 480p video.
 
 ### 1. Get the files
 
-Download the latest build from your GitHub repository: open the **Actions**
-tab, click the newest run with a green check, scroll to **Artifacts**, and
-download **cubebrowser**. Unzip it. Inside you'll find:
+Download the latest .zip build
 
 - `cubebrowser.dol`, the browser itself
 - a `gcbrowser` folder with `cacert.pem`, the list of trusted certificates
