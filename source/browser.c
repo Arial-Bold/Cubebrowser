@@ -236,7 +236,7 @@ void browser_clear_history(void) { nback = nfwd = 0; }
 
 /* ---------------------------------------------------------------- images */
 
-#define IMAGE_BUDGET (8u * 1024u * 1024u)   /* texture memory per page */
+#define IMAGE_BUDGET (6u * 1024u * 1024u)   /* texture memory per page */
 
 static void apply_image(ImageResult *ir) {
     int gen = ir->tag >> 8, idx = ir->tag & 0xFF;
@@ -251,18 +251,20 @@ static void apply_image(ImageResult *ir) {
         gfx_image_init(&im->img, ir->img.tex, ir->img.w, ir->img.h, ir->img.tex_w, ir->img.tex_h);
         page.image_bytes += ir->img.bytes;
         im->state = IMG_READY;
+        /* a picture with a declared size already has its space: just draw it */
+        if (im->decl_w && im->decl_h) return;
     }
     page.relayout = true;
 }
 
-static void image_request_url(const char *src, int max_w, char *out, size_t n) {
+static void image_request_url(const char *src, int max_w, int max_h, char *out, size_t n) {
     if (!g_set.image_proxy) { snprintf(out, n, "%s", src); return; }
     static char enc[URL_MAX];
     url_encode_component(src, enc, sizeof(enc));
     const Theme *t = theme();
     /* weserv fetches the picture, shrinks it and sends a small JPEG; bg fills transparency */
-    int w = snprintf(out, n, "https://images.weserv.nl/?url=%s&w=%d&h=1024&fit=inside&we&output=jpg&q=70"
-                     "&bg=%02x%02x%02x", enc, max_w, t->page_bg.r, t->page_bg.g, t->page_bg.b);
+    int w = snprintf(out, n, "https://images.weserv.nl/?url=%s&w=%d&h=%d&fit=inside&we&output=jpg&q=70"
+                     "&bg=%02x%02x%02x", enc, max_w, max_h, t->page_bg.r, t->page_bg.g, t->page_bg.b);
     if (w >= (int)n) out[0] = 0;
 }
 
@@ -307,9 +309,10 @@ static void schedule_images(float view_top, float view_h, float max_w) {
     if (pick < 0) return;
     PageImage *im = &page.images[pick];
     static char req[URL_MAX];
-    image_request_url(im->url, (int)max_w, req, sizeof(req));
+    int max_h = (int)settings_max_picture_height();
+    image_request_url(im->url, (int)max_w, max_h, req, sizeof(req));
     int tag = ((page_gen & 0xFFFFFF) << 8) | pick;
-    if (req[0] && fetch_start_image(req, (int)max_w, 1024, tag)) im->state = IMG_LOADING;
+    if (req[0] && fetch_start_image(req, (int)max_w, max_h, tag)) im->state = IMG_LOADING;
     else if (!req[0]) { im->state = IMG_SKIPPED; page.relayout = true; }
 }
 
@@ -573,14 +576,15 @@ void browser_frame(bool interactive) {
     gfx_rrect(cx, cy, cw, ch, 14, has_page && page.dom ? page.bg : t->page_bg);
 
     float scale = g_set.text_size / 100.0f;
-    static int last_layout_frame, last_load_images = -1, last_alt = -1;
-    if (last_load_images != g_set.load_images || last_alt != g_set.show_alt) {
+    static int last_layout_frame, last_load_images = -1, last_alt = -1, last_img_size = -1;
+    if (last_load_images != g_set.load_images || last_alt != g_set.show_alt || last_img_size != g_set.img_size) {
         last_load_images = g_set.load_images;
         last_alt = g_set.show_alt;
+        last_img_size = g_set.img_size;
         page.relayout = true;
     }
     if (page.styled_author != (g_set.page_styles != 0)) page.restyle = true;
-    bool image_relayout = page.relayout && ui_frame() - last_layout_frame >= 20;
+    bool image_relayout = page.relayout && ui_frame() - last_layout_frame >= 90;
     if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout || page.restyle)) {
         last_layout_frame = ui_frame();
         page_layout(&page, cw, scale);

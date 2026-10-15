@@ -715,6 +715,8 @@ static void measure(L *c, Node *n, const Style *s, float *minw, float *maxw) {
 static __attribute__((noinline)) void emit_image(L *c, Flow *f, Node *n, const Style *s) {
     Page *p = c->p;
     PageImage *im = (n->index >= 0) ? &p->images[n->index] : NULL;
+    /* skipped = blank placeholder or tracking pixel: nothing to show */
+    if (g_set.load_images && im && im->state == IMG_SKIPPED) return;
     if (!g_set.load_images || !im || im->state == IMG_FAILED || im->state == IMG_SKIPPED) {
         const char *alt = dom_attr(n, "alt");
         char shown[200];
@@ -737,8 +739,8 @@ static __attribute__((noinline)) void emit_image(L *c, Flow *f, Node *n, const S
     }
     float cw = f->right - f->left;
     float iw = 0, ih = 0;
-    if (im->state == IMG_READY) { iw = im->img.w; ih = im->img.h; }
-    else if (im->decl_w && im->decl_h) { iw = im->decl_w; ih = im->decl_h; }
+    if (im->decl_w && im->decl_h) { iw = im->decl_w; ih = im->decl_h; }
+    else if (im->state == IMG_READY) { iw = im->img.w; ih = im->img.h; }
     float ratio = (iw > 0 && ih > 0) ? ih / iw : (im->decl_w && im->decl_h ? (float)im->decl_h / im->decl_w : 0.66f);
     float w = -1, h = -1;
     if (s->width.u != U_UNSET && s->width.u != U_AUTO && !(c->measure && s->width.u == U_PCT))
@@ -756,7 +758,8 @@ static __attribute__((noinline)) void emit_image(L *c, Flow *f, Node *n, const S
         if (w > mw && mw > 0) { h *= mw / w; w = mw; }
     }
     if (!c->measure && w > cw) { h *= cw / w; w = cw; }
-    if (h > 1024) { w *= 1024 / h; h = 1024; }
+    float maxh = settings_max_picture_height();
+    if (h > maxh) { w *= maxh / h; h = maxh; }
     if (w < 1) w = 1;
     if (h < 1) h = 1;
 
@@ -1318,6 +1321,43 @@ static __attribute__((noinline)) void emit_frame_link(L *c, Flow *f, Node *n, co
     f->pending_margin = 6;
 }
 
+/* Does this subtree contain a picture we can actually load? */
+static bool contains_img(const Page *p, const Node *n, int depth) {
+    if (n->tag == TAG_IMG)
+        return n->index >= 0 && p->images[n->index].state != IMG_SKIPPED && p->images[n->index].state != IMG_FAILED;
+    if (n->tag == TAG_NOSCRIPT || depth > 8) return false;
+    for (const Node *c = n->first; c; c = c->next)
+        if (c->type == NT_ELEM && contains_img(p, c, depth + 1)) return true;
+    return false;
+}
+
+static bool has_text(const Node *n, int depth) {
+    for (const Node *c = n->first; c; c = c->next) {
+        if (c->type == NT_TEXT) {
+            for (int i = 0; i < c->len; i++) if (!isspace((unsigned char)c->text[i]) && c->text[i] != 1) return true;
+        } else if (depth < 8 && has_text(c, depth + 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* <noscript><img></noscript> next to a lazy-loaded <img> is the same picture
+ * again (meant for browsers without JavaScript): show only one of them. */
+static bool duplicate_noscript(const Page *p, const Node *ns) {
+    bool has_pic = false;
+    for (const Node *c = ns->first; c && !has_pic; c = c->next)
+        if (c->type == NT_ELEM && (c->tag == TAG_IMG || contains_img(p, c, 0))) has_pic = true;
+    if (!has_pic || has_text(ns, 0)) return false;
+    /* look for the loadable twin beside it, climbing through single-child wrappers */
+    for (const Node *par = ns->parent, *from = ns; par && par->tag != TAG_BODY; from = par, par = par->parent) {
+        for (const Node *sib = par->first; sib; sib = sib->next)
+            if (sib != from && sib->type == NT_ELEM && contains_img(p, sib, 0)) return true;
+        if (par->first != from || from->next) break;
+    }
+    return false;
+}
+
 /* Does this element contain anything visible (text, pictures, form controls)? */
 static bool has_content(const Node *n, int depth) {
     if (depth > 64) return true;
@@ -1347,6 +1387,7 @@ static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
         if (!cs || cs->display == D_NONE) continue;
         /* empty positioned layers (decorative gradients, overlays) take no space */
         if (cs->abspos && ch->tag != TAG_IMG && !has_content(ch, 0)) continue;
+        if (ch->tag == TAG_NOSCRIPT && duplicate_noscript(c->p, ch)) continue;
         if (ch->tag == TAG_BR) { forced_break(c, f); continue; }
         if (ch->tag == TAG_WBR) continue;
         if (ch->tag == TAG_IMG) { emit_image(c, f, ch, cs); continue; }

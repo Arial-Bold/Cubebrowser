@@ -23,7 +23,7 @@ typedef struct {
     char home[256];
     int  search_engine;
     char search_custom[256];
-    int  user_agent, show_alt, max_page_kb, load_images, image_proxy, page_styles;
+    int  user_agent, show_alt, max_page_kb, load_images, image_proxy, page_styles, img_size;
     /* Security */
     int  verify_certs;
     char ca_path[128];
@@ -67,3 +67,4 @@ int  *setdef_int(const SetDef *d);
 char *setdef_str(const SetDef *d);
 void settings_format_value(const SetDef *d, char *out, size_t outlen);
 const char *settings_search_prefix(void);
+float settings_max_picture_height(void);

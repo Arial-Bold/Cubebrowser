@@ -18,6 +18,7 @@ static const char *const video_mode_names[] = { "Auto", "480i", "480p", NULL };
 static const char *const aspect_names[] = { "4:3", "16:9", NULL };
 static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platinum", "Spice", NULL };
 static const char *const osk_layout_names[] = { "QWERTY", "ABC", NULL };
+static const char *const img_size_names[] = { "Small", "Medium", "Large", NULL };
 const char *const search_engine_names[] = { "DuckDuckGo Lite", "FrogFind", "Wiby", "Custom", NULL };
 static const char *const search_engine_prefixes[] = {
     "https://lite.duckduckgo.com/lite/?q=", "http://frogfind.com/?q=", "https://wiby.me/?q=", ""
@@ -105,6 +106,8 @@ const SetDef g_setdefs[] = {
       "Use each site's own colours, fonts and layout. Off shows plain pages." },
     { CAT_BROWSING, "web.images", "Load images", ST_BOOL, O(load_images), 0, 1, 1, NULL, NULL,
       "Show pictures on pages. Turn off for faster loading." },
+    { CAT_BROWSING, "web.imgsize", "Picture size", ST_CHOICE, O(img_size), 0, 2, 1, img_size_names, NULL,
+      "Limits how tall pictures can be. Smaller means less scrolling and faster loading." },
     { CAT_BROWSING, "web.imgproxy", "Image helper", ST_BOOL, O(image_proxy), 0, 1, 1, NULL, NULL,
       "Shrinks pictures on images.weserv.nl. Faster, but that site sees image addresses." },
     { CAT_BROWSING, "web.alt", "Show image labels", ST_BOOL, O(show_alt), 0, 1, 1, NULL, NULL,
@@ -172,6 +175,7 @@ void settings_defaults(Settings *s) {
     s->show_alt = 1;
     s->load_images = 1;
     s->page_styles = 1;
+    s->img_size = 1;
     s->image_proxy = 1;
     s->max_page_kb = 1024;
     s->verify_certs = 1;
@@ -310,4 +314,9 @@ void settings_format_value(const SetDef *d, char *out, size_t outlen) {
 const char *settings_search_prefix(void) {
     if (g_set.search_engine == 3) return g_set.search_custom;
     return search_engine_prefixes[g_set.search_engine];
+}
+
+float settings_max_picture_height(void) {
+    static const float h[3] = { 140, 240, 1024 };
+    return h[g_set.img_size >= 0 && g_set.img_size <= 2 ? g_set.img_size : 1];
 }
