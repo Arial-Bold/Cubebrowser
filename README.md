@@ -1,6 +1,6 @@
 # CubeBrowser
 
-A web browser for the Nintendo GameCube build with Claude Opus 5.5. It loads real websites over a wired
+A web browser for the Nintendo GameCube built with Claude Opus 5.5. It loads real websites over a wired
 network connection, including secure (HTTPS) sites, with pictures, page
 styles, tables and forms, all controlled with a standard GameCube controller.
 It runs as a `.dol` program launched from Swiss.
