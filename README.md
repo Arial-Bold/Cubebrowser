@@ -9,7 +9,7 @@ controller. It runs as a `.dol` program launched from Swiss,
 with menus designed to feel like they belong on the console.
 
 
-<img width="4096" height="2382" alt="IMG_20261014_224514833_HDR" src="https://github.com/user-attachments/assets/8749b04e-1206-4e1b-bf05-ccb387c8f54a" />
+<img width="3609" height="2062" alt="IMG_20261015_174831153_HDR" src="https://github.com/user-attachments/assets/a955fbcc-69c8-4985-bafb-c4bbf1e0e608" />
 
 
 ---
