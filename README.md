@@ -1,11 +1,9 @@
 # CubeBrowser
 
-A web browser for the Nintendo GameCube built with Claude Opus 5.5. It loads real websites over a wired
+A web browser for the Nintendo GameCube. It loads real websites over a wired
 network connection, including secure (HTTPS) sites, with pictures, page
 styles, tables and forms, all controlled with a standard GameCube controller.
 It runs as a `.dol` program launched from Swiss.
-
-<img width="4096" height="2382" alt="IMG_20261014_224514833_HDR" src="https://github.com/user-attachments/assets/d7e0aa8a-04e0-4928-a00d-bbc2821b4f7e" />
 
 ---
 
@@ -16,6 +14,7 @@ It runs as a `.dol` program launched from Swiss.
 | A GameCube that runs Swiss | Swiss loads the browser like any other homebrew program. |
 | A network adapter | The official Nintendo Broadband Adapter, or a WIZnet-based adapter such as the ETH2GC. Plug it into your router with an Ethernet cable. |
 | An SD card adapter | SD2SP2 (recommended) or SD Gecko. Holds the browser, its certificates, settings and bookmarks. |
+| A GameCube controller | In port 1. |
 
 Component cables are optional; they unlock 480p video.
 
@@ -25,7 +24,9 @@ Component cables are optional; they unlock 480p video.
 
 ### 1. Get the files
 
-Download the latest .zip build from the GitHub repository
+Download the latest build from your GitHub repository: open the **Actions**
+tab, click the newest run with a green check, scroll to **Artifacts**, and
+download **cubebrowser**. Unzip it. Inside you'll find:
 
 - `cubebrowser.dol`, the browser itself
 - a `gcbrowser` folder with `cacert.pem`, the list of trusted certificates
@@ -125,6 +126,29 @@ Click a text box to type into it. Search boxes submit automatically when you
 press OK. Checkboxes and radio buttons toggle when clicked, and submit buttons
 send the form.
 
+### Downloading files
+
+Clicking a link to a file (such as a `.dol`, `.iso`, `.gcm` or `.zip`) asks
+whether to save it to the SD card instead of opening it. Choose **Download**,
+or **Download & unzip** for zip files.
+
+The download screen shows progress, speed and time remaining. Files are saved
+to `sd:/downloads` (changeable in Settings > Data), where Swiss can launch them
+after you leave the browser.
+
+- **Interrupted downloads continue where they stopped.** If the connection
+  drops, choose **Retry**, or simply open the same link again later.
+- **Zip files** can be unzipped automatically, or later from the "Download
+  complete" screen. Files are extracted to a folder named after the zip.
+- **Cancel** (press twice) stops a download and deletes the partial file.
+- **Big files take time.** Speed depends on the server, but expect roughly
+  0.5 to 2 MB per second. A 1.4 GB disc image takes about 15 to 45 minutes.
+  Plain `http://` downloads, and files served from a computer on your own
+  network, are the fastest.
+
+Only download software you have the right to use, such as homebrew or backups
+of your own games.
+
 ### Status bar
 
 The bottom bar shows loading progress, the address of the link under the
@@ -151,6 +175,8 @@ no network) and the time.
 - **Forms:** text boxes, password fields, checkboxes, radio buttons and submit
   buttons, sent by GET or POST.
 - **Framed pages** (a 1990s technique) show a link to each part of the page.
+- **File downloads** straight to the SD card, with resume, progress and
+  speed display, and automatic unzipping.
 - **History** with Back and Forward, and **bookmarks** saved to the SD card.
 - **Four themes** named after the console colours: Indigo, Jet Black,
   Platinum and Spice.
@@ -169,7 +195,6 @@ Press **START** to open Settings. Changes apply immediately and are saved when
 you leave the Settings screen. Hold **L + R + START** while the browser starts
 to reset everything to defaults.
 
-
 | Section | What you can change |
 |---|---|
 | **Network** | Automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server. Network changes apply the next time you launch the browser. |
@@ -179,7 +204,7 @@ to reset everything to defaults.
 | **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), screen margin, page text size, theme, animations, sound effects and volume. |
 | **Browsing** | Home page, search engine (DuckDuckGo Lite, FrogFind, Wiby or your own), how the browser identifies itself to sites, page styles on/off, pictures on/off, image helper, picture labels, and the largest page size to load. |
 | **Security** | Certificate checking and the certificate file location. |
-| **Data** | Clear history, delete all bookmarks, reset all settings, save settings now. |
+| **Data** | Download folder, delete zips after unzipping, clear history, delete all bookmarks, reset all settings, save settings now. |
 
 ### Notes on a few settings
 
@@ -228,6 +253,8 @@ Older and hobbyist sites from the 1990s and 2000s usually display very well.
 | **A page is cut off at the end** | It was larger than the page size limit. Raise Settings > Browsing > Max page size. |
 | **The screen edges are cut off on my TV** | Increase Settings > Display > Screen margin. |
 | **The picture looks squashed or stretched** | Match Settings > Display > Aspect ratio to your TV's setting. |
+| **A download stopped partway** | Choose Retry, or open the same link again; it continues from where it stopped (on servers that allow it). |
+| **"Not enough space on the SD card"** | Free up space or use a larger card. FAT32 cards can't hold single files over 4 GB. |
 | **Settings or bookmarks aren't saved** | The SD card wasn't found. Make sure it's in the SD2SP2 (or SD Gecko) and formatted FAT32. |
 | **The pointer drifts on its own** | Raise Settings > Controller > Stick dead zone. |
 | **Something's wrong and I can't get back** | Hold L + R + START while launching to reset all settings. |
@@ -242,7 +269,7 @@ Older and hobbyist sites from the 1990s and 2000s usually display very well.
 - **No video, audio or animation.** Animated GIFs show their first frame.
 - **Drop-down menus** show their selected choice but can't be changed yet.
 - **Frames** open one part at a time rather than side by side.
-- **Downloads** aren't supported yet.
+- **Unzipping** supports standard `.zip` files; 7z, RAR and RVZ aren't supported.
 - **Speed:** heavy pages can take several seconds to lay out, and each new
   secure site needs a second or two to set up its connection.
 
@@ -298,6 +325,7 @@ last two into `third_party/`.
 | `source/http.c`, `source/conn.c` | HTTP and secure connections |
 | `source/netio.c`, `source/fetch.c` | Network setup, DNS, clock, background downloads |
 | `source/image.c` | Picture decoding to GameCube textures |
+| `source/download.c`, `source/unzip.c`, `source/inflate.c` | File downloads, zip extraction |
 | `source/gfx.c`, `source/ui.c`, `source/osk.c` | Graphics, menus, on-screen keyboard |
 | `source/settings*.c`, `source/input.c`, `source/sound.c` | Settings, controller, sound |
 | `tools/make_font.py` | Regenerates the built-in fonts |
