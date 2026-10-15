@@ -360,10 +360,15 @@ bool settings_ui_frame(bool interactive) {
         if (py2 < rows_y + rows_h - 40) {
             gfx_text(FONT_UI, 15, ox + 20, py2, t->text, kbd_connected() ? "Keyboard connected" : "No keyboard found yet", -1);
             gfx_text(FONT_BODY, 13, ox + 20, py2 + 24, t->text_dim, ports, gfx_text_fit(FONT_BODY, 13, ports, -1, ow - 40));
+            if (kbd_connected()) {
+                char st[160];
+                kbd_stats(st, sizeof(st));
+                gfx_text(FONT_BODY, 13, ox + 20, py2 + 44, t->text_dim, st, gfx_text_fit(FONT_BODY, 13, st, -1, ow - 40));
+            }
             if (kbd_last_code()) {
                 char lc[48];
                 snprintf(lc, sizeof(lc), "Last key code: 0x%02X", kbd_last_code());
-                gfx_text(FONT_BODY, 13, ox + 20, py2 + 44, t->text_dim, lc, -1);
+                gfx_text(FONT_BODY, 13, ox + 20, py2 + 64, t->text_dim, lc, -1);
             }
         }
     }

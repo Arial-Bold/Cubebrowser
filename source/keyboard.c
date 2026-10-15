@@ -149,7 +149,6 @@ void kbd_describe_ports(char *out, int n) {
 #include <gccore.h>
 #include <ogc/si.h>
 
-#define SI_KEYBOARD_POLL 0x54000000u
 
 /* Device identity, asked directly. SI_GetType() can't be used here: once a
  * port is being polled it keeps returning the type it first saw, so a port
@@ -190,46 +189,126 @@ static void collect_identities(void) {
 
 static bool is_keyboard(unsigned type) { return (type & 0xFFFF0000u) == 0x08200000u; }
 
-static void start_polling(int chan) {
-    SI_SetCommand(chan, SI_KEYBOARD_POLL);
-    SI_EnablePolling((u32)(0x80000000u >> chan));
-    SI_TransferCommands();
+/* Reading keys: once a keyboard is found, its port is taken away from the
+ * controller library (which would otherwise keep reading the port as a
+ * controller and consume the keyboard's data) and the keyboard is asked for
+ * its keys directly every frame with the read command 0x54. The 8-byte reply
+ * is: counter, 3 unused bytes, 3 key codes, checksum. */
+static u8 read_cmd[32] __attribute__((aligned(32))) = { 0x54, 0x00, 0x00 };
+static u8 read_resp[32] __attribute__((aligned(32)));
+static volatile int read_state;          /* 0 idle, 1 waiting, 2 got data, 3 failed */
+static int claim_frames;                 /* frames to wait after handing the port over */
+static unsigned stat_ok, stat_badsum, stat_fail;
+static unsigned last_hi, last_lo;
+static unsigned char pending[3];
+static bool have_pending;
+static int last_data_frame, wait_frames;
+static bool checking_port;   /* identity check of the keyboard's own port in progress */
+
+static void read_callback(s32 chan, u32 status) {
+    (void)chan;
+    read_state = (status & 0x0F) ? 3 : 2;
+}
+
+static void start_reading(int chan) {
+    PAD_Reset((u32)(0x80000000u >> chan));          /* controller library lets go of the port */
+    SI_DisablePolling((u32)(0x80000000u >> chan));  /* and stops its controller polling */
     port = chan;
+    claim_frames = 10;
+    read_state = 0;
+    last_data_frame = frames;
+    checking_port = false;
     misses = 0;
+    have_pending = false;
     memset(held, 0, sizeof(held));
     kbd_clear();
+}
+
+static void stop_reading(void) {
+    port = -1;
+    read_state = 0;
+    checking_port = false;
+    memset(held, 0, sizeof(held));
+    kbd_clear();
+}
+
+void kbd_stats(char *out, int n) {
+    snprintf(out, (size_t)n, "Reports %u   checksum mismatches %u   failed reads %u   last %08X %08X",
+             stat_ok, stat_badsum, stat_fail, last_hi, last_lo);
 }
 
 void kbd_update(void) {
     frames++;
     collect_identities();
-    /* every two seconds, ask every port what's plugged in */
-    if (frames % 120 == 45) for (int c = 0; c < 4; c++) ask_identity(c);
-    if (frames % 120 == 75) {
-        if (port < 0) {
+    if (port < 0) {
+        if (frames % 120 == 45) for (int c = 0; c < 4; c++) ask_identity(c);
+        if (frames % 120 == 75)
             for (int c = 0; c < 4; c++)
-                if (port_seen[c] && is_keyboard(port_types[c])) { start_polling(c); break; }
-        } else if (port_seen[port] && !is_keyboard(port_types[port]) && port_types[port] != 0) {
-            /* the device on our port changed into something else */
-            SI_DisablePolling((u32)(0x80000000u >> port));
-            port = -1;
-        }
+                if (port_seen[c] && is_keyboard(port_types[c])) { start_reading(c); break; }
+        return;
     }
-    if (port < 0) return;
-    u32 resp[2] = { 0, 0 };
-    if (SI_GetResponse(port, resp)) {
-        misses = 0;
-        unsigned char now[3] = { (unsigned char)(resp[1] >> 24), (unsigned char)(resp[1] >> 16),
-                                 (unsigned char)(resp[1] >> 8) };
-        unsigned char sum = (unsigned char)(now[0] ^ now[1] ^ now[2] ^ (resp[0] >> 24));
-        if (sum == (unsigned char)resp[1]) process(now);   /* ignore garbled reads */
-    } else if (++misses > 180 && port_seen[port] && port_types[port] == 0) {
-        /* no data and nothing answers on that port: keyboard was unplugged */
-        SI_DisablePolling((u32)(0x80000000u >> port));
-        port = -1;
-        memset(held, 0, sizeof(held));
+    if (claim_frames > 0) { claim_frames--; return; }
+
+    /* the other ports are still checked every two seconds */
+    if (frames % 120 == 45)
+        for (int c = 0; c < 4; c++) if (c != port) ask_identity(c);
+
+    /* Is the keyboard still there? Ask its port too every two seconds (between
+     * reads), and treat two seconds without any report as a disconnection,
+     * whatever the reason (failed, unfinished or missing replies). */
+    if (checking_port) {
+        if (port_seen[port]) {
+            checking_port = false;
+            if (!is_keyboard(port_types[port])) { stop_reading(); return; }   /* now a controller, or nothing */
+        } else if (frames % 120 >= 40) {
+            checking_port = false;   /* no clear answer: carry on reading; silence still counts */
+            port_seen[port] = true;
+        }
+    } else if (frames % 120 == 30 && read_state == 0) {
+        port_seen[port] = false;
+        ask_identity(port);
+        checking_port = true;
+        return;   /* skip this frame's read so the two requests don't collide */
+    }
+    if (frames - last_data_frame > 120) { stop_reading(); return; }
+
+    if (read_state == 2) {
+        u32 hi = ((u32)read_resp[0] << 24) | ((u32)read_resp[1] << 16) | ((u32)read_resp[2] << 8) | read_resp[3];
+        u32 lo = ((u32)read_resp[4] << 24) | ((u32)read_resp[5] << 16) | ((u32)read_resp[6] << 8) | read_resp[7];
+        last_hi = hi;
+        last_lo = lo;
+        last_data_frame = frames;
+        unsigned char now[3] = { read_resp[4], read_resp[5], read_resp[6] };
+        unsigned char sum = (unsigned char)(now[0] ^ now[1] ^ now[2] ^ read_resp[0]);
+        if (sum == read_resp[7]) {
+            stat_ok++;
+            have_pending = false;
+            process(now);
+        } else {
+            /* Checksum differs (some adapters compute it differently): accept
+             * the keys once two reports in a row agree, which still filters
+             * out a one-off garbled read. */
+            stat_badsum++;
+            if (have_pending && !memcmp(pending, now, 3)) { have_pending = false; process(now); }
+            else { memcpy(pending, now, 3); have_pending = true; }
+        }
+        read_state = 0;
+    } else if (read_state == 3) {
+        stat_fail++;
+        read_state = 0;
+    } else if (read_state == 1 && ++wait_frames > 30) {
+        stat_fail++;          /* a request that never finished: give up on it */
+        read_state = 0;
+    }
+    if (read_state == 0 && !checking_port) {
+        read_state = 1;
+        wait_frames = 0;
+        memset(read_resp, 0, 8);
+        if (!SI_Transfer(port, read_cmd, 3, read_resp, 8, read_callback, 0)) read_state = 0;   /* busy: retry next frame */
     }
 }
+
 #else
 void kbd_update(void) {}
+void kbd_stats(char *out, int n) { snprintf(out, (size_t)n, "(not on a GameCube)"); }
 #endif

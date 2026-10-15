@@ -23,6 +23,7 @@ static bool shift, caps, sym;
 static OskDone done_cb;
 static void *done_user;
 static int open_frame;
+static bool force_onscreen;   /* the user chose the on-screen keyboard for this box */
 
 static const char *const rows_qwerty[2][4] = {
     { "1234567890-=", "qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./" },
@@ -52,6 +53,7 @@ void osk_open(const char *t, const char *initial, int maxl, int m, OskDone done,
     done_user = user;
     active = true;
     open_frame = ui_frame();
+    force_onscreen = false;
     kbd_clear();   /* don't type keys pressed before the box opened */
     sound_play(SFX_OPEN);
 }
@@ -131,14 +133,15 @@ static void compact_frame(void) {
     float px = sx + (sw - pw) * 0.5f, py = sy + 60 - (1.0f - open) * 40;
     ui_panel(px, py, pw, ph, 18);
     gfx_text(FONT_UI, 20, px + 20, py + 12, t->text, title, -1);
-    const char *hint = "Type on your keyboard.  Enter: OK   Esc: Cancel";
+    const char *hint = "Type on your keyboard.  Enter: OK  Esc: Cancel  Y: on-screen keys";
     gfx_text(FONT_UI, 14, px + pw - 20 - gfx_text_width(FONT_UI, 14, hint, -1), py + 18, t->text_dim, hint, -1);
     draw_field(px + 16, py + 44, pw - 32, 46, 22);
     float bw = 140, by = py + ph - 54;
     if (ui_button(ui_id("osk-c", 0), px + pw - 2 * bw - 28, by, bw, 38, "Cancel", 17, UIB_NORMAL)) { finish(false); return; }
     if (ui_button(ui_id("osk-c", 1), px + pw - bw - 16, by, bw, 38, "OK", 17, UIB_ACCENT)) { finish(true); return; }
     if (keyboard_input()) return;
-    if (ui_frame() != open_frame && (input_raw_pressed() & PAD_BUTTON_START)) finish(true);
+    if (ui_frame() != open_frame && (input_raw_pressed() & PAD_BUTTON_START)) { finish(true); return; }
+    if (ui_frame() != open_frame && (input_raw_pressed() & PAD_BUTTON_Y)) { force_onscreen = true; sound_play(SFX_OPEN); }
 }
 
 static void finish(bool accepted) {
@@ -174,7 +177,7 @@ static void draw_field(float x, float y, float w, float h, float ts) {
 void osk_frame(void) {
     if (!active) return;
     ui_set_input(true);
-    if (kbd_connected()) { compact_frame(); return; }
+    if (kbd_connected() && !force_onscreen) { compact_frame(); return; }
     const Theme *t = theme();
     float sx, sy, sw, sh;
     ui_safe_area(&sx, &sy, &sw, &sh);
