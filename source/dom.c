@@ -307,6 +307,49 @@ static void add_text(P *ps, const char *src, size_t len, bool decode) {
     append(parent, t);
 }
 
+/* href/src-style attributes are addresses: decode entities but keep every
+ * other byte exactly (UTF-8 included), since lookalike ASCII would change
+ * which file the link points to. */
+static bool is_url_attr(const char *k) {
+    return !strcmp(k, "href") || !strcmp(k, "src") || !strcmp(k, "action") || !strcmp(k, "data-src") ||
+           !strcmp(k, "data-original") || !strcmp(k, "srcset") || !strcmp(k, "data-srcset") ||
+           !strcmp(k, "background");
+}
+
+static size_t put_utf8(unsigned cp, char *out) {
+    if (cp < 0x80) { out[0] = (char)cp; return 1; }
+    if (cp < 0x800) { out[0] = (char)(0xC0 | (cp >> 6)); out[1] = (char)(0x80 | (cp & 63)); return 2; }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12)); out[1] = (char)(0x80 | ((cp >> 6) & 63)); out[2] = (char)(0x80 | (cp & 63));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18)); out[1] = (char)(0x80 | ((cp >> 12) & 63));
+    out[2] = (char)(0x80 | ((cp >> 6) & 63)); out[3] = (char)(0x80 | (cp & 63));
+    return 4;
+}
+
+static size_t decode_url_value(const char *src, size_t len, char *out, size_t cap) {
+    size_t o = 0, i = 0;
+    while (i < len && o + 5 < cap) {
+        unsigned cp;
+        size_t n;
+        if (src[i] == '&' && (n = parse_entity(src + i, len - i, &cp)) > 0 && cp && cp < 0x110000) {
+            o += put_utf8(cp, out + o);
+            i += n;
+        } else {
+            out[o++] = src[i++];
+        }
+    }
+    /* trim surrounding whitespace, which browsers ignore in addresses */
+    size_t a = 0;
+    while (a < o && (out[a] == ' ' || out[a] == '\n' || out[a] == '\t' || out[a] == '\r')) a++;
+    while (o > a && (out[o - 1] == ' ' || out[o - 1] == '\n' || out[o - 1] == '\t' || out[o - 1] == '\r')) o--;
+    memmove(out, out + a, o - a);
+    o -= a;
+    out[o] = 0;
+    return o;
+}
+
 static void set_classes(Arena *a, Node *n) {
     const char *c = dom_attr(n, "class");
     n->id = dom_attr(n, "id");
@@ -362,8 +405,13 @@ static Attr *parse_attrs(Arena *a, const char *s, int len) {
         size_t cap = (size_t)vlen * 3 + 8;
         char *tmp = cap <= sizeof(small) ? small : malloc(cap);
         if (!k || !tmp) break;
-        size_t vl = decode_text(v, (size_t)vlen, tmp, cap, true);
-        for (char *c = tmp; *c; c++) if (*c == 1) *c = ' ';
+        size_t vl;
+        if (is_url_attr(k)) {
+            vl = decode_url_value(v, (size_t)vlen, tmp, cap);
+        } else {
+            vl = decode_text(v, (size_t)vlen, tmp, cap, true);
+            for (char *c = tmp; *c; c++) if (*c == 1) *c = ' ';
+        }
         char *val = arena_strndup(a, tmp, vl);
         if (tmp != small) free(tmp);
         if (!val) break;

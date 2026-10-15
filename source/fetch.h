@@ -20,6 +20,7 @@ typedef struct {
 
 void        fetch_init(void);
 bool        fetch_start(const char *url, const char *post_body);
+bool        fetch_start_save(const char *url);   /* ask to save whatever the link is */
 bool        fetch_start_image(const char *url, int max_w, int max_h, int tag);
 void        fetch_cancel(void);
 FetchState  fetch_state(void);

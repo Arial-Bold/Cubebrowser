@@ -72,7 +72,8 @@ static const char help_html[] =
     "<li><b>X</b> - type an address or search</li><li><b>Y</b> - bookmarks</li>"
     "<li><b>START</b> - settings</li><li><b>C-Stick</b> - scroll</li>"
     "<li><b>L / R</b> - page up / page down</li>"
-    "<li><b>D-Pad</b> - jump between links and buttons</li></ul>"
+    "<li><b>D-Pad</b> - jump between links and buttons</li>"
+    "<li><b>Hold Z + A</b> on a link - save it to the SD card instead of opening it</li></ul>"
     "<p>All buttons except the D-Pad can be changed in Settings &gt; Controller.</p>"
     "<h3>On-screen keyboard</h3><ul><li><b>B</b> delete, <b>Y</b> space, <b>X</b> shift</li>"
     "<li><b>L / R</b> move the text cursor, <b>START</b> accept</li></ul>"
@@ -216,6 +217,18 @@ static void navigate(const char *url, const char *post, bool record) {
 }
 
 void browser_navigate(const char *url) { navigate(url, NULL, true); }
+
+/* "Save link": fetch just the headers and go straight to the save prompt. */
+static void save_link(const char *url) {
+    if (strncasecmp(url, "http://", 7) && strncasecmp(url, "https://", 8)) {
+        ui_toast("Only web (http/https) links can be saved");
+        return;
+    }
+    if (fetch_state() != FETCH_IDLE) { ui_toast("Busy - try again in a moment"); return; }
+    if (!fetch_start_save(url)) { ui_toast("The network isn't ready yet"); return; }
+    loading = true;
+    snprintf(loading_url, sizeof(loading_url), "%s", url);
+}
 
 static void go_back(void) {
     if (nback == 0) { sound_play(SFX_ERROR); return; }
@@ -956,6 +969,8 @@ void browser_frame(bool interactive) {
                 else if (ft == FIELD_CHECK || ft == FIELD_RADIO) page_toggle_field(&page, hover_field);
                 else if (ft == FIELD_SELECT) ui_toast("Changing drop-down choices isn't supported yet");
                 else edit_field(hover_field);
+            } else if (page_link_is_download(&page, hover_link) || input_held(ACT_SLOW)) {
+                save_link(page_link_url(&page, hover_link));
             } else {
                 navigate(page_link_url(&page, hover_link), NULL, true);
             }

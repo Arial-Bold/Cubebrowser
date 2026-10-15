@@ -68,11 +68,19 @@ static int link_add(Page *p, const char *url) {
         char **nl = realloc(p->links, sizeof(char *) * (size_t)nc);
         if (!nl) return -1;
         p->links = nl;
+        unsigned char *nd = realloc(p->link_dl, (size_t)nc);
+        if (!nd) return -1;
+        p->link_dl = nd;
         p->caplinks = nc;
     }
     p->links[p->nlinks] = strdup(url);
     if (!p->links[p->nlinks]) return -1;
+    p->link_dl[p->nlinks] = 0;
     return p->nlinks++;
+}
+
+bool page_link_is_download(Page *p, int link) {
+    return link >= 0 && link < p->nlinks && p->link_dl && p->link_dl[link];
 }
 
 const char *page_link_url(Page *p, int link) {
@@ -165,6 +173,7 @@ static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) 
                 strncasecmp(v, "tel:", 4)) {
                 url_resolve(p->base, v, scratch_url, sizeof(scratch_url));
                 c->index = link_add(p, scratch_url);
+                if (c->index >= 0 && dom_attr(c, "download")) p->link_dl[c->index] = 1;
             }
             break;
         case TAG_IMG:
@@ -1546,6 +1555,7 @@ void page_free(Page *p) {
     free(p->boxes);
     free(p->arena);
     free(p->links);
+    free(p->link_dl);
     memset(p, 0, sizeof(*p));
 }
 

@@ -56,7 +56,10 @@ bool is_download_name(const char *url) {
 }
 
 /* Page downloads stop before the body if it isn't something we can display. */
+static volatile bool job_force_save;
+
 static bool page_wants_body(const char *url, const char *ct) {
+    if (job_force_save) return false;
     if (is_download_name(url)) return false;
     if (!ct || !ct[0]) return true;
     return strcasestr_s(ct, "html") || strcasestr_s(ct, "xml") || strcasestr_s(ct, "text/");
@@ -140,8 +143,15 @@ void fetch_init(void) {
     LWP_CreateThread(&worker, worker_main, NULL, NULL, WORKER_STACK, WORKER_PRIO);
 }
 
+bool fetch_start_save(const char *url) {
+    if (!fetch_start(url, NULL)) return false;
+    job_force_save = true;
+    return true;
+}
+
 bool fetch_start(const char *url, const char *post_body) {
     if (state != FETCH_IDLE) return false;
+    job_force_save = false;
     snprintf(job_url, sizeof(job_url), "%s", url);
     job_post = post_body ? strdup(post_body) : NULL;
     kind = JOB_PAGE;

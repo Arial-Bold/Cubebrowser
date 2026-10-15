@@ -6,6 +6,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Percent-encodes bytes that can't appear raw in a request line: spaces,
+ * control characters, quotes and other unsafe ASCII, and every non-ASCII
+ * byte (UTF-8 file names). Existing %XX escapes are left alone. */
+void url_escape_path(char *path, size_t cap) {
+    static const char hex[] = "0123456789ABCDEF";
+    char out[URL_MAX];
+    size_t o = 0;
+    for (const unsigned char *p = (const unsigned char *)path; *p && o + 4 < sizeof(out); p++) {
+        unsigned char c = *p;
+        if (c <= 0x20 || c >= 0x7F || strchr("\"<>\\^`{|}", c)) {
+            out[o++] = '%';
+            out[o++] = hex[c >> 4];
+            out[o++] = hex[c & 15];
+        } else {
+            out[o++] = (char)c;
+        }
+    }
+    out[o] = 0;
+    snprintf(path, cap, "%s", out);
+}
+
 static void copy_lower(char *dst, const char *src, size_t n, size_t cap) {
     if (n >= cap) n = cap - 1;
     for (size_t i = 0; i < n; i++) dst[i] = (char)tolower((unsigned char)src[i]);
@@ -50,8 +71,7 @@ bool url_parse(const char *s, Url *u) {
         strcpy(u->path, "/");
     }
     strip_fragment(u->path);
-    for (char *p = u->path; *p; p++)
-        if (*p == ' ') *p = '+';   /* never send raw spaces */
+    url_escape_path(u->path, sizeof(u->path));
     return true;
 }
 

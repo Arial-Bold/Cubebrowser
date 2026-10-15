@@ -84,6 +84,7 @@ typedef struct {
     char *arena;
     int arena_len, arena_cap;
     char **links;
+    unsigned char *link_dl;   /* <a download>: save rather than open */
     int nlinks, caplinks;
     int nframes;
     Field fields[PAGE_MAX_FIELDS];
@@ -111,6 +112,7 @@ void page_free_images(Page *p);
 void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int hover_field);
 int  page_hit(Page *p, float px, float py, int *field_out);
 const char *page_link_url(Page *p, int link);
+bool page_link_is_download(Page *p, int link);
 bool page_build_submit(Page *p, int field_idx, int submit_field, char *url_out, size_t url_len, char **post_out);
 void page_toggle_field(Page *p, int field);
 
