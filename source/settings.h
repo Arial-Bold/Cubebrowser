@@ -18,7 +18,7 @@ typedef struct {
     /* Keyboard */
     int  key_repeat, osk_layout;
     /* Display */
-    int  video_mode, widescreen, margin, text_size, theme, animations, sounds, volume;
+    int  video_mode, widescreen, margin, text_size, theme, animations, sounds, volume, full_width;
     /* Browsing */
     char home[256];
     int  search_engine;

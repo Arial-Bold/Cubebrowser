@@ -18,6 +18,8 @@ void diag_note(int slot, const char *fmt, ...) {
 
 void diag_frame(void) { frames++; }
 
+const char *diag_get(int slot) { return (slot >= 0 && slot < DIAG_SLOTS) ? notes[slot] : ""; }
+
 #ifdef GEKKO
 #include <gccore.h>
 #include <unistd.h>
@@ -39,8 +41,9 @@ static void *watchdog_main(void *arg) {
                          "frames drawn: %u\n"
                          "main:   %s\n"
                          "page:   %s\n"
-                         "worker: %s\n",
-                         frames, notes[DIAG_MAIN], notes[DIAG_PAGE], notes[DIAG_WORKER]);
+                         "worker: %s\n"
+                         "drawn:  %s\n",
+                         frames, notes[DIAG_MAIN], notes[DIAG_PAGE], notes[DIAG_WORKER], notes[DIAG_DRAW]);
         if (n > 0) {
             FILE *f = fopen(STORAGE_DIR "/freeze.log", "wb");
             if (f) { fwrite(buf, 1, (size_t)n, f); fclose(f); }

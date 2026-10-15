@@ -1055,6 +1055,7 @@ void browser_frame(bool interactive) {
             (void)px; (void)py;
         }
         diag_note(DIAG_MAIN, "drawing page at scroll %.0f of %.0f (%d boxes)", page.scroll, page.content_h, page.nboxes);
+        diag_note(DIAG_DRAW, "page at scroll %.0f of %.0f, %d boxes, %d pictures", page.scroll, page.content_h, page.nboxes, page.nimages);
         page_draw(&page, cx, cy, cw, ch, hover_link, hover_field);
         diag_note(DIAG_MAIN, "drawing toolbar and status bar");
 

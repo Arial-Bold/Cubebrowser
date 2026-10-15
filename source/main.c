@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
     bool sd = storage_init();
     diag_init();
     settings_load();
-    gfx_init(g_set.video_mode, g_set.widescreen != 0);
+    gfx_init(g_set.video_mode, g_set.widescreen != 0, g_set.full_width != 0);
     input_init();
 
     /* Hold L + R + START while starting to reset all settings */

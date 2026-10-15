@@ -20,8 +20,8 @@ typedef enum { FONT_UI = 0, FONT_BODY = 1, FONT_ITALIC = 2, FONT_MONO = 3, FONT_
 
 enum { VMODE_AUTO = 0, VMODE_480I = 1, VMODE_480P = 2 };
 
-void  gfx_init(int video_mode, bool widescreen);
-bool  gfx_apply_video_mode(int video_mode);  /* false if 480p requested without component cable */
+void  gfx_init(int video_mode, bool widescreen, bool full_width);
+bool  gfx_apply_video_mode(int video_mode, bool full_width);  /* false if 480p requested without component cable */
 void  gfx_set_widescreen(bool wide);
 bool  gfx_widescreen(void);
 float gfx_width(void);   /* 640 or 854 */

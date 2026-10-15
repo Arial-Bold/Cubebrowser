@@ -4,8 +4,9 @@
  * sd:/gcbrowser/freeze.log, so a freeze can be traced afterwards. */
 #pragma once
 
-enum { DIAG_MAIN, DIAG_WORKER, DIAG_PAGE, DIAG_SLOTS };
+enum { DIAG_MAIN, DIAG_WORKER, DIAG_PAGE, DIAG_DRAW, DIAG_SLOTS };
 
 void diag_init(void);
 void diag_note(int slot, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 void diag_frame(void);   /* call once per frame */
+const char *diag_get(int slot);

@@ -130,6 +130,7 @@ static __attribute__((noinline)) int image_add(Page *p, const Node *n) {
     if (p->nimages >= PAGE_MAX_IMAGES) return -1;
     PageImage *im = &p->images[p->nimages];
     memset(im, 0, sizeof(*im));
+    im->node = n;
     const char *src = dom_attr(n, "data-src");
     if (!src || !*src) src = dom_attr(n, "data-original");
     if (!src || !*src) src = dom_attr(n, "src");
@@ -1472,6 +1473,88 @@ static void free_links(Page *p) {
     p->nlinks = 0;
 }
 
+/* ---------------------------------------------------- duplicate crops
+ * Sites often include one photo several times in different crops (wide,
+ * square, phone-sized) and show only one with CSS or JavaScript. We spot
+ * crops of the same picture by their file names and keep the first. */
+
+static bool crop_word(const char *seg, size_t n) {
+    static const char *const words[] = { "wide", "sq", "square", "custom", "slide", "tall", "vertical", "crop",
+                                         "mobile", "desktop", "thumb", "small", "medium", "large", "full", "hero",
+                                         "landscape", "portrait", "feature", "card", "lead", NULL };
+    for (int i = 0; words[i]; i++) {
+        size_t w = strlen(words[i]);
+        if (n >= w && !strncasecmp(seg, words[i], w)) return true;
+    }
+    /* sizes like 300x200 */
+    size_t i = 0;
+    while (i < n && isdigit((unsigned char)seg[i])) i++;
+    if (i && i < n && (seg[i] == 'x' || seg[i] == 'X')) {
+        size_t j = i + 1;
+        while (j < n && isdigit((unsigned char)seg[j])) j++;
+        if (j > i + 1) return true;
+    }
+    return false;
+}
+
+/* The picture's identity: folder + file name without extension, query, or crop/size suffix. */
+static void image_key(const char *url, char *out, size_t cap) {
+    out[0] = 0;
+    const char *host = strstr(url, "://");
+    const char *path = host ? strchr(host + 3, '/') : NULL;
+    if (!path) return;
+    size_t len = strcspn(path, "?#");
+    char buf[URL_MAX];
+    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+    memcpy(buf, path, len);
+    buf[len] = 0;
+    char *slash = strrchr(buf, '/');
+    char *name = slash ? slash + 1 : buf;
+    char *dot = strrchr(name, '.');
+    if (dot) *dot = 0;
+    /* cut at the first _ or - segment that names a crop or size */
+    for (char *q = name; *q; q++) {
+        if ((*q == '_' || *q == '-') && q > name + 3) {
+            size_t seg = strcspn(q + 1, "_-");
+            if (crop_word(q + 1, seg)) { *q = 0; break; }
+        }
+    }
+    if (strlen(name) < 6) return;   /* too generic to compare safely */
+    snprintf(out, cap, "%s", buf);
+    for (char *c = out; *c; c++) *c = (char)tolower((unsigned char)*c);
+}
+
+/* Same story block: a shared ancestor within a few levels of both pictures,
+ * that isn't the page body itself. */
+static bool near_each_other(const Node *a, const Node *b) {
+    const Node *pa = a;
+    for (int i = 0; i <= 8 && pa; i++, pa = pa->parent) {
+        if (pa->tag == TAG_BODY || pa->tag == TAG_ROOT || pa->tag == TAG_HTML || pa->tag == TAG_MAIN) return false;
+        int depth_b = 0;
+        for (const Node *pb = b; pb && depth_b <= 8; pb = pb->parent, depth_b++)
+            if (pa == pb) return true;
+    }
+    return false;
+}
+
+static void dedupe_images(Page *p) {
+    char keys[PAGE_MAX_IMAGES][160];
+    for (int i = 0; i < p->nimages; i++) {
+        keys[i][0] = 0;
+        if (p->images[i].url && p->images[i].state != IMG_SKIPPED) image_key(p->images[i].url, keys[i], sizeof(keys[i]));
+    }
+    for (int i = 0; i < p->nimages; i++) {
+        if (!keys[i][0]) continue;
+        for (int j = i - 1; j >= 0 && j >= i - 16; j--) {
+            if (!keys[j][0] || strcmp(keys[i], keys[j])) continue;
+            if (!near_each_other(p->images[i].node, p->images[j].node)) continue;
+            p->images[i].state = IMG_SKIPPED;
+            keys[i][0] = 0;
+            break;
+        }
+    }
+}
+
 static void parse_job(void *arg) {
     Page *p = arg;
     p->dom = dom_parse(p->src ? p->src : "", p->src_len, p->plain);
@@ -1480,6 +1563,7 @@ static void parse_job(void *arg) {
         snprintf(p->title, sizeof(p->title), "%s", p->dom->title);
         int form = -1;
         prepass(p, p->dom->root, &form);
+        dedupe_images(p);
         sheets_init(p);
     }
 }
@@ -1574,7 +1658,7 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
     for (int i = 0; i < p->nboxes; i++) {
         Box *b = &p->boxes[i];
         if (!isfinite(b->x) || !isfinite(b->y) || !isfinite(b->w) || !isfinite(b->h) || b->w > 8192 || b->h > 8192 ||
-            b->w < 0 || b->h < 0)
+            b->w < 0 || b->h < 0 || b->x < -8192 || b->x > 8192)
             continue;   /* never hand the GPU nonsense */
         if (b->y + b->h < top || b->y > top + h) continue;
         float bx = x + b->x, by = y + b->y - top;

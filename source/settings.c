@@ -16,6 +16,7 @@ const char *const category_names[CAT_COUNT] = {
 
 static const char *const video_mode_names[] = { "Auto", "480i", "480p", NULL };
 static const char *const aspect_names[] = { "4:3", "16:9", NULL };
+static const char *const width_names[] = { "Standard (640)", "Full (704)", NULL };
 static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platinum", "Spice", NULL };
 static const char *const osk_layout_names[] = { "QWERTY", "ABC", NULL };
 static const char *const img_size_names[] = { "Small", "Medium", "Large", NULL };
@@ -83,6 +84,8 @@ const SetDef g_setdefs[] = {
       "Choose 16:9 if your TV stretches the picture to widescreen." },
     { CAT_DISPLAY, "disp.video", "Video mode", ST_CHOICE, O(video_mode), 0, 2, 1, video_mode_names, NULL,
       "480p needs component cables." },
+    { CAT_DISPLAY, "disp.width", "Picture width", ST_CHOICE, O(full_width), 0, 1, 1, width_names, NULL,
+      "Full uses the whole width of the TV picture. Standard leaves thin borders at the sides." },
     { CAT_DISPLAY, "disp.margin", "Screen margin", ST_INT, O(margin), 0, 10, 1, NULL, "%",
       "Raise this if the edges are cut off on your TV." },
     { CAT_DISPLAY, "disp.textsize", "Page text size", ST_INT, O(text_size), 70, 160, 10, NULL, "%",
@@ -166,6 +169,7 @@ void settings_defaults(Settings *s) {
     s->osk_layout = 0;
     s->video_mode = VMODE_AUTO;
     s->widescreen = 0;
+    s->full_width = 1;
     s->margin = 4;
     s->text_size = 100;
     s->theme = THEME_INDIGO;

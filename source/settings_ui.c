@@ -28,7 +28,7 @@ void settings_apply_all(void) {
     theme_set(g_set.theme);
     gfx_set_widescreen(g_set.widescreen != 0);
     input_clamp_cursor();
-    if (!gfx_apply_video_mode(g_set.video_mode))
+    if (!gfx_apply_video_mode(g_set.video_mode, g_set.full_width != 0))
         ui_toast("480p needs component cables - using the default mode");
 }
 
@@ -36,8 +36,8 @@ static void apply_one(const SetDef *d) {
     dirty = true;
     if (d->off == offsetof(Settings, theme)) theme_set(g_set.theme);
     else if (d->off == offsetof(Settings, widescreen)) { gfx_set_widescreen(g_set.widescreen != 0); input_clamp_cursor(); }
-    else if (d->off == offsetof(Settings, video_mode)) {
-        if (!gfx_apply_video_mode(g_set.video_mode)) ui_toast("480p needs component cables");
+    else if (d->off == offsetof(Settings, video_mode) || d->off == offsetof(Settings, full_width)) {
+        if (!gfx_apply_video_mode(g_set.video_mode, g_set.full_width != 0)) ui_toast("480p needs component cables");
     }
 }
 

@@ -1,12 +1,16 @@
 /* gfx.c - GX setup, 2D primitives, procedural cube and bitmap-font text. */
 #include "gfx.h"
 #include "font_data.h"
+#include "diag.h"
+#include "storage.h"
+#include <stdio.h>
+#include <unistd.h>
 #include <malloc.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define FIFO_SIZE (256 * 1024)
+#define FIFO_SIZE (1024 * 1024)   /* roomy, so even text-heavy frames never fill it */
 #define XFB_BYTES (640 * 576 * VI_DISPLAY_PIX_SZ)  /* big enough for any mode */
 
 static void *fifo;
@@ -20,6 +24,10 @@ static int cur_mode = -1;     /* 0 = color, 1 = text, 2 = image */
 static bool tex_invalidate;
 static int cur_font = -1;
 static GXTexObj font_tex[FONT_COUNT];
+static unsigned frame_verts, frame_images, gpu_resets;
+static volatile bool gpu_done;
+
+#define BEGIN(prim, count) do { frame_verts += (unsigned)(count); GX_Begin(prim, GX_VTXFMT0, (u16)(count)); } while (0)
 
 Color color_alpha(Color c, float mul) {
     float a = c.a * mul;
@@ -42,13 +50,28 @@ Color color_lerp(Color a, Color b, float t) {
 
 /* ------------------------------------------------------------------ video */
 
-static GXRModeObj *pick_mode(int pref) {
+static GXRModeObj custom_mode;
+static int applied_pref = -1, applied_full = -1;
+
+/* The GPU always draws a 640-pixel-wide frame. In full-width mode the video
+ * interface stretches it to 704 pixels, the whole width of the TV picture
+ * (as commercial games do), which also gives correct proportions: TV pixels
+ * are slightly narrower than square, so 640 of them look ~9% too narrow. */
+static GXRModeObj *pick_mode(int pref, bool full_width) {
     bool pal = (VIDEO_GetCurrentTvMode() == VI_PAL);
+    GXRModeObj *base;
     if (pref == VMODE_480P && VIDEO_HaveComponentCable())
-        return pal ? &TVEurgb60Hz480Prog : &TVNtsc480Prog;
-    if (pref == VMODE_480I)
-        return pal ? &TVPal528IntDf : &TVNtsc480IntDf;
-    return VIDEO_GetPreferredMode(NULL);
+        base = pal ? &TVEurgb60Hz480Prog : &TVNtsc480Prog;
+    else if (pref == VMODE_480I)
+        base = pal ? &TVPal528IntDf : &TVNtsc480IntDf;
+    else
+        base = VIDEO_GetPreferredMode(NULL);
+    custom_mode = *base;
+    if (full_width) {
+        custom_mode.viWidth = 704;
+        custom_mode.viXOrigin = (720 - 704) / 2;   /* centred in the 720-pixel video line */
+    }
+    return &custom_mode;
 }
 
 static void setup_gx_for_mode(void) {
@@ -81,21 +104,10 @@ static void configure_vi(GXRModeObj *m) {
     fb = 1;
 }
 
-void gfx_init(int video_mode, bool widescreen) {
-    VIDEO_Init();
-    xfb[0] = MEM_K0_TO_K1(memalign(32, XFB_BYTES));
-    xfb[1] = MEM_K0_TO_K1(memalign(32, XFB_BYTES));
-    configure_vi(pick_mode(video_mode));
+static void drawdone_cb(void) { gpu_done = true; }
 
-    fifo = memalign(32, FIFO_SIZE);
-    memset(fifo, 0, FIFO_SIZE);
-    GX_Init(fifo, FIFO_SIZE);
-    GXColor black = { 0, 0, 0, 255 };
-    GX_SetCopyClear(black, 0x00FFFFFF);
-    setup_gx_for_mode();
-    GX_SetCullMode(GX_CULL_NONE);
-    GX_CopyDisp(xfb[0], GX_TRUE);
-
+/* Drawing state that never changes; re-applied after a GPU reset. */
+static void apply_state(void) {
     GX_ClearVtxDesc();
     GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_F32, 0);
     GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
@@ -107,6 +119,27 @@ void gfx_init(int video_mode, bool widescreen) {
     GX_SetAlphaUpdate(GX_FALSE);
     GX_SetColorUpdate(GX_TRUE);
     GX_SetNumTevStages(1);
+}
+
+void gfx_init(int video_mode, bool widescreen, bool full_width) {
+    VIDEO_Init();
+    xfb[0] = MEM_K0_TO_K1(memalign(32, XFB_BYTES));
+    xfb[1] = MEM_K0_TO_K1(memalign(32, XFB_BYTES));
+    configure_vi(pick_mode(video_mode, full_width));
+    applied_pref = video_mode;
+    applied_full = full_width;
+
+    fifo = memalign(32, FIFO_SIZE);
+    memset(fifo, 0, FIFO_SIZE);
+    GX_Init(fifo, FIFO_SIZE);
+    GXColor black = { 0, 0, 0, 255 };
+    GX_SetCopyClear(black, 0x00FFFFFF);
+    setup_gx_for_mode();
+    GX_SetCullMode(GX_CULL_NONE);
+    GX_CopyDisp(xfb[0], GX_TRUE);
+    apply_state();
+    GX_SetDrawDoneCallback(drawdone_cb);
+
 
     const unsigned char *texdata[FONT_COUNT] = { font_ui_tex, font_body_tex, font_italic_tex, font_mono_tex };
     const u32 texsize[FONT_COUNT] = { sizeof(font_ui_tex), sizeof(font_body_tex), sizeof(font_italic_tex),
@@ -122,10 +155,12 @@ void gfx_init(int video_mode, bool widescreen) {
     gfx_set_widescreen(widescreen);
 }
 
-bool gfx_apply_video_mode(int video_mode) {
+bool gfx_apply_video_mode(int video_mode, bool full_width) {
     bool ok = !(video_mode == VMODE_480P && !VIDEO_HaveComponentCable());
-    GXRModeObj *m = pick_mode(video_mode);
-    if (m == rmode) return ok;
+    if (video_mode == applied_pref && (int)full_width == applied_full) return ok;
+    applied_pref = video_mode;
+    applied_full = full_width;
+    GXRModeObj *m = pick_mode(video_mode, full_width);
     GX_DrawDone();
     VIDEO_SetBlack(TRUE);
     VIDEO_Flush();
@@ -172,15 +207,51 @@ void gfx_begin_frame(void) {
     if (tex_invalidate) { GX_InvalidateTexAll(); tex_invalidate = false; }
 }
 
+/* Waits for the GPU to finish, but never forever: true if it finished. */
+static bool gpu_wait(int ms) {
+    gpu_done = false;
+    GX_SetDrawDone();
+    for (int i = 0; i < ms; i++) {
+        if (gpu_done) return true;
+        usleep(1000);
+    }
+    return gpu_done;
+}
+
+/* The GPU stopped responding: abort the frame, restore our drawing state,
+ * and note what was being drawn so the cause can be found. */
+static void gpu_recover(void) {
+    GX_AbortFrame();
+    setup_gx_for_mode();
+    GX_SetCullMode(GX_CULL_NONE);
+    apply_state();
+    cur_mode = -1;
+    cur_font = -1;
+    tex_invalidate = true;
+    gpu_resets++;
+    char line[400];
+    int n = snprintf(line, sizeof(line), "GPU reset %u: %u vertices, %u pictures this frame | %s | %s\n", gpu_resets,
+                     frame_verts, frame_images, diag_get(DIAG_PAGE), diag_get(DIAG_DRAW));
+    FILE *f = fopen(STORAGE_DIR "/gpu-reset.log", "ab");
+    if (f) { fwrite(line, 1, (size_t)n, f); fclose(f); }
+}
+
 void gfx_end_frame(void) {
-    GX_DrawDone();
-    GX_SetColorUpdate(GX_TRUE);
-    GX_CopyDisp(xfb[fb], GX_TRUE);
-    GX_DrawDone();
-    VIDEO_SetNextFramebuffer(xfb[fb]);
-    VIDEO_Flush();
+    bool ok = gpu_wait(1500);
+    if (ok) {
+        GX_SetColorUpdate(GX_TRUE);
+        GX_CopyDisp(xfb[fb], GX_TRUE);
+        ok = gpu_wait(1500);
+    }
+    if (!ok) {
+        gpu_recover();   /* skip showing this frame; the next one starts clean */
+    } else {
+        VIDEO_SetNextFramebuffer(xfb[fb]);
+        VIDEO_Flush();
+        fb ^= 1;
+    }
     VIDEO_WaitVSync();
-    fb ^= 1;
+    frame_verts = frame_images = 0;
 }
 
 void gfx_set_transform(float sx, float sy, float tx, float ty) {
@@ -199,8 +270,12 @@ void gfx_set_clip(float x, float y, float w, float h) {
     int pw = (int)(x1 * kx) - px, ph = (int)(y1 * ky) - py;
     if (px < 0) { pw += px; px = 0; }
     if (py < 0) { ph += py; py = 0; }
-    if (pw < 0) pw = 0;
-    if (ph < 0) ph = 0;
+    if (px > rmode->fbWidth - 1) px = rmode->fbWidth - 1;
+    if (py > rmode->efbHeight - 1) py = rmode->efbHeight - 1;
+    if (px + pw > rmode->fbWidth) pw = rmode->fbWidth - px;
+    if (py + ph > rmode->efbHeight) ph = rmode->efbHeight - py;
+    if (pw < 1) pw = 1;   /* a zero-sized scissor is invalid for the GPU */
+    if (ph < 1) ph = 1;
     GX_SetScissor(px, py, pw, ph);
 }
 
@@ -242,6 +317,9 @@ static void mode_text(int font) {
     }
 }
 
+/* finite and within a range the GPU's clipper handles comfortably */
+static inline bool sane(float v) { return isfinite(v) && v > -100000.0f && v < 100000.0f; }
+
 static inline void vtx(float x, float y, Color c) {
     GX_Position2f32(x, y);
     GX_Color4u8(c.r, c.g, c.b, c.a);
@@ -254,7 +332,7 @@ void gfx_rect(float x, float y, float w, float h, Color c) { gfx_rect_vgrad(x, y
 void gfx_rect_vgrad(float x, float y, float w, float h, Color top, Color bottom) {
     if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h)) return;
     mode_color();
-    GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+    BEGIN(GX_QUADS, 4);
     vtx(x, y, top);
     vtx(x + w, y, top);
     vtx(x + w, y + h, bottom);
@@ -265,7 +343,7 @@ void gfx_rect_vgrad(float x, float y, float w, float h, Color top, Color bottom)
 void gfx_rect_hgrad(float x, float y, float w, float h, Color left, Color right) {
     if (w <= 0 || h <= 0) return;
     mode_color();
-    GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+    BEGIN(GX_QUADS, 4);
     vtx(x, y, left);
     vtx(x + w, y, right);
     vtx(x + w, y + h, right);
@@ -300,7 +378,7 @@ void gfx_rrect_vgrad(float x, float y, float w, float h, float r, Color top, Col
     float px[RR_PTS], py[RR_PTS];
     int n = rr_points(x, y, w, h, r, px, py);
     mode_color();
-    GX_Begin(GX_TRIANGLEFAN, GX_VTXFMT0, n + 2);
+    BEGIN(GX_TRIANGLEFAN, n + 2);
     vtx(x + w * 0.5f, y + h * 0.5f, color_lerp(top, bottom, 0.5f));
     for (int i = 0; i <= n; i++) {
         int k = i % n;
@@ -317,7 +395,7 @@ void gfx_rrect_outline(float x, float y, float w, float h, float r, float t, Col
     int n = rr_points(x, y, w, h, r, ox, oy);
     rr_points(x + t, y + t, w - 2 * t, h - 2 * t, r - t, ix, iy);
     mode_color();
-    GX_Begin(GX_TRIANGLESTRIP, GX_VTXFMT0, (n + 1) * 2);
+    BEGIN(GX_TRIANGLESTRIP, (n + 1) * 2);
     for (int i = 0; i <= n; i++) {
         int k = i % n;
         vtx(ox[k], oy[k], c);
@@ -334,9 +412,10 @@ void gfx_shadow(float x, float y, float w, float h, float r, float spread, Color
 }
 
 void gfx_circle(float cx, float cy, float r, Color c) {
+    if (!sane(cx) || !sane(cy) || !sane(r)) return;
     const int N = 24;
     mode_color();
-    GX_Begin(GX_TRIANGLEFAN, GX_VTXFMT0, N + 2);
+    BEGIN(GX_TRIANGLEFAN, N + 2);
     vtx(cx, cy, c);
     for (int i = 0; i <= N; i++) {
         float a = 2.0f * (float)M_PI * i / N;
@@ -346,9 +425,10 @@ void gfx_circle(float cx, float cy, float r, Color c) {
 }
 
 void gfx_ring(float cx, float cy, float r, float t, float a0, float a1, Color c) {
+    if (!sane(cx) || !sane(cy) || !sane(r) || !sane(t) || !sane(a0) || !sane(a1)) return;
     const int N = 24;
     mode_color();
-    GX_Begin(GX_TRIANGLESTRIP, GX_VTXFMT0, (N + 1) * 2);
+    BEGIN(GX_TRIANGLESTRIP, (N + 1) * 2);
     for (int i = 0; i <= N; i++) {
         float a = a0 + (a1 - a0) * i / N;
         vtx(cx + cosf(a) * r, cy + sinf(a) * r, c);
@@ -358,8 +438,9 @@ void gfx_ring(float cx, float cy, float r, float t, float a0, float a1, Color c)
 }
 
 void gfx_tri(float x1, float y1, float x2, float y2, float x3, float y3, Color c) {
+    if (!sane(x1) || !sane(y1) || !sane(x2) || !sane(y2) || !sane(x3) || !sane(y3)) return;
     mode_color();
-    GX_Begin(GX_TRIANGLES, GX_VTXFMT0, 3);
+    BEGIN(GX_TRIANGLES, 3);
     vtx(x1, y1, c);
     vtx(x2, y2, c);
     vtx(x3, y3, c);
@@ -367,13 +448,15 @@ void gfx_tri(float x1, float y1, float x2, float y2, float x3, float y3, Color c
 }
 
 void gfx_quad(const float *p, Color c) {
+    for (int i = 0; i < 8; i++) if (!sane(p[i])) return;
     mode_color();
-    GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+    BEGIN(GX_QUADS, 4);
     for (int i = 0; i < 4; i++) vtx(p[i * 2], p[i * 2 + 1], c);
     GX_End();
 }
 
 void gfx_line(float x1, float y1, float x2, float y2, float t, Color c) {
+    if (!sane(x1) || !sane(y1) || !sane(x2) || !sane(y2) || !sane(t)) return;
     float dx = x2 - x1, dy = y2 - y1;
     float len = sqrtf(dx * dx + dy * dy);
     if (len < 0.001f) return;
@@ -383,6 +466,7 @@ void gfx_line(float x1, float y1, float x2, float y2, float t, Color c) {
 }
 
 void gfx_cube(float cx, float cy, float size, float rx, float ry, Color base) {
+    if (!sane(cx) || !sane(cy) || !sane(size) || !sane(rx) || !sane(ry)) return;
     static const float V[8][3] = {
         {-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},{-1,-1,1},{1,-1,1},{1,1,1},{-1,1,1}
     };
@@ -487,7 +571,7 @@ float gfx_text(FontId f, float size, float x, float y, Color c, const char *s, i
     if (n > 0) {
         mode_text(f);
         const float iw = 1.0f / FONT_TEX_W, ih = 1.0f / FONT_TEX_H;
-        GX_Begin(GX_QUADS, GX_VTXFMT0, n * 4);
+        BEGIN(GX_QUADS, n * 4);
         for (int i = 0; i < len; i++) {
             const FontGlyph *g = glyph_for(G, (unsigned char)s[i]);
             if (g->w) {
@@ -549,9 +633,10 @@ void gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color c) 
         GX_SetTevOp(GX_TEVSTAGE0, GX_MODULATE);
     }
     cur_font = -1;
+    frame_images++;
     GX_LoadTexObj(&img->obj, GX_TEXMAP0);
     float u1 = (float)img->w / img->tex_w, v1 = (float)img->h / img->tex_h;
-    GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+    BEGIN(GX_QUADS, 4);
     GX_Position2f32(x, y);         GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(0, 0);
     GX_Position2f32(x + w, y);     GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(u1, 0);
     GX_Position2f32(x + w, y + h); GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(u1, v1);

@@ -43,6 +43,7 @@ typedef struct {
     short decl_w, decl_h;
     unsigned char state;
     GfxImage img;
+    const Node *node;   /* the <img> element (valid while the page is loaded) */
 } PageImage;
 
 enum { SHEET_NONE, SHEET_LOADING, SHEET_DONE };
