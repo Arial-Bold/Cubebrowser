@@ -15,7 +15,7 @@
 
 typedef struct {
     Conn *c;
-    char buf[4096];
+    char buf[16384];
     size_t pos, len;
     bool eof, err;
 } Reader;
@@ -56,6 +56,13 @@ static int rd_line(Reader *r, char *out, size_t cap) {
 }
 
 static int rd_some(Reader *r, char *out, size_t max) {
+    if (r->pos >= r->len && max >= sizeof(r->buf) && !r->eof && !r->err) {
+        /* big reads go straight into the caller's buffer (no extra copy) */
+        int n = conn_read(r->c, out, max);
+        if (n < 0) { r->err = true; return -1; }
+        if (n == 0) { r->eof = true; return 0; }
+        return n;
+    }
     if (r->pos >= r->len && !rd_fill(r)) return r->err ? -1 : 0;
     size_t n = r->len - r->pos;
     if (n > max) n = max;
@@ -204,6 +211,16 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
         else if (!strcasecmp(line, "content-type")) snprintf(res->content_type, sizeof(res->content_type), "%s", val);
         else if (!strcasecmp(line, "location")) snprintf(location, loclen, "%s", val);
         else if (!strcasecmp(line, "connection") && contains_nocase(val, "close")) server_close = true;
+        else if (!strcasecmp(line, "content-disposition")) http_disposition_filename(val, res->filename, sizeof(res->filename));
+    }
+    res->length = content_length;
+    if (hooks && hooks->want_body && res->status >= 200 && res->status < 300 &&
+        !hooks->want_body(url, res->content_type)) {
+        /* a file to save, not a page: stop here and let the browser ask */
+        res->download = true;
+        free(r);
+        http_close_idle();
+        return FO_OK;
     }
 
     b.limit = (size_t)g_set.max_page_kb * 1024;
@@ -278,6 +295,7 @@ bool http_fetch(const char *url, const char *post_body, const char *accept, Http
             r = fetch_once(cur, post, accept, res, hooks, location, sizeof(location));
         }
         if (r != FO_OK) return false;
+        if (res->download) return true;
         bool redirect = res->status >= 300 && res->status < 400 && location[0];
         if (!redirect) return true;
         url_resolve(cur, location, next, sizeof(next));
@@ -294,4 +312,168 @@ void http_result_free(HttpResult *res) {
     free(res->body);
     res->body = NULL;
     res->body_len = 0;
+}
+
+/* ================================================================ streams */
+
+void http_disposition_filename(const char *v, char *out, size_t outlen) {
+    out[0] = 0;
+    const char *p = NULL;
+    for (const char *q = v; *q; q++)
+        if (!strncasecmp(q, "filename*=", 10)) { p = q + 10; break; }
+    if (p) {   /* filename*=UTF-8''name%20here */
+        const char *t = strstr(p, "''");
+        p = t ? t + 2 : p;
+    } else {
+        for (const char *q = v; *q; q++)
+            if (!strncasecmp(q, "filename=", 9)) { p = q + 9; break; }
+    }
+    if (!p) return;
+    while (*p == ' ') p++;
+    char quote = 0;
+    if (*p == '"' || *p == '\'') quote = *p++;
+    size_t o = 0;
+    while (*p && o + 1 < outlen) {
+        if (quote ? *p == quote : (*p == ';' || *p == ' ')) break;
+        if (*p == '%' && isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2])) {
+            char hex[3] = { p[1], p[2], 0 };
+            out[o++] = (char)strtol(hex, NULL, 16);
+            p += 3;
+            continue;
+        }
+        out[o++] = *p++;
+    }
+    out[o] = 0;
+}
+
+struct HttpStream {
+    Conn conn;
+    Reader rd;
+    bool chunked, done;
+    long long chunk_left;     /* bytes left in the current chunk */
+    long long body_left;      /* for Content-Length bodies, -1 otherwise */
+};
+
+HttpStream *http_stream_open(const char *url, long long range_from, const HttpHooks *hooks, HttpStreamInfo *info,
+                             char *err, size_t errlen) {
+    memset(info, 0, sizeof(*info));
+    err[0] = 0;
+    if (netio_state() != NET_UP) { snprintf(err, errlen, "The network isn't connected."); return NULL; }
+    HttpStream *st = calloc(1, sizeof(HttpStream));
+    if (!st) { snprintf(err, errlen, "Out of memory."); return NULL; }
+    snprintf(info->url, sizeof(info->url), "%s", url);
+    for (int hop = 0; hop < 8; hop++) {
+        Url u;
+        if (!url_parse(info->url, &u) || !strcmp(u.scheme, "about")) { snprintf(err, errlen, "That address can't be downloaded."); break; }
+        bool tls = !strcmp(u.scheme, "https");
+        if (!conn_open(&st->conn, u.host, u.port, tls, hooks ? hooks->cancel : NULL, hooks ? hooks->stage : NULL, err, errlen))
+            break;
+        char req[URL_MAX + 1024];
+        bool default_port = (tls && u.port == 443) || (!tls && u.port == 80);
+        char hosthdr[300], range[64] = "";
+        if (default_port) snprintf(hosthdr, sizeof(hosthdr), "%s", u.host);
+        else snprintf(hosthdr, sizeof(hosthdr), "%s:%u", u.host, u.port);
+        if (range_from > 0) snprintf(range, sizeof(range), "Range: bytes=%lld-\r\n", range_from);
+        int n = snprintf(req, sizeof(req),
+                         "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\n"
+                         "Accept-Encoding: identity\r\n%sConnection: close\r\n\r\n",
+                         u.path, hosthdr, user_agent_strings[g_set.user_agent], range);
+        if (n >= (int)sizeof(req) || !conn_write_all(&st->conn, req, (size_t)n)) {
+            snprintf(err, errlen, "Couldn't send the request.");
+            conn_close(&st->conn);
+            break;
+        }
+        memset(&st->rd, 0, sizeof(st->rd));
+        st->rd.c = &st->conn;
+        char line[1024], location[URL_MAX] = "";
+        long long clen = -1, rtotal = -1;
+        st->chunked = false;
+        int status = 0;
+        for (;;) {
+            if (rd_line(&st->rd, line, sizeof(line)) < 0 || strncmp(line, "HTTP/", 5)) { status = -1; break; }
+            const char *sp = strchr(line, ' ');
+            status = sp ? atoi(sp + 1) : 0;
+            if (status >= 200 || status < 100) break;
+            while (rd_line(&st->rd, line, sizeof(line)) > 0) {}
+        }
+        if (status < 0) { snprintf(err, errlen, "The server sent a response I couldn't understand."); conn_close(&st->conn); break; }
+        for (int i = 0; i < 200; i++) {
+            int l = rd_line(&st->rd, line, sizeof(line));
+            if (l <= 0) break;
+            char *colon = strchr(line, ':');
+            if (!colon) continue;
+            *colon = 0;
+            char *val = colon + 1;
+            while (*val == ' ' || *val == '\t') val++;
+            if (!strcasecmp(line, "content-length")) clen = atoll(val);
+            else if (!strcasecmp(line, "transfer-encoding") && strstr(val, "chunked")) st->chunked = true;
+            else if (!strcasecmp(line, "content-type")) snprintf(info->content_type, sizeof(info->content_type), "%s", val);
+            else if (!strcasecmp(line, "location")) snprintf(location, sizeof(location), "%s", val);
+            else if (!strcasecmp(line, "content-disposition")) http_disposition_filename(val, info->filename, sizeof(info->filename));
+            else if (!strcasecmp(line, "content-range")) {   /* bytes 100-999/1000 */
+                const char *slash = strrchr(val, '/');
+                if (slash && slash[1] != '*') rtotal = atoll(slash + 1);
+            }
+        }
+        if (status >= 300 && status < 400 && location[0]) {
+            char next[URL_MAX];
+            url_resolve(info->url, location, next, sizeof(next));
+            snprintf(info->url, sizeof(info->url), "%s", next);
+            conn_close(&st->conn);
+            continue;
+        }
+        info->status = status;
+        if (status == 416) {   /* the partial file is already complete */
+            info->ranged = true;
+            info->length = 0;
+            info->total = range_from;
+            st->done = true;
+            return st;
+        }
+        if (status >= 400) {
+            snprintf(err, errlen, "The server refused the download (error %d).", status);
+            conn_close(&st->conn);
+            break;
+        }
+        info->ranged = (status == 206);
+        info->length = st->chunked ? -1 : clen;
+        if (info->ranged) info->total = rtotal >= 0 ? rtotal : (clen >= 0 ? range_from + clen : -1);
+        else info->total = st->chunked ? -1 : clen;
+        st->body_left = st->chunked ? -1 : clen;
+        return st;
+    }
+    if (!err[0]) snprintf(err, errlen, "Too many redirects.");
+    free(st);
+    return NULL;
+}
+
+int http_stream_read(HttpStream *st, void *buf, size_t len) {
+    if (st->done) return 0;
+    if (st->chunked) {
+        if (st->chunk_left == 0) {
+            char line[64];
+            if (rd_line(&st->rd, line, sizeof(line)) < 0) return -1;
+            if (!line[0] && rd_line(&st->rd, line, sizeof(line)) < 0) return -1;   /* CRLF after a chunk */
+            st->chunk_left = strtoll(line, NULL, 16);
+            if (st->chunk_left <= 0) { st->done = true; return 0; }
+        }
+        if ((long long)len > st->chunk_left) len = (size_t)st->chunk_left;
+        int n = rd_some(&st->rd, buf, len);
+        if (n <= 0) return -1;   /* the connection ended mid-chunk */
+        st->chunk_left -= n;
+        return n;
+    }
+    if (st->body_left == 0) { st->done = true; return 0; }
+    if (st->body_left > 0 && (long long)len > st->body_left) len = (size_t)st->body_left;
+    int n = rd_some(&st->rd, buf, len);
+    if (n < 0) return -1;
+    if (n == 0) { st->done = true; return st->body_left > 0 ? -1 : 0; }   /* closed early? */
+    if (st->body_left > 0) st->body_left -= n;
+    return n;
+}
+
+void http_stream_close(HttpStream *st) {
+    if (!st) return;
+    conn_close(&st->conn);
+    free(st);
 }

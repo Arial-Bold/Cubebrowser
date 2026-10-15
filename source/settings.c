@@ -120,6 +120,10 @@ const SetDef g_setdefs[] = {
     { CAT_SECURITY, "sec.ca", "Certificate file", ST_STR, O(ca_path), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
       "Trusted root certificates (PEM). Applies next launch." },
     /* Data */
+    { CAT_DATA, "dl.folder", "Download folder", ST_STR, O(dl_folder), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
+      "Where downloaded files are saved. Swiss can open them from here." },
+    { CAT_DATA, "dl.delzip", "Delete zip after unzipping", ST_BOOL, O(dl_delete_zip), 0, 1, 1, NULL, NULL,
+      "Saves space by removing the .zip once its files are extracted." },
     { CAT_DATA, NULL, "Clear history", ST_ACTION, 0, SA_CLEAR_HISTORY, 0, 0, NULL, NULL,
       "Forget Back/Forward pages." },
     { CAT_DATA, NULL, "Delete all bookmarks", ST_ACTION, 0, SA_CLEAR_BOOKMARKS, 0, 0, NULL, NULL,
@@ -180,6 +184,7 @@ void settings_defaults(Settings *s) {
     s->max_page_kb = 1024;
     s->verify_certs = 1;
     strcpy(s->ca_path, "sd:/gcbrowser/cacert.pem");
+    strcpy(s->dl_folder, "sd:/downloads");
 }
 
 static bool valid_ipv4(const char *s) {
@@ -220,6 +225,7 @@ void settings_validate(Settings *s) {
     }
     if (!s->home[0]) strcpy(s->home, def.home);
     if (!s->ca_path[0]) strcpy(s->ca_path, def.ca_path);
+    if (strncmp(s->dl_folder, "sd:/", 4) != 0) strcpy(s->dl_folder, def.dl_folder);
     /* Click and Back must stay on distinct buttons or the UI becomes unusable */
     if (s->bind[ACT_CLICK] == s->bind[ACT_BACK]) {
         s->bind[ACT_CLICK] = BTN_A;

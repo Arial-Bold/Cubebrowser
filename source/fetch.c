@@ -8,6 +8,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+
+static bool strcasestr_s(const char *h, const char *n) {
+    size_t l = strlen(n);
+    for (; *h; h++) if (!strncasecmp(h, n, l)) return true;
+    return false;
+}
 
 #define WORKER_STACK (256 * 1024)
 #define WORKER_PRIO 40   /* below the UI thread, which yields every vsync */
@@ -25,6 +32,35 @@ static HttpResult result;
 static ImageResult img_result;
 static char stage_buf[192] = "";
 static volatile bool net_ready;
+static char task_path[600], task_dest[600];
+static DownloadProgress dl_progress;
+static UnzipProgress uz_progress;
+static bool task_ok;
+static char task_err[256];
+
+/* File types that are always downloads, whatever the server calls them. */
+bool is_download_name(const char *url) {
+    static const char *const ext[] = { ".dol", ".elf", ".iso", ".gcm", ".gcz", ".ciso", ".rvz", ".tgc", ".zip", ".7z",
+                                       ".rar", ".gz", ".tar", ".bin", ".img", ".dff", ".nkit.iso", ".exe", ".pdf",
+                                       ".mp3", ".mp4", ".wav", ".ogg", ".flac", ".gci", ".sav", ".raw", NULL };
+    char path[URL_MAX];
+    snprintf(path, sizeof(path), "%s", url);
+    char *q = strpbrk(path, "?#");
+    if (q) *q = 0;
+    size_t n = strlen(path);
+    for (int i = 0; ext[i]; i++) {
+        size_t e = strlen(ext[i]);
+        if (n > e && !strcasecmp(path + n - e, ext[i])) return true;
+    }
+    return false;
+}
+
+/* Page downloads stop before the body if it isn't something we can display. */
+static bool page_wants_body(const char *url, const char *ct) {
+    if (is_download_name(url)) return false;
+    if (!ct || !ct[0]) return true;
+    return strcasestr_s(ct, "html") || strcasestr_s(ct, "xml") || strcasestr_s(ct, "text/");
+}
 
 static void set_stage(const char *msg) { snprintf(stage_buf, sizeof(stage_buf), "%s", msg); }
 static void no_stage(const char *msg) { (void)msg; }
@@ -71,6 +107,12 @@ static void *worker_main(void *arg) {
             job_pending = 0;
             if (kind == JOB_IMAGE) {
                 run_image_job();
+            } else if (kind == JOB_DOWNLOAD) {
+                diag_note(DIAG_WORKER, "saving file %.120s", task_path);
+                task_ok = download_to_file(job_url, task_path, &dl_progress, &cancel_flag, task_err, sizeof(task_err));
+            } else if (kind == JOB_UNZIP) {
+                diag_note(DIAG_WORKER, "unzipping %.120s", task_path);
+                task_ok = unzip_file(task_path, task_dest, &uz_progress, &cancel_flag, task_err, sizeof(task_err));
             } else if (kind == JOB_CSS) {
                 diag_note(DIAG_WORKER, "downloading stylesheet %.120s", job_url);
                 HttpHooks hooks = { &cancel_flag, &progress, no_stage };
@@ -79,7 +121,7 @@ static void *worker_main(void *arg) {
                 result = r;
             } else {
                 diag_note(DIAG_WORKER, "downloading page %.120s", job_url);
-                HttpHooks hooks = { &cancel_flag, &progress, set_stage };
+                HttpHooks hooks = { &cancel_flag, &progress, set_stage, page_wants_body };
                 HttpResult r;
                 http_fetch(job_url, job_post, NULL, &r, &hooks);
                 free(job_post);
@@ -149,6 +191,45 @@ bool fetch_take_css(HttpResult *out, int *tag) {
     return true;
 }
 
+static bool start_task(int k) {
+    task_ok = false;
+    task_err[0] = 0;
+    kind = (JobKind)k;
+    cancel_flag = 0;
+    progress = 0;
+    state = FETCH_BUSY;
+    job_pending = 1;
+    return true;
+}
+
+bool fetch_start_download(const char *url, const char *dest_path) {
+    if (state != FETCH_IDLE || !net_ready) return false;
+    snprintf(job_url, sizeof(job_url), "%s", url);
+    snprintf(task_path, sizeof(task_path), "%s", dest_path);
+    memset(&dl_progress, 0, sizeof(dl_progress));
+    dl_progress.total = -1;
+    return start_task(JOB_DOWNLOAD);
+}
+
+bool fetch_start_unzip(const char *zip_path, const char *dest_dir) {
+    if (state != FETCH_IDLE) return false;
+    snprintf(task_path, sizeof(task_path), "%s", zip_path);
+    snprintf(task_dest, sizeof(task_dest), "%s", dest_dir);
+    memset(&uz_progress, 0, sizeof(uz_progress));
+    return start_task(JOB_UNZIP);
+}
+
+const DownloadProgress *fetch_download_progress(void) { return &dl_progress; }
+const UnzipProgress *fetch_unzip_progress(void) { return &uz_progress; }
+
+bool fetch_take_task(bool *ok, char *err, size_t errlen) {
+    if (state != FETCH_DONE || (kind != JOB_DOWNLOAD && kind != JOB_UNZIP)) return false;
+    *ok = task_ok;
+    snprintf(err, errlen, "%s", task_err);
+    state = FETCH_IDLE;
+    return true;
+}
+
 void fetch_cancel(void) { if (state == FETCH_BUSY) cancel_flag = 1; }
 FetchState fetch_state(void) { return state; }
 JobKind fetch_job_kind(void) { return kind; }
@@ -175,6 +256,7 @@ bool fetch_take_image(ImageResult *out) {
 
 void fetch_discard(void) {
     if (state != FETCH_DONE) return;
+    if (kind == JOB_DOWNLOAD || kind == JOB_UNZIP) { state = FETCH_IDLE; return; }
     if (kind == JOB_IMAGE) image_free(&img_result.img);
     else http_result_free(&result);
     state = FETCH_IDLE;

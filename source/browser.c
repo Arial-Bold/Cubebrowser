@@ -13,6 +13,8 @@
 #include "url.h"
 #include "image.h"
 #include "diag.h"
+#include "unzip.h"
+#include <sys/stat.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
@@ -74,6 +76,8 @@ static const char help_html[] =
     "<p>All buttons except the D-Pad can be changed in Settings &gt; Controller.</p>"
     "<h3>On-screen keyboard</h3><ul><li><b>B</b> delete, <b>Y</b> space, <b>X</b> shift</li>"
     "<li><b>L / R</b> move the text cursor, <b>START</b> accept</li></ul>"
+    "<h3>Downloads</h3><p>Links to files (such as .dol, .iso or .zip) ask to save them to the SD card. "
+    "Zip files can be unzipped automatically. Interrupted downloads continue where they stopped.</p>"
     "<h3>What works</h3><p>Text, links, pictures, tables, lists, forms such as search boxes, and most "
     "page colours, fonts and spacing. JavaScript and modern multi-column layouts aren't supported, so "
     "sites are shown in a simpler, phone-style layout. Lightweight sites work best.</p>"
@@ -235,6 +239,302 @@ static void go_forward(void) {
 
 void browser_clear_history(void) { nback = nfwd = 0; }
 
+
+/* ------------------------------------------------------------- downloads */
+
+enum { DL_IDLE, DL_OFFER, DL_RUNNING, DL_DONE, DL_FAILED, DL_UNZIPPING, DL_UNZIPPED, DL_UNZIP_FAILED };
+static int dl_state;
+static char dl_url[URL_MAX], dl_name[128], dl_path[600], dl_msg[256], dl_unzip_dir[600];
+static long long dl_size;
+static bool dl_is_zip, dl_unzip_after, dl_confirm_cancel;
+static int dl_files;
+
+static void fmt_size(long long b, char *out, size_t n) {
+    if (b < 0) snprintf(out, n, "unknown size");
+    else if (b >= 1024LL * 1024 * 1024) snprintf(out, n, "%.2f GB", b / (1024.0 * 1024 * 1024));
+    else if (b >= 1024 * 1024) snprintf(out, n, "%.1f MB", b / (1024.0 * 1024));
+    else if (b >= 1024) snprintf(out, n, "%lld KB", b / 1024);
+    else snprintf(out, n, "%lld bytes", b);
+}
+
+static bool file_exists(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+static bool ends_with_ci(const char *s, const char *suffix) {
+    size_t a = strlen(s), b = strlen(suffix);
+    return a >= b && !strcasecmp(s + a - b, suffix);
+}
+
+/* A safe file name from the server's suggestion or the address. */
+static void pick_download_name(const char *url, const char *suggested) {
+    char raw[256] = "";
+    if (suggested && suggested[0]) {
+        snprintf(raw, sizeof(raw), "%s", suggested);
+    } else {
+        char path[URL_MAX];
+        snprintf(path, sizeof(path), "%s", url);
+        char *q = strpbrk(path, "?#");
+        if (q) *q = 0;
+        size_t n = strlen(path);
+        while (n && path[n - 1] == '/') path[--n] = 0;
+        const char *slash = strrchr(path, '/');
+        const char *seg = slash ? slash + 1 : path;
+        size_t o = 0;   /* undo %20-style escapes */
+        for (const char *c = seg; *c && o + 1 < sizeof(raw); c++) {
+            if (*c == '%' && isxdigit((unsigned char)c[1]) && isxdigit((unsigned char)c[2])) {
+                char hex[3] = { c[1], c[2], 0 };
+                raw[o++] = (char)strtol(hex, NULL, 16);
+                c += 2;
+            } else {
+                raw[o++] = *c;
+            }
+        }
+        raw[o] = 0;
+    }
+    size_t o = 0;
+    for (const char *c = raw; *c && o + 1 < 100; c++) {
+        unsigned char ch = (unsigned char)*c;
+        if (ch < 32 || ch >= 127 || strchr("\\/:*?\"<>|", ch)) ch = '_';
+        dl_name[o++] = (char)ch;
+    }
+    dl_name[o] = 0;
+    while (o && (dl_name[o - 1] == '.' || dl_name[o - 1] == ' ')) dl_name[--o] = 0;
+    if (!dl_name[0] || dl_name[0] == '.') snprintf(dl_name, sizeof(dl_name), "download.bin");
+
+    /* an unfinished download of the same name is continued; finished ones aren't overwritten */
+    snprintf(dl_path, sizeof(dl_path), "%s/%s", g_set.dl_folder, dl_name);
+    char part[620];
+    snprintf(part, sizeof(part), "%s.part", dl_path);
+    if (file_exists(part) || !file_exists(dl_path)) return;
+    char base[128], ext[32] = "";
+    snprintf(base, sizeof(base), "%s", dl_name);
+    char *dot = strrchr(base, '.');
+    if (dot && strlen(dot) < sizeof(ext)) { snprintf(ext, sizeof(ext), "%s", dot); *dot = 0; }
+    for (int k = 2; k < 100; k++) {
+        snprintf(dl_name, sizeof(dl_name), "%.90s (%d)%s", base, k, ext);
+        snprintf(dl_path, sizeof(dl_path), "%s/%s", g_set.dl_folder, dl_name);
+        if (!file_exists(dl_path)) break;
+    }
+}
+
+static void offer_download(const HttpResult *r) {
+    snprintf(dl_url, sizeof(dl_url), "%s", r->url);
+    pick_download_name(r->url, r->filename);
+    dl_size = r->length;
+    dl_is_zip = ends_with_ci(dl_name, ".zip");
+    dl_unzip_after = false;
+    dl_confirm_cancel = false;
+    dl_state = DL_OFFER;
+    /* the link didn't lead to a new page, so don't add one to Back */
+    if (nback > 0 && has_page && !strcmp(back_stack[nback - 1].url, page.url)) nback--;
+    sound_play(SFX_OPEN);
+}
+
+static void start_download(void) {
+    if (!storage_ok()) { snprintf(dl_msg, sizeof(dl_msg), "No SD card was found."); dl_state = DL_FAILED; return; }
+    make_dirs(g_set.dl_folder);
+    if (!fetch_start_download(dl_url, dl_path)) {
+        snprintf(dl_msg, sizeof(dl_msg), "The network is busy or not connected. Try again in a moment.");
+        dl_state = DL_FAILED;
+        return;
+    }
+    dl_confirm_cancel = false;
+    dl_state = DL_RUNNING;
+}
+
+static void start_unzip(void) {
+    char base[128];
+    snprintf(base, sizeof(base), "%s", dl_name);
+    if (ends_with_ci(base, ".zip")) base[strlen(base) - 4] = 0;
+    snprintf(dl_unzip_dir, sizeof(dl_unzip_dir), "%s/%s", g_set.dl_folder, base);
+    if (!fetch_start_unzip(dl_path, dl_unzip_dir)) {
+        snprintf(dl_msg, sizeof(dl_msg), "Couldn't start unzipping. Try again in a moment.");
+        dl_state = DL_UNZIP_FAILED;
+        return;
+    }
+    dl_confirm_cancel = false;
+    dl_state = DL_UNZIPPING;
+}
+
+static void handle_task_result(void) {
+    bool ok;
+    char err[256];
+    if (!fetch_take_task(&ok, err, sizeof(err))) return;
+    if (dl_state == DL_RUNNING) {
+        if (ok) {
+            sound_play(SFX_LOADED);
+            if (dl_unzip_after) start_unzip();
+            else dl_state = DL_DONE;
+        } else if (!strcmp(err, "Stopped.")) {
+            dl_state = DL_IDLE;
+            ui_toast("Download cancelled");
+        } else {
+            snprintf(dl_msg, sizeof(dl_msg), "%s", err);
+            dl_state = DL_FAILED;
+            sound_play(SFX_ERROR);
+        }
+    } else if (dl_state == DL_UNZIPPING) {
+        if (ok) {
+            dl_files = fetch_unzip_progress()->files_done;
+            if (g_set.dl_delete_zip) remove(dl_path);
+            dl_state = DL_UNZIPPED;
+            sound_play(SFX_LOADED);
+        } else if (!strcmp(err, "Stopped.")) {
+            dl_state = DL_DONE;
+            ui_toast("Unzipping cancelled");
+        } else {
+            snprintf(dl_msg, sizeof(dl_msg), "%s", err);
+            dl_state = DL_UNZIP_FAILED;
+            sound_play(SFX_ERROR);
+        }
+    }
+}
+
+static void wrap_text(FontId f, float size, float x, float y, float w, Color c, const char *text, int max_lines) {
+    const char *p = text;
+    float lh = gfx_line_height(f, size);
+    for (int line = 0; *p && line < max_lines; line++) {
+        int n = gfx_text_fit(f, size, p, -1, w);
+        if (n <= 0) break;
+        if (p[n]) {   /* break at a space if possible */
+            int k = n;
+            while (k > 0 && p[k] != ' ') k--;
+            if (k > n / 2) n = k;
+        }
+        gfx_text(f, size, x, y + line * lh, c, p, n);
+        p += n;
+        while (*p == ' ') p++;
+    }
+}
+
+static void draw_download(bool interactive) {
+    const Theme *t = theme();
+    float sx, sy, sw, sh;
+    ui_safe_area(&sx, &sy, &sw, &sh);
+    float open = ui_anim(ui_id("dl-open", 0), 1.0f, 0.25f);
+    gfx_rect(0, 0, gfx_width(), 480, color_alpha(t->shadow, 0.6f * open));
+    float pw = fminf(560, sw - 20), ph = 290;
+    float px = sx + (sw - pw) * 0.5f, py = sy + (sh - ph) * 0.5f + (1 - open) * 60;
+    ui_set_input(interactive);
+    ui_panel(px, py, pw, ph, 20);
+    char a[48], b[48], line[300];
+    const char *title = "";
+    switch (dl_state) {
+    case DL_OFFER: title = "Save to SD card?"; break;
+    case DL_RUNNING: title = "Downloading"; break;
+    case DL_DONE: title = "Download complete"; break;
+    case DL_FAILED: title = "Download stopped"; break;
+    case DL_UNZIPPING: title = "Unzipping"; break;
+    case DL_UNZIPPED: title = "Unzipped"; break;
+    case DL_UNZIP_FAILED: title = "Couldn't unzip"; break;
+    }
+    gfx_text(FONT_UI, 24, px + 24, py + 16, t->text, title, -1);
+    float tx = px + 24, ty = py + 58, tw = pw - 48;
+    gfx_text(FONT_UI, 18, tx, ty, t->text, dl_name, gfx_text_fit(FONT_UI, 18, dl_name, -1, tw));
+    ty += 32;
+    float by = py + ph - 58, bh = 40;
+    bool close = false;
+
+    if (dl_state == DL_OFFER) {
+        fmt_size(dl_size, a, sizeof(a));
+        snprintf(line, sizeof(line), "Size: %s", a);
+        gfx_text(FONT_BODY, 17, tx, ty, t->text_dim, line, -1);
+        snprintf(line, sizeof(line), "Saves to: %s", g_set.dl_folder);
+        gfx_text(FONT_BODY, 17, tx, ty + 26, t->text_dim, line, gfx_text_fit(FONT_BODY, 17, line, -1, tw));
+        if (dl_size > 200LL * 1024 * 1024)
+            wrap_text(FONT_BODY, 16, tx, ty + 58, tw, t->text_dim, "This is a big file, so it may take a while. Keep the GameCube on until it finishes.", 2);
+        int nb = dl_is_zip ? 3 : 2;
+        float bw = (tw - 12 * (nb - 1)) / nb, bx = tx;
+        if (ui_button(ui_id("dl-go", 0), bx, by, bw, bh, "Download", 17, UIB_ACCENT)) { dl_unzip_after = false; start_download(); }
+        bx += bw + 12;
+        if (dl_is_zip) {
+            if (ui_button(ui_id("dl-go", 1), bx, by, bw, bh, "Download & unzip", 17, UIB_NORMAL)) { dl_unzip_after = true; start_download(); }
+            bx += bw + 12;
+        }
+        if (ui_button(ui_id("dl-go", 2), bx, by, bw, bh, "Cancel", 17, UIB_NORMAL)) close = true;
+    } else if (dl_state == DL_RUNNING || dl_state == DL_UNZIPPING) {
+        long long done, total;
+        if (dl_state == DL_RUNNING) {
+            const DownloadProgress *pg = fetch_download_progress();
+            done = pg->done; total = pg->total;
+            fmt_size(done, a, sizeof(a));
+            fmt_size(total, b, sizeof(b));
+            char speed[48] = "";
+            if (pg->speed > 0) {
+                fmt_size(pg->speed, speed, sizeof(speed));
+                strcat(speed, "/s");
+            }
+            if (total > 0) snprintf(line, sizeof(line), "%s of %s   %s", a, b, speed);
+            else snprintf(line, sizeof(line), "%s   %s", a, speed);
+            gfx_text(FONT_BODY, 17, tx, ty, t->text, line, -1);
+            if (total > 0 && pg->speed > 0) {
+                long long left = (total - done) / pg->speed;
+                if (left >= 3600) snprintf(line, sizeof(line), "About %lld hr %lld min left", left / 3600, (left % 3600) / 60);
+                else if (left >= 60) snprintf(line, sizeof(line), "About %lld min left", left / 60 + 1);
+                else snprintf(line, sizeof(line), "Less than a minute left");
+                gfx_text(FONT_BODY, 17, tx, ty + 26, t->text_dim, line, -1);
+            } else if (pg->resumed) {
+                gfx_text(FONT_BODY, 17, tx, ty + 26, t->text_dim, "Continuing where it stopped before", -1);
+            }
+        } else {
+            const UnzipProgress *up = fetch_unzip_progress();
+            done = (long long)up->done; total = (long long)up->total;
+            snprintf(line, sizeof(line), "File %d of %d: %s", up->files_done + 1 > up->files_total ? up->files_total : up->files_done + 1,
+                     up->files_total, up->current);
+            gfx_text(FONT_BODY, 17, tx, ty, t->text, line, gfx_text_fit(FONT_BODY, 17, line, -1, tw));
+        }
+        /* progress bar (an animated stripe when the size isn't known) */
+        float bar_y = ty + 62;
+        gfx_rrect(tx, bar_y, tw, 18, 9, color_alpha(t->button_bottom, 0.6f));
+        if (total > 0) {
+            float frac = (float)done / (float)total;
+            if (frac > 1) frac = 1;
+            gfx_rrect_vgrad(tx, bar_y, fmaxf(18, tw * frac), 18, 9, t->accent_hi, t->accent);
+            snprintf(line, sizeof(line), "%d%%", (int)(frac * 100));
+            gfx_text_centered(FONT_UI, 14, tx + tw * 0.5f, bar_y + 1, t->text, line);
+        } else {
+            float k = fmodf(ui_time() * 0.6f, 1.0f);
+            gfx_rrect(tx + (tw - 80) * k, bar_y, 80, 18, 9, t->accent);
+        }
+        ui_spinner(px + pw - 40, py + 34, 24);
+        const char *lbl = dl_confirm_cancel ? "Press again to cancel" : "Cancel";
+        if (ui_button(ui_id("dl-cancel", 0), tx + tw * 0.25f, by, tw * 0.5f, bh, lbl, 17, dl_confirm_cancel ? UIB_ACCENT : UIB_NORMAL)) {
+            if (dl_confirm_cancel) fetch_cancel();
+            dl_confirm_cancel = !dl_confirm_cancel;
+        }
+    } else if (dl_state == DL_DONE) {
+        snprintf(line, sizeof(line), "Saved to %s", dl_path);
+        wrap_text(FONT_BODY, 17, tx, ty, tw, t->text_dim, line, 2);
+        wrap_text(FONT_BODY, 16, tx, ty + 56, tw, t->text_dim, "You can open it from Swiss after leaving the browser.", 2);
+        float bw = dl_is_zip ? (tw - 12) / 2 : tw * 0.5f, bx = dl_is_zip ? tx : tx + tw * 0.25f;
+        if (dl_is_zip) {
+            if (ui_button(ui_id("dl-done", 0), bx, by, bw, bh, "Unzip", 17, UIB_NORMAL)) start_unzip();
+            bx += bw + 12;
+        }
+        if (ui_button(ui_id("dl-done", 1), bx, by, bw, bh, "OK", 17, UIB_ACCENT)) close = true;
+    } else if (dl_state == DL_UNZIPPED) {
+        snprintf(line, sizeof(line), "%d file%s extracted to %s", dl_files, dl_files == 1 ? "" : "s", dl_unzip_dir);
+        wrap_text(FONT_BODY, 17, tx, ty, tw, t->text_dim, line, 3);
+        if (ui_button(ui_id("dl-uz", 0), tx + tw * 0.25f, by, tw * 0.5f, bh, "OK", 17, UIB_ACCENT)) close = true;
+    } else {   /* failed */
+        wrap_text(FONT_BODY, 17, tx, ty, tw, t->text, dl_msg, 3);
+        if (dl_state == DL_FAILED) {
+            float bw = (tw - 12) / 2;
+            if (ui_button(ui_id("dl-fail", 0), tx, by, bw, bh, "Retry", 17, UIB_ACCENT)) start_download();
+            if (ui_button(ui_id("dl-fail", 1), tx + bw + 12, by, bw, bh, "Close", 17, UIB_NORMAL)) close = true;
+        } else if (ui_button(ui_id("dl-fail", 2), tx + tw * 0.25f, by, tw * 0.5f, bh, "OK", 17, UIB_ACCENT)) {
+            dl_state = DL_DONE;   /* back to the downloaded zip */
+        }
+    }
+    if (interactive && dl_state != DL_RUNNING && dl_state != DL_UNZIPPING && input_pressed(ACT_BACK)) {
+        input_consume(ACT_BACK);
+        close = true;
+    }
+    if (close) { dl_state = DL_IDLE; sound_play(SFX_CLOSE); }
+}
+
 /* ---------------------------------------------------------------- images */
 
 #define IMAGE_BUDGET (6u * 1024u * 1024u)   /* texture memory per page */
@@ -327,6 +627,7 @@ static int images_pending(void) {
 
 static void handle_fetch_result(void) {
     if (fetch_state() != FETCH_DONE) return;
+    if (fetch_job_kind() == JOB_DOWNLOAD || fetch_job_kind() == JOB_UNZIP) { handle_task_result(); return; }
     if (queued) {
         /* a new page was requested while something was downloading */
         queued = false;
@@ -366,6 +667,11 @@ static void handle_fetch_result(void) {
     if (!fetch_take(&r)) return;
     if (!loading) { http_result_free(&r); return; }   /* user moved on */
     loading = false;
+    if (r.download) {
+        offer_download(&r);
+        http_result_free(&r);
+        return;
+    }
     if (!r.body) {
         if (strcmp(r.error, "Stopped.") != 0) show_error(loading_url, r.error[0] ? r.error : "Unknown error.");
         restore_scroll = -1;
@@ -527,7 +833,7 @@ bool browser_take_settings_request(void) {
 
 void browser_frame(bool interactive) {
     const Theme *t = theme();
-    bool modal = osk_active() || bm_open;
+    bool modal = osk_active() || bm_open || dl_state != DL_IDLE;
     handle_fetch_result();
 
     float sx, sy, sw, sh;
@@ -706,6 +1012,7 @@ void browser_frame(bool interactive) {
     }
 
     /* ---- modal layers */
+    if (dl_state != DL_IDLE) draw_download(interactive && !osk_active());
     if (bm_open) {
         bool bm_input = interactive && !osk_active();
         draw_bookmarks(bm_input);

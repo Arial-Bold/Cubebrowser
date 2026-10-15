@@ -27,6 +27,9 @@ typedef struct {
     /* Security */
     int  verify_certs;
     char ca_path[128];
+    /* Downloads */
+    char dl_folder[128];
+    int  dl_delete_zip;
 } Settings;
 
 extern Settings g_set;
