@@ -25,6 +25,7 @@ int  kbd_port(void);                   /* 1..4, or 0 */
 bool kbd_next(KeyEvent *ev);           /* pops the next key press, false if none */
 void kbd_clear(void);                  /* drop queued presses */
 int  kbd_last_code(void);              /* raw code of the last key, for troubleshooting */
+void kbd_describe_ports(char *out, int n);   /* what each controller port reports */
 
 /* Turns raw keyboard codes into an event. Exposed for testing. */
 int  kbd_translate(int code, bool shift, bool japanese_layout);

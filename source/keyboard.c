@@ -21,6 +21,8 @@ static int last_code;
 static unsigned char held[3];
 static int repeat_code, repeat_timer;
 static bool caps;
+static unsigned port_types[4];
+static bool port_seen[4];
 
 static void push(const KeyEvent *ev) {
     int next = (qtail + 1) % QUEUE;
@@ -128,6 +130,21 @@ static __attribute__((unused)) void process(const unsigned char now[3]) {
     memcpy(held, now, 3);
 }
 
+#include <stdio.h>
+
+void kbd_describe_ports(char *out, int n) {
+    int o = 0;
+    out[0] = 0;
+    for (int c = 0; c < 4 && o < n - 1; c++) {
+        const char *what = "empty";
+        unsigned t = port_types[c];
+        if (!port_seen[c]) what = "not checked yet";
+        else if ((t & 0xFFFF0000u) == 0x08200000u) what = "keyboard";
+        else if (t & 0x08000000u) what = (t & 0x01000000u) ? "controller" : "other device";
+        o += snprintf(out + o, (size_t)(n - o), "%sPort %d: %s (%08X)", c ? "   " : "", c + 1, what, t);
+    }
+}
+
 #ifdef GEKKO
 #include <gccore.h>
 #include <ogc/si.h>
@@ -154,10 +171,15 @@ static void start_polling(int chan) {
 void kbd_update(void) {
     frames++;
     if (port < 0) {
-        if (frames % 60) return;   /* look for a keyboard once a second */
+        /* look for a keyboard once a second, away from the moment empty
+         * controller ports get retried (frame 15 of each second) */
+        if (frames % 60 != 45) return;
         for (int c = 0; c < 4; c++) {
             u32 t = SI_GetType(c);
-            if (!(t & 0x80) && is_keyboard(t)) { start_polling(c); return; }   /* 0x80 = busy */
+            if (t & 0x80) continue;   /* still being identified: check again next time */
+            port_types[c] = t;
+            port_seen[c] = true;
+            if (is_keyboard(t)) { start_polling(c); return; }
         }
         return;
     }

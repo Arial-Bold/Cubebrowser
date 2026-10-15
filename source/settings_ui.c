@@ -291,6 +291,22 @@ bool settings_ui_frame(bool interactive) {
         gfx_rrect(ox + ow - 8, by2, 4, bh2, 2, t->accent);
     }
 
+    /* Keyboard page: show what each controller port reports */
+    if (category == CAT_KEYBOARD) {
+        char ports[200];
+        kbd_describe_ports(ports, sizeof(ports));
+        float py2 = rows_y + n * row_h + 14 - scroll;
+        if (py2 < rows_y + rows_h - 40) {
+            gfx_text(FONT_UI, 15, ox + 20, py2, t->text, kbd_connected() ? "Keyboard connected" : "No keyboard found yet", -1);
+            gfx_text(FONT_BODY, 13, ox + 20, py2 + 24, t->text_dim, ports, gfx_text_fit(FONT_BODY, 13, ports, -1, ow - 40));
+            if (kbd_last_code()) {
+                char lc[48];
+                snprintf(lc, sizeof(lc), "Last key code: 0x%02X", kbd_last_code());
+                gfx_text(FONT_BODY, 13, ox + 20, py2 + 44, t->text_dim, lc, -1);
+            }
+        }
+    }
+
     /* help line */
     float hy = oy + oh - help_h;
     gfx_rect(ox + 14, hy - 2, ow - 28, 1.5f, color_alpha(t->panel_edge, 0.6f));
