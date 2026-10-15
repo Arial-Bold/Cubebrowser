@@ -1,200 +1,308 @@
 # CubeBrowser
 
-A small HTTPS web browser for the Nintendo GameCube, built as a `.dol` you
-launch from Swiss. It needs a Broadband Adapter (BBA) for networking and an
-SD2SP2 (or SD Gecko) for settings, bookmarks and certificates.
+A web browser for the Nintendo GameCube. It loads real websites over a wired
+network connection, including secure (HTTPS) sites, with pictures, page
+styles, tables and forms, all controlled with a standard GameCube controller.
+It runs as a `.dol` program launched from Swiss.
 
-It renders pages with a real (if small) layout engine: the page's own styles
-(CSS colours, fonts, spacing, borders, backgrounds, hidden elements, CSS
-variables and media queries), tables with side-by-side columns, floating
-pictures with text wrapping around them, lists, and forms (text boxes,
-checkboxes, radio buttons and submit buttons). It tells sites it has a
-phone-sized screen, so many use their simpler mobile layouts. It does not run
-JavaScript or support flexbox/grid multi-column layouts, which are shown as a
-single column. Settings > Browsing > Page styles switches to plain pages.
+---
 
-Pictures load after the text, one at a time. By default they go through the
-free images.weserv.nl service, which shrinks them and converts formats the
-GameCube can't decode (like WebP) to JPEG. That's much faster, but the service
-sees the address of each picture. Turn off Settings > Browsing > Image helper
-to fetch pictures directly instead.
+## What you need
 
-## 1. Build the .dol
+| Item | Notes |
+|---|---|
+| A GameCube that runs Swiss | Swiss loads the browser like any other homebrew program. |
+| A network adapter | The official Nintendo Broadband Adapter, or a WIZnet-based adapter such as the ETH2GC. Plug it into your router with an Ethernet cable. |
+| An SD card adapter | SD2SP2 (recommended) or SD Gecko. Holds the browser, its certificates, settings and bookmarks. |
+| A GameCube controller | In port 1. |
 
-### Option A: Let GitHub build it (nothing to install)
+Component cables are optional; they unlock 480p video.
 
-1. Make a free account at https://github.com and sign in.
-2. Click **+** (top right) > **New repository**. Give it a name, choose
-   **Public** (free build minutes are unlimited for public repos), and click
-   **Create repository**.
-3. On the new repository page, click **uploading an existing file**. Unzip
-   this project on your computer, open the `gcbrowser` folder, select
-   everything inside it, and drag it onto the page. Click **Commit changes**.
-4. Check that the `.github` folder uploaded (see "If .github is missing"
-   below).
-5. Open the **Actions** tab. A build named "Build CubeBrowser" starts
-   automatically and takes a few minutes. A green check means it worked.
-6. Click the finished build, scroll to **Artifacts**, and download
-   **cubebrowser**. It's a zip containing `cubebrowser.dol` and the
-   `gcbrowser` folder for your SD card.
+---
 
-If the build shows a red X, click it, then click the failed step to see the
-error text.
+## Installing
 
-**If .github is missing:** some computers hide folders whose names start with a
-dot, so they don't get dragged in. In that case, on the repository page click
-**Add file > Create new file**, type `.github/workflows/build.yml` as the
-name, paste in the contents of that file from this project (open it with
-Notepad or TextEdit), and click **Commit changes**.
+### 1. Get the files
 
-### Option B: Docker
+Download the latest build from your GitHub repository: open the **Actions**
+tab, click the newest run with a green check, scroll to **Artifacts**, and
+download **cubebrowser**. Unzip it. Inside you'll find:
 
-Install Docker Desktop. Then, in this folder:
+- `cubebrowser.dol`, the browser itself
+- a `gcbrowser` folder with `cacert.pem`, the list of trusted certificates
+  used to check secure websites
+
+(To build it yourself instead, see [Building from source](#building-from-source)
+at the end.)
+
+### 2. Copy them to your SD card
+
+Put the `gcbrowser` folder in the **root** of the SD card, and the `.dol`
+anywhere you like:
+
+```
+SD card
+├── cubebrowser.dol
+└── gcbrowser/
+    └── cacert.pem
+```
+
+The browser adds its own files to `gcbrowser` as you use it:
+
+| File | Contents |
+|---|---|
+| `settings.ini` | Your settings (plain text; editable on a PC) |
+| `bookmarks.txt` | Your bookmarks |
+| `seed.bin` | Saved randomness for secure connections |
+
+### 3. Launch it
+
+Insert the SD card and network adapter, boot Swiss, browse to
+`cubebrowser.dol`, and launch it.
+
+On the first start, the status bar at the bottom shows the browser getting an
+address from your router, setting its clock, and loading certificates. This
+takes a few seconds. When the dot in the bottom-right corner turns green,
+you're online and the start page is ready.
+
+---
+
+## Using the browser
+
+### Controls
+
+| Button | Action |
+|---|---|
+| Control Stick | Move the pointer |
+| Z (hold) | Slow, precise pointer movement |
+| A | Click |
+| B | Back |
+| X | Type an address or search |
+| Y | Bookmarks |
+| START | Settings |
+| C-Stick | Scroll the page |
+| L / R | Page up / page down |
+| D-Pad | Jump the pointer between links and buttons |
+
+Every button except the D-Pad can be changed in Settings > Controller.
+
+### Going to a website or searching
+
+Press **X** (or click the address bar). Type a web address such as
+`text.npr.org`, or type any words to search. Then press **START** or click
+**OK**. Addresses without `https://` are opened securely automatically.
+
+### The on-screen keyboard
+
+| Button | Action |
+|---|---|
+| A | Press the key under the pointer |
+| D-Pad | Jump from key to key |
+| B | Delete |
+| Y | Space |
+| X | Shift (click the on-screen Shift key twice for caps lock) |
+| L / R | Move the text cursor |
+| START | Accept |
+
+When typing an address, a row of shortcut keys (`https://`, `www.`, `.com`,
+`.org`, `.net`, `/`) saves typing.
+
+### The toolbar
+
+From left to right: **Back**, **Forward**, **Reload** (becomes **Stop** while
+loading), **Home**, the **address bar**, **Bookmarks** (star) and
+**Settings** (gear). A green lock in the address bar means the site's
+security certificate was checked successfully.
+
+### Bookmarks
+
+Press **Y** to open your bookmarks. Click **Bookmark this page** to add the
+current page, click a bookmark to open it, or click the **x** beside one twice
+to delete it.
+
+### Forms
+
+Click a text box to type into it. Search boxes submit automatically when you
+press OK. Checkboxes and radio buttons toggle when clicked, and submit buttons
+send the form.
+
+### Status bar
+
+The bottom bar shows loading progress, the address of the link under the
+pointer, the network status dot (green: connected, yellow: connecting, red:
+no network) and the time.
+
+---
+
+## Features
+
+- **Secure browsing (HTTPS)** with full certificate checking, using TLS 1.2
+  and 1.3.
+- **Pictures** (JPEG, PNG, GIF and BMP), loaded after the text so pages
+  appear quickly.
+- **Page styles:** the colours, fonts, spacing, borders and backgrounds each
+  site chooses, including hiding elements sites mark as hidden (menus, cookie
+  banners). The browser presents itself as a phone-sized screen, so many sites
+  send their simpler mobile layouts.
+- **Tables** with real side-by-side columns, so classic table-based sites look
+  the way they were designed.
+- **Floating pictures and boxes** with text wrapping around them.
+- **Fonts:** regular, bold, italic and monospace.
+- **Lists** with bullets, numbers and letters.
+- **Forms:** text boxes, password fields, checkboxes, radio buttons and submit
+  buttons, sent by GET or POST.
+- **Framed pages** (a 1990s technique) show a link to each part of the page.
+- **History** with Back and Forward, and **bookmarks** saved to the SD card.
+- **Four themes** named after the console colours: Indigo, Jet Black,
+  Platinum and Spice.
+- **4:3 and 16:9** display, 480i or 480p, and adjustable screen margins for
+  TVs that cut off the edges.
+- **Fully remappable controls**, pointer speed and acceleration, D-Pad
+  snapping, and rumble feedback.
+- **Synthesized sound effects** and smooth, animated menus.
+- **Built-in start page** with links to sites that work well.
+
+---
+
+## Settings
+
+Press **START** to open Settings. Changes apply immediately and are saved when
+you leave the Settings screen. Hold **L + R + START** while the browser starts
+to reset everything to defaults.
+
+| Section | What you can change |
+|---|---|
+| **Network** | Automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server. Network changes apply the next time you launch the browser. |
+| **Time** | Time zone and daylight saving, for the clock in the status bar. |
+| **Controller** | Stick dead zone, pointer speed, acceleration, scroll speed, pointer snap, rumble, and the button for each action. To remap, click an action and press the button you want. |
+| **Keyboard** | QWERTY or ABC key layout, and key repeat speed. |
+| **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), screen margin, page text size, theme, animations, sound effects and volume. |
+| **Browsing** | Home page, search engine (DuckDuckGo Lite, FrogFind, Wiby or your own), how the browser identifies itself to sites, page styles on/off, pictures on/off, image helper, picture labels, and the largest page size to load. |
+| **Security** | Certificate checking and the certificate file location. |
+| **Data** | Clear history, delete all bookmarks, reset all settings, save settings now. |
+
+### Notes on a few settings
+
+- **16:9** is for TVs set to stretch the picture to widescreen. Pages are laid
+  out wider to use the extra space.
+- **Page styles: Off** shows every page in a plain, readable format. Useful if
+  a site's design doesn't suit the TV.
+- **Identify as: Lynx (text mode)** makes some sites send very simple pages,
+  which load faster.
+- **Image helper** (on by default) routes pictures through the free
+  images.weserv.nl service, which shrinks them for your screen and converts
+  formats the GameCube can't read (such as WebP). It makes pictures much faster
+  and work on more sites, but that service sees the address of each picture
+  you view. Turn it off to fetch pictures directly.
+- **Verify certificates** should stay on. Turning it off removes the
+  protection HTTPS provides; it's only meant for troubleshooting.
+
+---
+
+## Sites that work well
+
+The GameCube has a 485 MHz processor and 24 MB of memory, so lightweight sites
+work best. Good places to start (all linked from the start page):
+
+- **DuckDuckGo Lite** (search): `lite.duckduckgo.com/lite`
+- **Wikipedia, mobile version**: `en.m.wikipedia.org`
+- **NPR Text** (news): `text.npr.org`
+- **CNN Lite** (news): `lite.cnn.com`
+- **68k.news** (headlines): `68k.news`
+- **FrogFind** (search that simplifies pages): `frogfind.com`
+- **Wiby** (search for classic-style sites): `wiby.me`
+
+Older and hobbyist sites from the 1990s and 2000s usually display very well.
+
+---
+
+## Troubleshooting
+
+| Problem | What to try |
+|---|---|
+| **"No network (error -1)"** | Check the Ethernet cable and that the adapter is seated firmly. If you use manual network settings, check them under Settings > Network. Retry by opening any page. |
+| **A secure site says its certificate couldn't be verified** | Usually the clock. Make sure the time server under Settings > Network is reachable (the default `pool.ntp.org` works for most people). If it persists, download a fresh certificate list from `https://curl.se/ca/cacert.pem` and replace `gcbrowser/cacert.pem` on the SD card. |
+| **A page is blank or nearly empty** | The site probably builds its content with JavaScript, which isn't supported. Try the site's mobile or "lite" version, or open it through FrogFind. |
+| **A page looks cluttered or oddly arranged** | Modern multi-column layouts are shown as a single column. Try Settings > Browsing > Page styles: Off for a clean, plain view. |
+| **Pictures don't appear** | Check Settings > Browsing > Load images. With the image helper off, some formats (like WebP) can't be shown. Very large pages show only their first several pictures to save memory. |
+| **A page is cut off at the end** | It was larger than the page size limit. Raise Settings > Browsing > Max page size. |
+| **The screen edges are cut off on my TV** | Increase Settings > Display > Screen margin. |
+| **The picture looks squashed or stretched** | Match Settings > Display > Aspect ratio to your TV's setting. |
+| **Settings or bookmarks aren't saved** | The SD card wasn't found. Make sure it's in the SD2SP2 (or SD Gecko) and formatted FAT32. |
+| **The pointer drifts on its own** | Raise Settings > Controller > Stick dead zone. |
+| **Something's wrong and I can't get back** | Hold L + R + START while launching to reset all settings. |
+
+---
+
+## Limitations
+
+- **No JavaScript.** Sites that depend on it may be blank or only partly work.
+- **No modern multi-column layouts** (CSS flexbox and grid). These sections
+  are stacked into a single column.
+- **No video, audio or animation.** Animated GIFs show their first frame.
+- **Drop-down menus** show their selected choice but can't be changed yet.
+- **Frames** open one part at a time rather than side by side.
+- **Downloads** aren't supported yet.
+- **Speed:** heavy pages can take several seconds to lay out, and each new
+  secure site needs a second or two to set up its connection.
+
+## Security and privacy
+
+- Secure sites are checked against the trusted certificate list on your SD
+  card, using mbedTLS.
+- The GameCube has no hardware random number generator. The browser gathers
+  randomness from a seed saved between sessions, processor timing, and
+  controller and network activity. That's fine for everyday browsing, but don't
+  use it for banking or other high-value accounts.
+- With the image helper on, images.weserv.nl sees the addresses of pictures
+  you view.
+- The browser keeps no cookies, so you won't stay logged in to sites.
+
+---
+
+## Building from source
+
+The easiest way is GitHub Actions, which builds on GitHub's servers with
+nothing to install:
+
+1. Create a free GitHub account and a new **public** repository.
+2. Upload everything inside this project's folder, including the hidden
+   `.github` folder. If your computer hides it, create
+   `.github/workflows/cubebrowser-libogc2.yml` on GitHub with **Add file >
+   Create new file** and paste in the file's contents.
+3. Open the **Actions** tab. Each upload starts a build; when it shows a green
+   check, download the **cubebrowser** artifact.
+
+If a build fails, click the run, then the failed step, to see the error.
+
+**With Docker** (any operating system):
 
 ```sh
 ./get-mbedtls.sh
 docker run --rm -v "$PWD:/src" -w /src ghcr.io/extremscorner/libogc2:latest make
 ```
 
-On Windows PowerShell, use `${PWD}` instead of `$PWD`.
+The build uses [libogc2](https://libogc2.org/) (for official and WIZnet
+network adapters), [mbedTLS 3.6](https://github.com/Mbed-TLS/mbedtls) and
+[stb_image](https://github.com/nothings/stb). `get-mbedtls.sh` downloads the
+last two into `third_party/`.
 
-### Option C: Install devkitPro
+### Project layout
 
-1. Install devkitPro (https://devkitpro.org/wiki/Getting_Started). On Windows,
-   use the graphical installer and tick **GameCube development**. On Linux or
-   Mac, run `sudo dkp-pacman -S gamecube-dev`.
-2. In this folder, run `./get-mbedtls.sh` then `make`.
-
-### Getting mbedTLS manually
-
-If `get-mbedtls.sh` doesn't work on your system (for example, plain Windows
-without bash), download
-`https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2`,
-extract it, and rename the folder so this file exists:
-`third_party/mbedtls/library/ssl_tls.c`.
-Use the release download, not a git clone; the release includes generated
-files the build needs. Any later 3.6.x release also works.
-
-The result is `cubebrowser.dol` in this folder.
-
-## 2. Set up the SD card
-
-Copy the `sd/gcbrowser` folder to the root of your SD card, so you have:
-
-```
-SD card
-├── cubebrowser.dol          (anywhere you like)
-└── gcbrowser/
-    └── cacert.pem           (trusted root certificates)
-```
-
-The browser creates `settings.ini`, `bookmarks.txt` and `seed.bin` in the
-same folder. You can edit `settings.ini` on a PC; bad values reset to
-defaults.
-
-To refresh the certificate list later, download
-`https://curl.se/ca/cacert.pem` and replace `gcbrowser/cacert.pem`.
-
-## 3. Run it
-
-Plug in the Broadband Adapter and the SD2SP2, boot Swiss, browse to
-`cubebrowser.dol` and launch it. The first start takes a few seconds while it
-gets an address from your router, sets the clock and loads certificates (the
-status bar shows progress).
-
-## Controls
-
-| Button | Action |
+| Path | Contents |
 |---|---|
-| Control Stick | Move the pointer (hold Z for slow, precise movement) |
-| A | Click |
-| B | Back |
-| X | Type an address or search |
-| Y | Bookmarks |
-| START | Settings |
-| C-Stick | Scroll |
-| L / R | Page up / page down |
-| D-Pad | Jump between links and buttons |
+| `source/main.c` | Start-up, main loop, screen transitions |
+| `source/browser.c` | Browser screen, history, bookmarks, download scheduling |
+| `source/page.c` | Layout engine (blocks, text, floats, tables), drawing, forms |
+| `source/dom.c`, `source/css.c` | HTML parsing and stylesheets |
+| `source/http.c`, `source/conn.c` | HTTP and secure connections |
+| `source/netio.c`, `source/fetch.c` | Network setup, DNS, clock, background downloads |
+| `source/image.c` | Picture decoding to GameCube textures |
+| `source/gfx.c`, `source/ui.c`, `source/osk.c` | Graphics, menus, on-screen keyboard |
+| `source/settings*.c`, `source/input.c`, `source/sound.c` | Settings, controller, sound |
+| `tools/make_font.py` | Regenerates the built-in fonts |
+| `sd/gcbrowser/` | Files for the SD card |
 
-On the on-screen keyboard: B deletes, Y adds a space, X is shift, L and R move
-the text cursor, and START accepts.
-
-Every button except the D-Pad can be remapped in Settings > Controller.
-Hold **L + R + START** while the browser starts to reset all settings.
-
-## Settings
-
-Settings has eight sections: Network (DHCP or static IP, DNS, time server),
-Time, Controller, Keyboard, Display (aspect ratio 4:3 or 16:9, video mode
-480i/480p, screen margin, text size, theme, sounds), Browsing (home page,
-search engine, how the browser identifies itself, page size limit), Security
-(certificate checking) and Data (clear history and bookmarks, reset).
-
-16:9 mode is for TVs set to stretch the picture to widescreen. 480p needs
-component cables.
-
-## Testing in Dolphin
-
-In Dolphin's GameCube settings, set **SP1** to **Broadband Adapter (HLE)**,
-then open the `.dol` with File > Open.
-
-Dolphin's support for GameCube SD adapters is limited, so the browser may not
-find an SD card there. It still runs with default settings, but nothing is
-saved and HTTPS sites will fail the certificate check because `cacert.pem`
-can't be loaded. For Dolphin testing, try plain HTTP sites such as
-`http://68k.news` or `http://frogfind.com`, or temporarily turn off
-Settings > Security > Verify certificates. Test HTTPS on the real console.
-
-## Security notes
-
-- Certificates and hostnames are fully checked against `cacert.pem` using
-  mbedTLS (TLS 1.2 and 1.3).
-- The GameCube has no hardware random number generator. Randomness comes from
-  a seed file saved between runs, CPU timing jitter, and controller and network
-  timing, mixed through SHA-256. That's reasonable for casual browsing, but
-  don't use this browser for banking or other high-value accounts.
-- Turning off "Verify certificates" removes HTTPS protection; it's meant only
-  for troubleshooting.
-
-## If the build fails
-
-This code was checked for errors on a PC against stand-in headers, but it
-hasn't been compiled with devkitPPC yet. These are the spots most likely to
-need a small change depending on your libogc version:
-
-| Error mentions | What it means |
-|---|---|
-| `__io_gcsd2` | Your libogc is too old to know the SD2SP2. Update devkitPro (`dkp-pacman -Syu`). |
-| `net_select`, `fd_set` or `FD_SET` | Timeout code in `netio.c` (`netio_wait`) needs adjusting for your libogc's socket API. |
-| `asndlib.h` or `-lasnd` | The sound library isn't installed. `sound.c` can be switched to AESND. |
-| `if_config` | The network setup call's arguments differ in your libogc version (`netio.c`). |
-| `#error` from mbedTLS `check_config.h` | A setting in `source/gc_mbedtls_config.h` conflicts with your mbedTLS version. |
-
-Copy the error text and it can be fixed quickly.
-
-## Project layout
-
-```
-source/        browser source code (C)
-  main.c         start-up and main loop, cube-turn transitions
-  gfx.c          video modes, 4:3/16:9, drawing, text
-  ui.c theme.c   widgets, pointer, themes, background
-  osk.c          on-screen keyboard
-  input.c        controller, pointer physics, rumble
-  sound.c        synthesized sound effects
-  settings*.c    settings data and Settings screen
-  netio.c        Broadband Adapter, DNS, clock sync
-  conn.c http.c  TLS (mbedTLS) and HTTP
-  fetch.c        background download thread
-  dom.c          HTML -> document tree
-  css.c          stylesheets: parsing, selectors, cascade
-  page.c         layout engine (blocks, text, floats, tables), drawing, forms
-  image.c        picture decoding (stb_image) to GameCube textures
-  browser.c      browser screen, history, bookmarks
-  font_data.h    baked fonts (regenerate with tools/make_font.py)
-tools/         font baking script
-sd/            files for the SD card
-```
-
-The bundled fonts are DejaVu Sans (free license). To use a rounder font, run
-`python3 tools/make_font.py YourFont-Bold.ttf YourFont-Regular.ttf`.
+The bundled fonts are DejaVu Sans (free license). For a rounder look, run
+`python3 tools/make_font.py` with your own `.ttf` files (bold, regular,
+italic, monospace).
