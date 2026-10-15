@@ -19,7 +19,7 @@ static float t_sx = 1, t_sy = 1, t_tx = 0, t_ty = 0;
 static int cur_mode = -1;     /* 0 = color, 1 = text, 2 = image */
 static bool tex_invalidate;
 static int cur_font = -1;
-static GXTexObj font_tex[2];
+static GXTexObj font_tex[FONT_COUNT];
 
 Color color_alpha(Color c, float mul) {
     float a = c.a * mul;
@@ -108,12 +108,14 @@ void gfx_init(int video_mode, bool widescreen) {
     GX_SetColorUpdate(GX_TRUE);
     GX_SetNumTevStages(1);
 
-    DCFlushRange((void *)font_ui_tex, sizeof(font_ui_tex));
-    DCFlushRange((void *)font_body_tex, sizeof(font_body_tex));
-    GX_InitTexObj(&font_tex[0], (void *)font_ui_tex, FONT_TEX_W, FONT_TEX_H, GX_TF_I4, GX_CLAMP, GX_CLAMP, GX_FALSE);
-    GX_InitTexObj(&font_tex[1], (void *)font_body_tex, FONT_TEX_W, FONT_TEX_H, GX_TF_I4, GX_CLAMP, GX_CLAMP, GX_FALSE);
-    for (int i = 0; i < 2; i++)
+    const unsigned char *texdata[FONT_COUNT] = { font_ui_tex, font_body_tex, font_italic_tex, font_mono_tex };
+    const u32 texsize[FONT_COUNT] = { sizeof(font_ui_tex), sizeof(font_body_tex), sizeof(font_italic_tex),
+                                      sizeof(font_mono_tex) };
+    for (int i = 0; i < FONT_COUNT; i++) {
+        DCFlushRange((void *)texdata[i], texsize[i]);
+        GX_InitTexObj(&font_tex[i], (void *)texdata[i], FONT_TEX_W, FONT_TEX_H, GX_TF_I4, GX_CLAMP, GX_CLAMP, GX_FALSE);
         GX_InitTexObjLOD(&font_tex[i], GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+    }
     GX_InvalidateTexAll();
     GX_InvVtxCache();
 
@@ -419,9 +421,30 @@ void gfx_cube(float cx, float cy, float size, float rx, float ry, Color base) {
 
 /* ------------------------------------------------------------------- text */
 
-static const FontGlyph *glyph_table(FontId f) { return f == FONT_UI ? font_ui_glyphs : font_body_glyphs; }
-static float font_px(FontId f) { return f == FONT_UI ? FONT_UI_PX : FONT_BODY_PX; }
-static float font_line(FontId f) { return f == FONT_UI ? FONT_UI_LINE : FONT_BODY_LINE; }
+static const FontGlyph *glyph_table(FontId f) {
+    switch (f) {
+    case FONT_UI: return font_ui_glyphs;
+    case FONT_ITALIC: return font_italic_glyphs;
+    case FONT_MONO: return font_mono_glyphs;
+    default: return font_body_glyphs;
+    }
+}
+static float font_px(FontId f) {
+    switch (f) {
+    case FONT_UI: return FONT_UI_PX;
+    case FONT_ITALIC: return FONT_ITALIC_PX;
+    case FONT_MONO: return FONT_MONO_PX;
+    default: return FONT_BODY_PX;
+    }
+}
+static float font_line(FontId f) {
+    switch (f) {
+    case FONT_UI: return FONT_UI_LINE;
+    case FONT_ITALIC: return FONT_ITALIC_LINE;
+    case FONT_MONO: return FONT_MONO_LINE;
+    default: return FONT_BODY_LINE;
+    }
+}
 
 static inline const FontGlyph *glyph_for(const FontGlyph *G, unsigned char ch) {
     if (ch < 32 || ch > 126) ch = '?';

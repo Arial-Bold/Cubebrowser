@@ -73,8 +73,9 @@ static const char help_html[] =
     "<p>All buttons except the D-Pad can be changed in Settings &gt; Controller.</p>"
     "<h3>On-screen keyboard</h3><ul><li><b>B</b> delete, <b>Y</b> space, <b>X</b> shift</li>"
     "<li><b>L / R</b> move the text cursor, <b>START</b> accept</li></ul>"
-    "<h3>What works</h3><p>Text, links, headings, lists and simple forms such as search boxes. "
-    "Pictures, styles and JavaScript are not supported, so lightweight and text-only sites work best.</p>"
+    "<h3>What works</h3><p>Text, links, pictures, tables, lists, forms such as search boxes, and most "
+    "page colours, fonts and spacing. JavaScript and modern multi-column layouts aren't supported, so "
+    "sites are shown in a simpler, phone-style layout. Lightweight sites work best.</p>"
     "<p><a href=\"about:home\">Back to the start page</a></p>";
 
 /* ------------------------------------------------------------ bookmarks */
@@ -266,8 +267,26 @@ static void image_request_url(const char *src, int max_w, char *out, size_t n) {
 }
 
 /* Starts the next image download: ones on screen first, then the rest. */
+static bool sheets_pending(void) {
+    if (!g_set.page_styles) return false;
+    for (int i = 0; i < page.nsheets; i++)
+        if (page.sheets[i].state != SHEET_DONE) return true;
+    return false;
+}
+
+/* Downloads the page's stylesheets first, then its pictures. */
 static void schedule_images(float view_top, float view_h, float max_w) {
-    if (!g_set.load_images || loading || queued || fetch_state() != FETCH_IDLE || !fetch_net_ready()) return;
+    if (loading || queued || fetch_state() != FETCH_IDLE || !fetch_net_ready()) return;
+    if (g_set.page_styles) {
+        int si = page_next_sheet(&page);
+        if (si >= 0) {
+            int tag = ((page_gen & 0xFFFFFF) << 8) | si;
+            if (!fetch_start_css(page.sheets[si].url, tag)) page.sheets[si].state = SHEET_NONE;
+            return;
+        }
+        if (sheets_pending()) return;
+    }
+    if (!g_set.load_images) return;
     if (page.image_bytes >= IMAGE_BUDGET) {
         bool changed = false;
         for (int i = 0; i < page.nimages; i++)
@@ -324,6 +343,18 @@ static void handle_fetch_result(void) {
     if (fetch_job_kind() == JOB_IMAGE) {
         ImageResult ir;
         if (fetch_take_image(&ir)) apply_image(&ir);
+        return;
+    }
+    if (fetch_job_kind() == JOB_CSS) {
+        HttpResult r;
+        int tag;
+        if (!fetch_take_css(&r, &tag)) return;
+        int gen = tag >> 8, idx = tag & 0xFF;
+        if (gen == (page_gen & 0xFFFFFF) && has_page) {
+            page_sheet_loaded(&page, idx, r.body, r.body_len);   /* takes the text */
+            r.body = NULL;
+        }
+        http_result_free(&r);
         return;
     }
     HttpResult r;
@@ -539,13 +570,18 @@ void browser_frame(bool interactive) {
     /* ---- content area */
     float cx = sx + 8, cy = sy + bar_h + 16, cw = sw - 16, ch = sh - bar_h - 16 - 34;
     gfx_shadow(cx + 2, cy + 4, cw, ch, 14, 6, t->shadow);
-    gfx_rrect(cx, cy, cw, ch, 14, t->page_bg);
+    gfx_rrect(cx, cy, cw, ch, 14, has_page && page.dom ? page.bg : t->page_bg);
 
     float scale = g_set.text_size / 100.0f;
-    static int last_layout_frame, last_load_images = -1;
-    if (last_load_images != g_set.load_images) { last_load_images = g_set.load_images; page.relayout = true; }
+    static int last_layout_frame, last_load_images = -1, last_alt = -1;
+    if (last_load_images != g_set.load_images || last_alt != g_set.show_alt) {
+        last_load_images = g_set.load_images;
+        last_alt = g_set.show_alt;
+        page.relayout = true;
+    }
+    if (page.styled_author != (g_set.page_styles != 0)) page.restyle = true;
     bool image_relayout = page.relayout && ui_frame() - last_layout_frame >= 20;
-    if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout)) {
+    if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout || page.restyle)) {
         last_layout_frame = ui_frame();
         page_layout(&page, cw, scale);
         last_layout_w = cw;
@@ -600,6 +636,8 @@ void browser_frame(bool interactive) {
             if (hover_field >= 0) {
                 int ft = page.fields[hover_field].type;
                 if (ft == FIELD_SUBMIT) submit_form(hover_field, hover_field);
+                else if (ft == FIELD_CHECK || ft == FIELD_RADIO) page_toggle_field(&page, hover_field);
+                else if (ft == FIELD_SELECT) ui_toast("Changing drop-down choices isn't supported yet");
                 else edit_field(hover_field);
             } else {
                 navigate(page_link_url(&page, hover_link), NULL, true);
@@ -624,6 +662,10 @@ void browser_frame(bool interactive) {
         sbx += 24;
     } else if (hover_link >= 0) {
         snprintf(status, sizeof(status), "%s", page_link_url(&page, hover_link));
+    } else if (has_page && sheets_pending() && netio_state() == NET_UP) {
+        snprintf(status, sizeof(status), "Loading page styles...");
+        ui_spinner(sbx + 8, sby + 10, 14);
+        sbx += 24;
     } else if (has_page && g_set.load_images && images_pending() > 0 && netio_state() == NET_UP) {
         snprintf(status, sizeof(status), "Loading pictures (%d left)", images_pending());
         ui_spinner(sbx + 8, sby + 10, 14);

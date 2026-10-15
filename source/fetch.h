@@ -7,7 +7,7 @@
 #include "image.h"
 
 typedef enum { FETCH_IDLE, FETCH_BUSY, FETCH_DONE } FetchState;
-typedef enum { JOB_PAGE, JOB_IMAGE } JobKind;
+typedef enum { JOB_PAGE, JOB_IMAGE, JOB_CSS } JobKind;
 
 typedef struct {
     int tag;              /* caller's identifier */
@@ -26,6 +26,8 @@ const char *fetch_stage(void);
 int         fetch_progress(void);
 bool        fetch_take(HttpResult *out);          /* page result; back to IDLE */
 bool        fetch_take_image(ImageResult *out);   /* image result; back to IDLE */
+bool        fetch_start_css(const char *url, int tag);
+bool        fetch_take_css(HttpResult *out, int *tag);
 void        fetch_discard(void);                  /* drop whatever finished */
 bool        fetch_net_ready(void);
 void        fetch_retry_network(void);

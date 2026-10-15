@@ -67,6 +67,11 @@ static void *worker_main(void *arg) {
             job_pending = 0;
             if (kind == JOB_IMAGE) {
                 run_image_job();
+            } else if (kind == JOB_CSS) {
+                HttpHooks hooks = { &cancel_flag, &progress, no_stage };
+                HttpResult r;
+                if (http_fetch(job_url, NULL, "text/css,*/*;q=0.1", &r, &hooks) && r.status >= 400) http_result_free(&r);
+                result = r;
             } else {
                 HttpHooks hooks = { &cancel_flag, &progress, set_stage };
                 HttpResult r;
@@ -112,6 +117,28 @@ bool fetch_start_image(const char *url, int max_w, int max_h, int tag) {
     progress = 0;
     state = FETCH_BUSY;
     job_pending = 1;
+    return true;
+}
+
+bool fetch_start_css(const char *url, int tag) {
+    if (state != FETCH_IDLE || !net_ready || strlen(url) >= sizeof(job_url)) return false;
+    snprintf(job_url, sizeof(job_url), "%s", url);
+    job_post = NULL;
+    job_tag = tag;
+    kind = JOB_CSS;
+    cancel_flag = 0;
+    progress = 0;
+    state = FETCH_BUSY;
+    job_pending = 1;
+    return true;
+}
+
+bool fetch_take_css(HttpResult *out, int *tag) {
+    if (state != FETCH_DONE || kind != JOB_CSS) return false;
+    *out = result;
+    *tag = job_tag;
+    memset(&result, 0, sizeof(result));
+    state = FETCH_IDLE;
     return true;
 }
 

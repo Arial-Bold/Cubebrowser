@@ -16,7 +16,7 @@ static inline Color rgba(u8 r, u8 g, u8 b, u8 a) { Color c = { r, g, b, a }; ret
 Color color_alpha(Color c, float mul);
 Color color_lerp(Color a, Color b, float t);
 
-typedef enum { FONT_UI = 0, FONT_BODY = 1 } FontId;
+typedef enum { FONT_UI = 0, FONT_BODY = 1, FONT_ITALIC = 2, FONT_MONO = 3, FONT_COUNT } FontId;
 
 enum { VMODE_AUTO = 0, VMODE_480I = 1, VMODE_480P = 2 };
 

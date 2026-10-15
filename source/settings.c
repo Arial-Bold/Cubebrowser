@@ -101,6 +101,8 @@ const SetDef g_setdefs[] = {
       "Your words are added to the end, e.g. https://site/search?q=" },
     { CAT_BROWSING, "web.ua", "Identify as", ST_CHOICE, O(user_agent), 0, 2, 1, user_agent_names, NULL,
       "Some sites send simpler pages to text browsers." },
+    { CAT_BROWSING, "web.css", "Page styles", ST_BOOL, O(page_styles), 0, 1, 1, NULL, NULL,
+      "Use each site's own colours, fonts and layout. Off shows plain pages." },
     { CAT_BROWSING, "web.images", "Load images", ST_BOOL, O(load_images), 0, 1, 1, NULL, NULL,
       "Show pictures on pages. Turn off for faster loading." },
     { CAT_BROWSING, "web.imgproxy", "Image helper", ST_BOOL, O(image_proxy), 0, 1, 1, NULL, NULL,
@@ -169,6 +171,7 @@ void settings_defaults(Settings *s) {
     s->user_agent = 0;
     s->show_alt = 1;
     s->load_images = 1;
+    s->page_styles = 1;
     s->image_proxy = 1;
     s->max_page_kb = 1024;
     s->verify_certs = 1;
