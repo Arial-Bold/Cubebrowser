@@ -5,10 +5,8 @@
 CubeBrowser loads websites over a wired network connection, including secure
 (HTTPS) sites, with pictures, page styles, tables and forms. You can download
 files straight to your SD card, and control everything with a GameCube
-controller or a keyboard. It runs as a `.dol` program launched from Swiss,
+controller. It runs as a `.dol` program launched from Swiss,
 with menus designed to feel like they belong on the console.
-
-<img width="4096" height="2382" alt="IMG_20261014_224514833_HDR" src="https://github.com/user-attachments/assets/e2ffd974-0f7a-4d9f-a837-4448daee501a" />
 
 ---
 
@@ -20,7 +18,6 @@ with menus designed to feel like they belong on the console.
 | A **network adapter** | The official Nintendo Broadband Adapter, or a WIZnet-based adapter such as the ETH2GC, connected to your router with an Ethernet cable. |
 | An **SD card adapter** | SD2SP2 (recommended) or SD Gecko, with a FAT32 card. |
 | A **controller** | Any port. Bluetooth controllers through BlueRetro work too. |
-| A **keyboard** (optional) | A GameCube keyboard, or a Bluetooth keyboard through BlueRetro. |
 
 Component cables are optional and unlock 480p video.
 
@@ -86,23 +83,6 @@ Point and press A on a key, or use the D-Pad to hop from key to key.
 When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 `.net`, `/`) save typing.
 
-### Keyboard
-
-A GameCube keyboard, or a Bluetooth keyboard paired through BlueRetro, is
-detected automatically, even if you connect it after the browser starts. Text
-boxes then show a simple typing bar instead of the on-screen keyboard: type
-normally, press **Enter** to confirm or **Esc** to cancel.
-
-| Key | Action |
-|---|---|
-| Ctrl+L or F6 | Address bar |
-| Backspace or Alt+Left | Back |
-| Alt+Right | Forward |
-| F5 or Ctrl+R | Reload |
-| Ctrl+D | Bookmark this page |
-| Space, Page Up/Down, arrows, Home/End | Scroll |
-| Esc | Stop loading, or close a panel |
-
 ---
 
 ## Browsing
@@ -110,8 +90,13 @@ normally, press **Enter** to confirm or **Esc** to cancel.
 - **Go anywhere:** press X, type an address like `text.npr.org`, or type any
   words to search. Addresses open securely (HTTPS) automatically.
 - **Toolbar:** Back, Forward, Reload (Stop while loading), Home, the address
-  bar, Bookmarks (star) and Settings (gear). A green lock means the site's
-  security certificate checked out.
+  bar, Exit (power), Bookmarks (star) and Settings (gear). A green lock means
+  the site's security certificate checked out.
+- **Exit to Swiss:** press the power button twice to leave the browser and
+  start Swiss. Choose which `.dol` it starts under Settings > Data (**Find .dol
+  files on SD card** lists them), or set the Exit button to **Restart console**
+  if Swiss starts automatically when your GameCube powers on. If the chosen
+  file has moved, the browser looks for a Swiss `.dol` on the card by itself.
 - **Back and Forward** return instantly to your last few pages, scrolled to
   where you left them, and Back after a search takes you to your results.
 - **Bookmarks:** press Y, then **Bookmark this page**. Click a bookmark to open
@@ -186,11 +171,11 @@ defaults.
 | **Network** | Automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server. |
 | **Time** | Time zone and daylight saving, for the clock. |
 | **Controller** | Stick dead zone, pointer speed and acceleration, scroll speed, pointer snapping, rumble, and the button for each action. |
-| **Keyboard** | On-screen key layout (QWERTY or ABC), physical keyboard layout (US or Japanese), key repeat speed. |
+| **Keyboard** | On-screen key layout (QWERTY or ABC), key repeat speed. |
 | **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), picture width (Full 704 or Standard 640), screen margin, page text size, theme, animations, sound effects and volume. |
 | **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture labels, maximum page size. |
 | **Security** | Certificate checking and the certificate file. |
-| **Data** | Download folder, delete zips after unzipping, clear history, delete bookmarks, reset all settings. |
+| **Data** | Exit button action and Swiss `.dol` file, download folder, delete zips after unzipping, clear history, delete bookmarks, reset all settings. |
 
 A few worth knowing about:
 
@@ -241,8 +226,7 @@ Older and hobbyist sites from the 1990s and 2000s usually display very well.
 | **A file link shows an error instead of downloading** | Some sites only allow downloads for signed-in accounts, which CubeBrowser can't do. |
 | **A download stopped partway** | Choose Retry, or open the same link again; it continues where it stopped. |
 | **"Not enough space on the SD card"** | Free up space. FAT32 cards can't hold single files over 4 GB. |
-| **Keyboard symbols come out wrong** | Change Settings > Keyboard > Physical keyboard layout. |
-| **Keyboard isn't detected** | Check the top line of the Settings screen, which shows the keyboard's port when found. Re-pair it with BlueRetro if needed. |
+| **Exit doesn't find Swiss** | Use Settings > Data > Find .dol files on SD card and pick your Swiss `.dol`. |
 | **Settings or bookmarks aren't saved** | The SD card wasn't found. Check it's in the SD2SP2 and formatted FAT32. |
 | **The pointer drifts on its own** | Raise Settings > Controller > Stick dead zone. |
 | **Something's set wrong and you can't get back** | Hold L + R + START while launching to reset all settings. |
