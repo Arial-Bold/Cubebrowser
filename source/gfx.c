@@ -191,6 +191,7 @@ void gfx_set_transform(float sx, float sy, float tx, float ty) {
 void gfx_reset_transform(void) { gfx_set_transform(1, 1, 0, 0); }
 
 void gfx_set_clip(float x, float y, float w, float h) {
+    if (!isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h)) { gfx_clear_clip(); return; }
     float x0 = x * t_sx + t_tx, y0 = y * t_sy + t_ty;
     float x1 = (x + w) * t_sx + t_tx, y1 = (y + h) * t_sy + t_ty;
     float kx = rmode->fbWidth / vw, ky = rmode->efbHeight / 480.0f;
@@ -251,7 +252,7 @@ static inline void vtx(float x, float y, Color c) {
 void gfx_rect(float x, float y, float w, float h, Color c) { gfx_rect_vgrad(x, y, w, h, c, c); }
 
 void gfx_rect_vgrad(float x, float y, float w, float h, Color top, Color bottom) {
-    if (w <= 0 || h <= 0) return;
+    if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h)) return;
     mode_color();
     GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
     vtx(x, y, top);
@@ -295,7 +296,7 @@ static int rr_points(float x, float y, float w, float h, float r, float *px, flo
 }
 
 void gfx_rrect_vgrad(float x, float y, float w, float h, float r, Color top, Color bottom) {
-    if (w <= 0 || h <= 0) return;
+    if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || !isfinite(r)) return;
     float px[RR_PTS], py[RR_PTS];
     int n = rr_points(x, y, w, h, r, px, py);
     mode_color();
@@ -311,7 +312,7 @@ void gfx_rrect_vgrad(float x, float y, float w, float h, float r, Color top, Col
 void gfx_rrect(float x, float y, float w, float h, float r, Color c) { gfx_rrect_vgrad(x, y, w, h, r, c, c); }
 
 void gfx_rrect_outline(float x, float y, float w, float h, float r, float t, Color c) {
-    if (w <= 0 || h <= 0) return;
+    if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || !isfinite(t)) return;
     float ox[RR_PTS], oy[RR_PTS], ix[RR_PTS], iy[RR_PTS];
     int n = rr_points(x, y, w, h, r, ox, oy);
     rr_points(x + t, y + t, w - 2 * t, h - 2 * t, r - t, ix, iy);
@@ -475,6 +476,8 @@ int gfx_text_fit(FontId f, float size, const char *s, int len, float maxw) {
 
 float gfx_text(FontId f, float size, float x, float y, Color c, const char *s, int len) {
     if (len < 0) len = (int)strlen(s);
+    if (len > 2000) len = 2000;   /* keeps the vertex count well inside GX limits */
+    if (!isfinite(x) || !isfinite(y) || !isfinite(size) || size <= 0 || size > 400) return 0;
     const FontGlyph *G = glyph_table(f);
     float sc = size / font_px(f);
     int n = 0;
@@ -513,6 +516,12 @@ void gfx_text_centered(FontId f, float size, float cx, float y, Color c, const c
 /* ----------------------------------------------------------------- images */
 
 void gfx_image_init(GfxImage *img, void *data, int w, int h, int tex_w, int tex_h) {
+    if (!data || w <= 0 || h <= 0 || tex_w <= 0 || tex_h <= 0 || tex_w > 1024 || tex_h > 1024 ||
+        (tex_w & 3) || (tex_h & 3) || ((unsigned long)data & 31)) {
+        free(data);   /* not a texture the GPU can safely read */
+        img->data = NULL;
+        return;
+    }
     img->data = data;
     img->w = (u16)w; img->h = (u16)h; img->tex_w = (u16)tex_w; img->tex_h = (u16)tex_h;
     GX_InitTexObj(&img->obj, data, (u16)tex_w, (u16)tex_h, GX_TF_RGB5A3, GX_CLAMP, GX_CLAMP, GX_FALSE);
@@ -526,7 +535,8 @@ void gfx_image_free(GfxImage *img) {
 }
 
 void gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color c) {
-    if (!img->data) return;
+    if (!img->data || !img->tex_w || !img->tex_h) return;
+    if (!isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || w <= 0 || h <= 0) return;
     if (cur_mode != 2) {
         cur_mode = 2;
         GX_ClearVtxDesc();

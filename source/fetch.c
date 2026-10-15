@@ -2,6 +2,7 @@
 #include "fetch.h"
 #include "netio.h"
 #include "conn.h"
+#include "diag.h"
 #include <gccore.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -41,6 +42,7 @@ static void bring_up(void) {
 }
 
 static void run_image_job(void) {
+    diag_note(DIAG_WORKER, "downloading picture %.120s", job_url);
     ImageResult ir;
     memset(&ir, 0, sizeof(ir));
     ir.tag = job_tag;
@@ -51,11 +53,13 @@ static void run_image_job(void) {
     } else if (r.status >= 400) {
         snprintf(ir.error, sizeof(ir.error), "server error %d", r.status);
     } else if (!cancel_flag) {
+        diag_note(DIAG_WORKER, "decoding picture (%u bytes)", (unsigned)r.body_len);
         ir.ok = image_decode((const unsigned char *)r.body, r.body_len, job_max_w, job_max_h, MAX_SRC_PIXELS,
                              &ir.img, ir.error, sizeof(ir.error));
     }
     http_result_free(&r);
     img_result = ir;
+    diag_note(DIAG_WORKER, "idle");
 }
 
 static void *worker_main(void *arg) {
@@ -68,11 +72,13 @@ static void *worker_main(void *arg) {
             if (kind == JOB_IMAGE) {
                 run_image_job();
             } else if (kind == JOB_CSS) {
+                diag_note(DIAG_WORKER, "downloading stylesheet %.120s", job_url);
                 HttpHooks hooks = { &cancel_flag, &progress, no_stage };
                 HttpResult r;
                 if (http_fetch(job_url, NULL, "text/css,*/*;q=0.1", &r, &hooks) && r.status >= 400) http_result_free(&r);
                 result = r;
             } else {
+                diag_note(DIAG_WORKER, "downloading page %.120s", job_url);
                 HttpHooks hooks = { &cancel_flag, &progress, set_stage };
                 HttpResult r;
                 http_fetch(job_url, job_post, NULL, &r, &hooks);
@@ -81,6 +87,7 @@ static void *worker_main(void *arg) {
                 result = r;
             }
             state = FETCH_DONE;
+            diag_note(DIAG_WORKER, "idle");
         }
         usleep(10000);
     }

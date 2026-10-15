@@ -699,6 +699,9 @@ static float block_box(L *c, Node *n, const Style *s, float bx, float bw, float 
 
 /* Measures min-content / max-content width of a node's content. */
 static void measure(L *c, Node *n, const Style *s, float *minw, float *maxw) {
+    /* Nested floats and tables measure their contents repeatedly; on some
+     * pages that grows exponentially. After a fixed budget, estimate instead. */
+    if (c->p->measure_left-- <= 0) { *minw = 40; *maxw = 300; return; }
     L m = *c;
     m.measure = true;
     m.origin = 0;
@@ -866,12 +869,13 @@ static __attribute__((noinline)) void layout_float(L *c, Flow *f, Node *n, const
     float ml = css_len(s->margin[3], cw, s->fsize, 0), mr = css_len(s->margin[1], cw, s->fsize, 0);
     float mt = css_len(s->margin[0], cw, s->fsize, 0), mb = css_len(s->margin[2], cw, s->fsize, 0);
     float extra = pd.l + pd.r + bd.l + bd.r;
-    float bw;
+    float bw, mn = 0, mx = 0;
+    bool measured = false;
     if (s->width.u != U_UNSET && s->width.u != U_AUTO && !(c->measure && s->width.u == U_PCT)) {
         bw = css_len(s->width, cw, s->fsize, cw) + extra;
     } else {
-        float mn, mx;
         measure(c, n, s, &mn, &mx);
+        measured = true;
         bw = mx + extra + 1;
     }
     if (s->maxw.u != U_UNSET && s->maxw.u != U_AUTO) {
@@ -881,8 +885,7 @@ static __attribute__((noinline)) void layout_float(L *c, Flow *f, Node *n, const
     if (bw > cw - ml - mr) bw = cw - ml - mr;
     if (bw < 8) bw = 8;
     if (c->measure) {
-        float mn, mx;
-        measure(c, n, s, &mn, &mx);
+        if (!measured) measure(c, n, s, &mn, &mx);
         float atom = fminf(bw, mn + extra) + ml + mr + (f->left - c->origin);
         if (atom > c->max_atom) c->max_atom = atom;
         float line = bw + ml + mr + (f->left - c->origin);
@@ -1514,6 +1517,7 @@ static void layout_job(void *arg) {
     p->scale = text_scale;
     p->relayout = false;
     p->content_h = 0;
+    p->measure_left = 20000;
     if (!p->dom) return;
     if (p->restyle || p->styled_author != (g_set.page_styles != 0)) restyle(p);
     L c;
@@ -1559,6 +1563,9 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
     gfx_set_clip(x, y, w, h);
     for (int i = 0; i < p->nboxes; i++) {
         Box *b = &p->boxes[i];
+        if (!isfinite(b->x) || !isfinite(b->y) || !isfinite(b->w) || !isfinite(b->h) || b->w > 8192 || b->h > 8192 ||
+            b->w < 0 || b->h < 0)
+            continue;   /* never hand the GPU nonsense */
         if (b->y + b->h < top || b->y > top + h) continue;
         float bx = x + b->x, by = y + b->y - top;
         switch (b->type) {
@@ -1583,6 +1590,7 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
             else gfx_circle(bx + b->w * 0.5f, by + b->h * 0.5f, b->w * 0.5f, b->color);
             break;
         case BOX_IMAGE: {
+            if (b->text < 0 || b->text >= p->nimages) break;
             PageImage *im = &p->images[b->text];
             if (im->state == IMG_READY) {
                 gfx_image_draw(&im->img, bx, by, b->w, b->h, rgba(255, 255, 255, 255));

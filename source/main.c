@@ -15,6 +15,7 @@
 #include "ui.h"
 #include "osk.h"
 #include "browser.h"
+#include "diag.h"
 
 enum { SCREEN_BROWSER, SCREEN_SETTINGS };
 
@@ -58,6 +59,7 @@ static void draw_transition(int from, int to, float p) {
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
     bool sd = storage_init();
+    diag_init();
     settings_load();
     gfx_init(g_set.video_mode, g_set.widescreen != 0);
     input_init();
@@ -84,11 +86,14 @@ int main(int argc, char **argv) {
     else if (!sd) ui_toast("No SD card found - settings and bookmarks won't be saved");
 
     for (;;) {
+        diag_frame();
+        diag_note(DIAG_MAIN, "reading controller");
         input_update();
         ui_begin_frame();
         gfx_begin_frame();
         ui_draw_background();
 
+        diag_note(DIAG_MAIN, "screen %d", screen);
         if (trans < 1.0f) {
             draw_transition(screen, target_screen, trans);
             trans += 1.0f / 22.0f;
@@ -104,10 +109,12 @@ int main(int argc, char **argv) {
             }
         }
 
+        diag_note(DIAG_MAIN, "drawing keyboard and pointer");
         osk_frame();
         ui_draw_toast();
         ui_draw_cursor();
         ui_end_frame();
+        diag_note(DIAG_MAIN, "waiting for the GPU to finish the frame");
         gfx_end_frame();
     }
     return 0;

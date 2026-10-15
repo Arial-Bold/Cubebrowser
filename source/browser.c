@@ -12,6 +12,7 @@
 #include "sound.h"
 #include "url.h"
 #include "image.h"
+#include "diag.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
@@ -240,6 +241,7 @@ void browser_clear_history(void) { nback = nfwd = 0; }
 
 static void apply_image(ImageResult *ir) {
     int gen = ir->tag >> 8, idx = ir->tag & 0xFF;
+    diag_note(DIAG_MAIN, "picture %d arrived: %s %dx%d", idx, ir->ok ? "ok" : ir->error, ir->img.w, ir->img.h);
     if (gen != (page_gen & 0xFFFFFF) || idx >= page.nimages) { image_free(&ir->img); return; }
     PageImage *im = &page.images[idx];
     if (!ir->ok) {
@@ -383,6 +385,8 @@ static void handle_fetch_result(void) {
         show_error(r.url, msg);
         return;
     }
+    diag_note(DIAG_PAGE, "%.150s", r.url);
+    diag_note(DIAG_MAIN, "reading page (%u bytes)", (unsigned)r.body_len);
     page_set_source(&page, r.body, r.body_len, plain, r.url);
     page.secure = r.secure;
     page.verified = r.verified;
@@ -587,6 +591,7 @@ void browser_frame(bool interactive) {
     bool image_relayout = page.relayout && ui_frame() - last_layout_frame >= 90;
     if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout || page.restyle)) {
         last_layout_frame = ui_frame();
+        diag_note(DIAG_MAIN, "laying out page (%d pictures ready)", page.nimages);
         page_layout(&page, cw, scale);
         last_layout_w = cw;
         last_layout_scale = scale;
@@ -623,7 +628,9 @@ void browser_frame(bool interactive) {
             }
             (void)px; (void)py;
         }
+        diag_note(DIAG_MAIN, "drawing page at scroll %.0f of %.0f (%d boxes)", page.scroll, page.content_h, page.nboxes);
         page_draw(&page, cx, cy, cw, ch, hover_link, hover_field);
+        diag_note(DIAG_MAIN, "drawing toolbar and status bar");
 
         /* scroll bar */
         if (page.content_h > ch) {

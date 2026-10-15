@@ -95,6 +95,7 @@ typedef struct {
     size_t image_bytes;
     Float floats[PAGE_MAX_FLOATS];
     int nfloats;
+    int measure_left;    /* limits nested measuring work per layout */
     Color bg;            /* page background */
     float width, scale, content_h;
     /* view state */

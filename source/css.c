@@ -252,7 +252,7 @@ static bool parse_len(const char *s, Len *out) {
     }
     char *end;
     float v = strtof(s, &end);
-    if (end == s) return false;
+    if (end == s || !isfinite(v) || v > 1e6f || v < -1e6f) return false;
     char unit[8];
     int n = 0;
     while ((isalpha((unsigned char)*end) || *end == '%') && n < 7) unit[n++] = (char)tolower((unsigned char)*end++);
@@ -915,7 +915,12 @@ static bool match_compound(const Compound *c, const Node *n) {
     return true;
 }
 
+/* Long descendant-selector chains on deeply nested pages can explode into
+ * millions of checks; cap the work per element so styling always finishes. */
+static int match_steps;
+
 static bool match_from(const Selector *s, int i, const Node *n, int budget) {
+    if (++match_steps > 4000) return false;
     if (!match_compound(&s->c[i], n)) return false;
     if (i + 1 == s->n) return true;
     if (budget <= 0) return false;
@@ -1377,6 +1382,7 @@ typedef struct {
 static void collect(Run *r, int head, const Node *n, int *nm) {
     for (int i = head; i >= 0; i = r->ix.e[i].next) {
         const Entry *en = &r->ix.e[i];
+        if (match_steps > 200000) break;
         if (!match_from(&en->rule->sel, 0, n, 32)) continue;
         for (int k = 0; k < en->rule->count && *nm < r->maxm; k++) {
             Match *m = &r->matches[(*nm)++];
@@ -1404,6 +1410,7 @@ static void style_node(Run *r, Node *n, const Style *parent) {
     c.nvar_sheets = r->author ? r->nsheets : 0;
 
     int nm = 0;
+    match_steps = 0;
     collect(r, r->ix.universal, n, &nm);
     if (n->id) collect(r, r->ix.buckets[hkey('#', n->id) & 2047], n, &nm);
     for (int i = 0; i < n->nclasses; i++) {
