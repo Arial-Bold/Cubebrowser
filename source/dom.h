@@ -41,6 +41,7 @@ typedef struct Node {
     int nclasses;
     int index;                      /* link / field / image / form index, -1 if none */
     int sub;                        /* extra index (e.g. form of a field) */
+    unsigned char hidden;           /* skip when laying out (duplicate content) */
     struct Style *style;
 } Node;
 

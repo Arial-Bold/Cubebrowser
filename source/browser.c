@@ -14,6 +14,7 @@
 #include "image.h"
 #include "diag.h"
 #include "unzip.h"
+#include "keyboard.h"
 #include <sys/stat.h>
 #include <ctype.h>
 #include <math.h>
@@ -86,6 +87,10 @@ static const char help_html[] =
     "<li><b>L / R</b> - page up / page down</li>"
     "<li><b>D-Pad</b> - jump between links and buttons</li>"
     "<li><b>Hold Z + A</b> on a link - save it to the SD card instead of opening it</li></ul>"
+    "<h3>Keyboard</h3><p>A GameCube keyboard, or a Bluetooth keyboard through BlueRetro, is found "
+    "automatically. Type straight into boxes. Shortcuts: <b>Ctrl+L</b> or <b>F6</b> address bar, "
+    "<b>Backspace</b> back, <b>Alt+Left/Right</b> back/forward, <b>F5</b> reload, <b>Ctrl+D</b> bookmark, "
+    "<b>Space</b>/<b>Page Up</b>/<b>Page Down</b>/arrows scroll, <b>Esc</b> stop or close.</p>"
     "<p>All buttons except the D-Pad can be changed in Settings &gt; Controller.</p>"
     "<h3>On-screen keyboard</h3><ul><li><b>B</b> delete, <b>Y</b> space, <b>X</b> shift</li>"
     "<li><b>L / R</b> move the text cursor, <b>START</b> accept</li></ul>"
@@ -1121,6 +1126,36 @@ void browser_frame(bool interactive) {
     Color dot = netio_state() == NET_UP ? t->good : (netio_state() == NET_FAILED ? t->bad : t->accent);
     gfx_circle(sx + sw - 110, sby + 10, 5, dot);
     draw_clock(sx + sw - 14, sby);
+
+    /* ---- keyboard shortcuts (real or Bluetooth keyboard) */
+    KeyEvent kev;
+    while (interactive && !osk_active() && kbd_next(&kev)) {
+        int k = kev.key;
+        bool lk = (k == 'l' || k == 'L'), rk = (k == 'r' || k == 'R'), dk = (k == 'd' || k == 'D');
+        if (dl_state != DL_IDLE || bm_open) {
+            if (k == KEY_ESC) {
+                if (bm_open) { bm_open = false; sound_play(SFX_CLOSE); }
+                else if (dl_state != DL_RUNNING && dl_state != DL_UNZIPPING) { dl_state = DL_IDLE; sound_play(SFX_CLOSE); }
+            }
+            continue;
+        }
+        if ((kev.ctrl && lk) || k == KEY_F6) open_address_bar();
+        else if (k == KEY_BACKSPACE || (kev.alt && k == KEY_LEFT)) go_back();
+        else if (kev.alt && k == KEY_RIGHT) go_forward();
+        else if (k == KEY_F5 || (kev.ctrl && rk)) {
+            if (has_page && !loading) { restore_scroll = page.scroll_target; start_load(page.url, cur_post); }
+        } else if (kev.ctrl && dk) bookmark_add_current();
+        else if (k == KEY_ESC && loading) { queued = false; fetch_cancel(); }
+        else if (has_page) {
+            float step = ch * 0.85f;
+            if (k == KEY_DOWN) page.scroll_target += 48;
+            else if (k == KEY_UP) page.scroll_target -= 48;
+            else if (k == KEY_PGDN || k == ' ') page.scroll_target += step;
+            else if (k == KEY_PGUP) page.scroll_target -= step;
+            else if (k == KEY_HOME) page.scroll_target = 0;
+            else if (k == KEY_END) page.scroll_target = page.content_h;
+        }
+    }
 
     /* ---- shortcuts */
     if (input_ok) {

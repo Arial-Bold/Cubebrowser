@@ -4,7 +4,9 @@
 #include "settings.h"
 #include "gfx.h"
 #include "gc_entropy.h"
+#include "keyboard.h"
 #include <math.h>
+#include <stdlib.h>
 
 const char *const action_names[ACT_COUNT] = {
     "Click", "Back", "Address bar", "Bookmarks", "Settings menu", "Slow pointer", "Page up", "Page down"
@@ -24,6 +26,7 @@ static int dpad_dir = DIR_NONE, dpad_timer;
 static u32 repeat_mask;
 static int repeat_timer;
 static s8 last_sx, last_sy;
+static int active_chan;
 
 void input_init(void) {
     PAD_Init();
@@ -46,12 +49,22 @@ static float stick_axis(int v) {
 
 void input_update(void) {
     PAD_ScanPads();
+    kbd_update();
     prev_held = held;
-    held = PAD_ButtonsHeld(0);
-    down = PAD_ButtonsDown(0);
+    /* a controller on any port works (Bluetooth adapters may use any of them) */
+    held = down = 0;
+    s8 sx = 0, sy = 0;
+    for (int c = 0; c < 4; c++) {
+        u32 h = PAD_ButtonsHeld(c), d = PAD_ButtonsDown(c);
+        s8 x = PAD_StickX(c), y = PAD_StickY(c), cy2 = PAD_SubStickY(c);
+        if (h || d || abs(x) > 20 || abs(y) > 20 || abs(cy2) > 20) active_chan = c;
+        held |= h;
+        down |= d;
+        if (abs(x) > abs(sx)) sx = x;
+        if (abs(y) > abs(sy)) sy = y;
+    }
     consumed = 0;
 
-    s8 sx = PAD_StickX(0), sy = PAD_StickY(0);
     if (down || sx != last_sx || sy != last_sy) entropy_add_event(((u32)down << 16) ^ ((u8)sx << 8) ^ (u8)sy);
     last_sx = sx; last_sy = sy;
 
@@ -87,7 +100,7 @@ void input_update(void) {
     if (held != prev_held) { repeat_mask = held; repeat_timer = 0; }
     else repeat_timer++;
 
-    if (rumble_left > 0 && --rumble_left == 0) PAD_ControlMotor(PAD_CHAN0, PAD_MOTOR_STOP);
+    if (rumble_left > 0 && --rumble_left == 0) PAD_ControlMotor(active_chan, PAD_MOTOR_STOP);
 }
 
 bool input_pressed(Action a) { u32 m = action_mask(a); return (down & m) && !(consumed & m); }
@@ -140,7 +153,9 @@ bool input_pointer_moved(void) { return moved; }
 
 float input_scroll_delta(void) {
     float k = 1.5f + g_set.scroll_speed * 1.2f;
-    float d = -stick_axis(PAD_SubStickY(0)) * k * 1.6f;
+    s8 cy = 0;
+    for (int c = 0; c < 4; c++) { s8 v = PAD_SubStickY(c); if (abs(v) > abs(cy)) cy = v; }
+    float d = -stick_axis(cy) * k * 1.6f;
     if (input_raw_repeat(action_mask(ACT_PAGE_DOWN))) d += 300;
     if (input_raw_repeat(action_mask(ACT_PAGE_UP))) d -= 300;
     return d;
@@ -148,11 +163,11 @@ float input_scroll_delta(void) {
 
 void input_rumble(int frames) {
     if (!g_set.rumble) return;
-    if (rumble_left <= 0) PAD_ControlMotor(PAD_CHAN0, PAD_MOTOR_RUMBLE);
+    if (rumble_left <= 0) PAD_ControlMotor(active_chan, PAD_MOTOR_RUMBLE);
     if (frames > rumble_left) rumble_left = frames;
 }
 
 void input_stop_rumble(void) {
     rumble_left = 0;
-    PAD_ControlMotor(PAD_CHAN0, PAD_MOTOR_STOP);
+    PAD_ControlMotor(active_chan, PAD_MOTOR_STOP);
 }

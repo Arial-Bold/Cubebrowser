@@ -12,6 +12,7 @@
 #include "netio.h"
 #include "storage.h"
 #include "conn.h"
+#include "keyboard.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -125,12 +126,21 @@ static void draw_toggle(UiId id, float x, float y, bool on) {
 static void draw_info_line(float x, float y, float w) {
     const Theme *t = theme();
     char info[160];
-    snprintf(info, sizeof(info), "%s  %s  |  %s  |  SD: %s  |  %d certificates", gfx_mode_name(),
+    char kb[32] = "";
+    if (kbd_connected()) snprintf(kb, sizeof(kb), "  |  Keyboard: port %d", kbd_port());
+    snprintf(info, sizeof(info), "%s  %s  |  %s  |  SD: %s%s", gfx_mode_name(),
              g_set.widescreen ? "16:9" : "4:3", netio_state() == NET_UP ? netio_ip() : "offline",
-             storage_ok() ? storage_device_name() : "none", tls_ca_count());
+             storage_ok() ? storage_device_name() : "none", kb);
     float ts = 14;
     float iw = gfx_text_width(FONT_UI, ts, info, -1);
     gfx_text(FONT_UI, ts, x + w - iw, y, t->text_dim, info, -1);
+}
+
+static bool esc_pressed(void) {
+    KeyEvent ev;
+    bool esc = false;
+    while (!osk_active() && kbd_next(&ev)) if (ev.key == KEY_ESC) esc = true;
+    return esc;
 }
 
 bool settings_ui_frame(bool interactive) {
@@ -306,7 +316,7 @@ bool settings_ui_frame(bool interactive) {
                 input_consume(ACT_MENU);
             }
         }
-    } else if (input_ok && (input_pressed(ACT_BACK) || input_pressed(ACT_MENU))) {
+    } else if (input_ok && (input_pressed(ACT_BACK) || input_pressed(ACT_MENU) || esc_pressed())) {
         input_consume(ACT_BACK);
         input_consume(ACT_MENU);
         leave = true;

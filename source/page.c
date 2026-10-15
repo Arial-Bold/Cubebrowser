@@ -1397,7 +1397,7 @@ static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
     for (Node *ch = n->first; ch; ch = ch->next) {
         if (ch->type == NT_TEXT) { emit_text(c, f, ch, s); continue; }
         const Style *cs = ch->style;
-        if (!cs || cs->display == D_NONE) continue;
+        if (!cs || cs->display == D_NONE || ch->hidden) continue;
         /* empty positioned layers (decorative gradients, overlays) take no space */
         if (cs->abspos && ch->tag != TAG_IMG && !has_content(ch, 0)) continue;
         if (ch->tag == TAG_NOSCRIPT && duplicate_noscript(c->p, ch)) continue;
@@ -1537,6 +1537,56 @@ static bool near_each_other(const Node *a, const Node *b) {
     return false;
 }
 
+static bool contains_node(const Node *outer, const Node *inner) {
+    for (const Node *q = inner; q; q = q->parent) if (q == outer) return true;
+    return false;
+}
+
+static bool has_word_ci(const char *s, const char *w) {
+    size_t n = strlen(w);
+    for (; s && *s; s++) if (!strncasecmp(s, w, n)) return true;
+    return false;
+}
+
+/* Caption/credit blocks repeated next to each other (a second copy meant for
+ * another screen size) are shown once. */
+#define MAX_CAPS 600
+typedef struct { Node *n; unsigned hash; } Cap;
+
+static unsigned text_hash(const char *t) {
+    unsigned h = 2166136261u;
+    for (; *t; t++) h = (h ^ (unsigned char)*t) * 16777619u;
+    return h;
+}
+
+static void collect_captions(Node *n, Cap *caps, int *ncaps, int depth) {
+    for (Node *c = n->first; c && *ncaps < MAX_CAPS; c = c->next) {
+        if (c->type != NT_ELEM) continue;
+        const char *cls = dom_attr(c, "class");
+        if ((cls && (has_word_ci(cls, "caption") || has_word_ci(cls, "credit"))) || !strcmp(c->name, "figcaption")) {
+            char t[256];
+            text_of(c, t, sizeof(t));
+            if (strlen(t) >= 20) { caps[*ncaps].n = c; caps[*ncaps].hash = text_hash(t); (*ncaps)++; continue; }
+        }
+        if (depth < 200) collect_captions(c, caps, ncaps, depth + 1);
+    }
+}
+
+static void dedupe_captions(Page *p) {
+    Cap *caps = malloc(sizeof(Cap) * MAX_CAPS);
+    if (!caps) return;
+    int n = 0;
+    collect_captions(p->dom->root, caps, &n, 0);
+    for (int i = 1; i < n; i++)
+        for (int j = i - 1; j >= 0 && j >= i - 12; j--)
+            if (caps[j].hash == caps[i].hash && !contains_node(caps[j].n, caps[i].n) && !caps[j].n->hidden &&
+                near_each_other(caps[i].n, caps[j].n)) {
+                caps[i].n->hidden = 1;
+                break;
+            }
+    free(caps);
+}
+
 static void dedupe_images(Page *p) {
     char keys[PAGE_MAX_IMAGES][160];
     for (int i = 0; i < p->nimages; i++) {
@@ -1553,6 +1603,21 @@ static void dedupe_images(Page *p) {
             break;
         }
     }
+    /* Second check: the same description (alt text) on two nearby pictures
+     * means the same photo, whatever the file names look like. */
+    for (int i = 0; i < p->nimages; i++) {
+        if (p->images[i].state == IMG_SKIPPED || !p->images[i].node) continue;
+        const char *ai = dom_attr(p->images[i].node, "alt");
+        if (!ai || strlen(ai) < 12) continue;
+        for (int j = i - 1; j >= 0 && j >= i - 16; j--) {
+            if (p->images[j].state == IMG_SKIPPED || !p->images[j].node) continue;
+            const char *aj = dom_attr(p->images[j].node, "alt");
+            if (!aj || strcmp(ai, aj)) continue;
+            if (!near_each_other(p->images[i].node, p->images[j].node)) continue;
+            p->images[i].state = IMG_SKIPPED;
+            break;
+        }
+    }
 }
 
 static void parse_job(void *arg) {
@@ -1564,6 +1629,7 @@ static void parse_job(void *arg) {
         int form = -1;
         prepass(p, p->dom->root, &form);
         dedupe_images(p);
+        dedupe_captions(p);
         sheets_init(p);
     }
 }
