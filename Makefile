@@ -17,9 +17,12 @@ MBEDTLS		:=	third_party/mbedtls
 
 # Only check from the top-level folder; the second pass runs inside build/
 ifneq (build,$(notdir $(CURDIR)))
-ifeq ($(wildcard $(MBEDTLS)/library/ssl_tls.c),)
 ifneq ($(MAKECMDGOALS),clean)
+ifeq ($(wildcard $(MBEDTLS)/library/ssl_tls.c),)
 $(error "mbedTLS not found in $(MBEDTLS). Run ./get-mbedtls.sh first (see README.md)")
+endif
+ifeq ($(wildcard third_party/stb/stb_image.h),)
+$(error "stb_image.h not found in third_party/stb. Run ./get-mbedtls.sh first (see README.md)")
 endif
 endif
 endif
@@ -59,6 +62,7 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES), -iquote $(CURDIR)/$(dir)) \
 			-I$(CURDIR)/source \
 			-I$(CURDIR)/$(MBEDTLS)/include \
 			-I$(CURDIR)/$(MBEDTLS)/library \
+			-I$(CURDIR)/third_party/stb \
 			$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
 			-I$(CURDIR)/$(BUILD) \
 			-I$(LIBOGC_INC)

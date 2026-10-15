@@ -4,9 +4,15 @@ A small HTTPS web browser for the Nintendo GameCube, built as a `.dol` you
 launch from Swiss. It needs a Broadband Adapter (BBA) for networking and an
 SD2SP2 (or SD Gecko) for settings, bookmarks and certificates.
 
-It shows text, links, headings, lists, simple tables and basic forms, so search
-boxes work. It does not show pictures, styles or JavaScript. Lightweight and
-text-only sites work best; the start page links to several.
+It shows text, links, headings, lists, simple tables, basic forms (so search
+boxes work) and pictures (JPEG, PNG, GIF, BMP). It does not run JavaScript or
+apply page styles. Lightweight sites work best; the start page links to several.
+
+Pictures load after the text, one at a time. By default they go through the
+free images.weserv.nl service, which shrinks them and converts formats the
+GameCube can't decode (like WebP) to JPEG. That's much faster, but the service
+sees the address of each picture. Turn off Settings > Browsing > Image helper
+to fetch pictures directly instead.
 
 ## 1. Build the .dol
 
@@ -42,7 +48,7 @@ Install Docker Desktop. Then, in this folder:
 
 ```sh
 ./get-mbedtls.sh
-docker run --rm -v "$PWD:/src" -w /src devkitpro/devkitppc make
+docker run --rm -v "$PWD:/src" -w /src ghcr.io/extremscorner/libogc2:latest make
 ```
 
 On Windows PowerShell, use `${PWD}` instead of `$PWD`.
