@@ -15,6 +15,7 @@
 #include "dolload.h"
 #include "cookies.h"
 #include "update.h"
+#include "version.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -200,9 +201,8 @@ static void draw_toggle(UiId id, float x, float y, bool on) {
 static void draw_info_line(float x, float y, float w) {
     const Theme *t = theme();
     char info[160];
-    snprintf(info, sizeof(info), "%s  %s  |  %s  |  SD: %s", gfx_mode_name(),
-             g_set.widescreen ? "16:9" : "4:3", netio_state() == NET_UP ? netio_ip() : "offline",
-             storage_ok() ? storage_device_name() : "none");
+    snprintf(info, sizeof(info), "v%s  |  %s  |  SD: %s", CB_VERSION,
+             netio_state() == NET_UP ? netio_ip() : "offline", storage_ok() ? storage_device_name() : "none");
     float ts = 14;
     float iw = gfx_text_width(FONT_UI, ts, info, -1);
     gfx_text(FONT_UI, ts, x + w - iw, y, t->text_dim, info, -1);

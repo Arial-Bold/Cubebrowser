@@ -663,15 +663,40 @@ static void draw_download(bool interactive) {
 
 #define IMAGE_BUDGET (6u * 1024u * 1024u)   /* texture memory per page */
 
+/* Picture and style sheet requests carry the page generation and the index
+ * (10 bits: up to 1024, pages may have several hundred pictures). */
+#define TAG_MAKE(idx) ((int)(((page_gen & 0x1FFFFF) << 10) | ((idx) & 0x3FF)))
+#define TAG_IDX(tag) ((tag) & 0x3FF)
+#define TAG_CURRENT(tag) ((((unsigned)(tag)) >> 10) == (page_gen & 0x1FFFFF))
+
+/* Gives every other copy of the same picture on the page the same result,
+ * so a picture used many times (spacers, tabs, icons) is downloaded once. */
+static void share_image_result(int idx) {
+    PageImage *src = &page.images[idx];
+    for (int k = 0; k < page.nimages; k++) {
+        PageImage *im = &page.images[k];
+        if (k == idx || (im->state != IMG_NONE && im->state != IMG_LOADING) || !im->url || strcmp(im->url, src->url)) continue;
+        if (src->state == IMG_READY) {
+            im->img = src->share >= 0 ? page.images[src->share].img : src->img;
+            im->share = (short)(src->share >= 0 ? src->share : idx);
+            im->state = IMG_READY;
+        } else {
+            im->state = src->state;   /* failed or skipped, same as the original */
+        }
+        if (!(im->decl_w && im->decl_h)) page.relayout = true;
+    }
+}
+
 static void apply_image(ImageResult *ir) {
-    int gen = ir->tag >> 8, idx = ir->tag & 0xFF;
+    int idx = TAG_IDX(ir->tag);
     diag_note(DIAG_MAIN, "picture %d arrived: %s %dx%d", idx, ir->ok ? "ok" : ir->error, ir->img.w, ir->img.h);
-    if (gen != (page_gen & 0xFFFFFF) || idx >= page.nimages) { image_free(&ir->img); return; }
+    if (!TAG_CURRENT(ir->tag) || idx >= page.nimages) { image_free(&ir->img); return; }
     PageImage *im = &page.images[idx];
+    bool moved = true;
     if (!ir->ok) {
         im->state = IMG_FAILED;
         /* with a declared size its box is already in place: nothing moves */
-        if (im->decl_w && im->decl_h) return;
+        if (im->decl_w && im->decl_h) moved = false;
     } else if (page.image_bytes + ir->img.bytes > IMAGE_BUDGET) {
         image_free(&ir->img);
         im->state = IMG_SKIPPED;
@@ -680,9 +705,10 @@ static void apply_image(ImageResult *ir) {
         page.image_bytes += ir->img.bytes;
         im->state = IMG_READY;
         /* a picture with a declared size already has its space: just draw it */
-        if (im->decl_w && im->decl_h) return;
+        if (im->decl_w && im->decl_h) moved = false;
     }
-    page.relayout = true;
+    if (moved) page.relayout = true;
+    share_image_result(idx);
 }
 
 static void image_request_url(const char *src, int max_w, int max_h, char *out, size_t n) {
@@ -690,8 +716,19 @@ static void image_request_url(const char *src, int max_w, int max_h, char *out, 
     static char enc[URL_MAX];
     url_encode_component(src, enc, sizeof(enc));
     const Theme *t = theme();
-    /* weserv fetches the picture, shrinks it and sends a small JPEG; bg fills transparency */
-    int w = snprintf(out, n, "https://images.weserv.nl/?url=%s&w=%d&h=%d&fit=inside&we&output=jpg&q=70"
+    /* GIFs and PNGs (icons, buttons, see-through shapes on old sites) come back
+     * as PNG so their transparency survives; photos as a small JPEG. */
+    char path[URL_MAX];
+    snprintf(path, sizeof(path), "%s", src);
+    char *q = strpbrk(path, "?#");
+    if (q) *q = 0;
+    size_t pl = strlen(path);
+    bool keep_alpha = pl > 4 && (!strcasecmp(path + pl - 4, ".gif") || !strcasecmp(path + pl - 4, ".png"));
+    int w;
+    if (keep_alpha)
+        w = snprintf(out, n, "https://images.weserv.nl/?url=%s&w=%d&h=%d&fit=inside&we&output=png", enc, max_w, max_h);
+    else   /* weserv shrinks the picture and sends a small JPEG; bg fills any transparency */
+        w = snprintf(out, n, "https://images.weserv.nl/?url=%s&w=%d&h=%d&fit=inside&we&output=jpg&q=70"
                      "&bg=%02x%02x%02x", enc, max_w, max_h, t->page_bg.r, t->page_bg.g, t->page_bg.b);
     if (w >= (int)n) out[0] = 0;
 }
@@ -710,7 +747,7 @@ static void schedule_images(float view_top, float view_h, float max_w) {
     if (g_set.page_styles) {
         int si = page_next_sheet(&page);
         if (si >= 0) {
-            int tag = ((page_gen & 0xFFFFFF) << 8) | si;
+            int tag = TAG_MAKE(si);
             if (!fetch_start_css(page.sheets[si].url, tag)) page.sheets[si].state = SHEET_NONE;
             return;
         }
@@ -736,10 +773,17 @@ static void schedule_images(float view_top, float view_h, float max_w) {
     }
     if (pick < 0) return;
     PageImage *im = &page.images[pick];
+    for (int k = 0; k < page.nimages; k++) {   /* the same picture already loaded or loading? */
+        PageImage *o = &page.images[k];
+        if (k == pick || !o->url || o->state == IMG_NONE || strcmp(o->url, im->url)) continue;
+        if (o->state == IMG_LOADING) return;   /* it'll be shared when that one arrives */
+        share_image_result(k);
+        return;
+    }
     static char req[URL_MAX];
     int max_h = (int)settings_max_picture_height();
     image_request_url(im->url, (int)max_w, max_h, req, sizeof(req));
-    int tag = ((page_gen & 0xFFFFFF) << 8) | pick;
+    int tag = TAG_MAKE(pick);
     if (req[0] && fetch_start_image(req, (int)max_w, max_h, tag)) im->state = IMG_LOADING;
     else if (!req[0]) { im->state = IMG_SKIPPED; page.relayout = true; }
 }
@@ -761,7 +805,7 @@ static void handle_fetch_result(void) {
         if (fetch_job_kind() == JOB_IMAGE) {
             ImageResult ir;
             if (fetch_take_image(&ir)) {
-                int idx = ir.tag & 0xFF;
+                int idx = TAG_IDX(ir.tag);
                 if (idx < page.nimages && page.images[idx].state == IMG_LOADING) page.images[idx].state = IMG_NONE;
                 image_free(&ir.img);
             }
@@ -782,8 +826,8 @@ static void handle_fetch_result(void) {
         HttpResult r;
         int tag;
         if (!fetch_take_css(&r, &tag)) return;
-        int gen = tag >> 8, idx = tag & 0xFF;
-        if (gen == (page_gen & 0xFFFFFF) && has_page) {
+        int idx = TAG_IDX(tag);
+        if (TAG_CURRENT(tag) && has_page) {
             page_sheet_loaded(&page, idx, r.body, r.body_len);   /* takes the text */
             r.body = NULL;
         }

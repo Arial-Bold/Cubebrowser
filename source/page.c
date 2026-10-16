@@ -126,10 +126,26 @@ static int field_add(Page *p, int form, int type, const char *name, const char *
     return p->nfields++;
 }
 
+/* Transparent spacer pictures that old table layouts used to hold cells
+ * open. They keep their space but are never downloaded. */
+static bool spacer_name(const char *src) {
+    const char *name = strrchr(src, '/');
+    name = name ? name + 1 : src;
+    static const char *const pats[] = { "pixel_trans", "spacer", "blank.gif", "clear.gif", "clearpixel", "trans.gif",
+                                        "transparent.gif", "shim.gif", "1x1.gif", "dot_clear", "pix.gif", NULL };
+    for (int i = 0; pats[i]; i++) {
+        size_t l = strlen(pats[i]);
+        for (const char *q = name; *q && *q != '?'; q++)
+            if (!strncasecmp(q, pats[i], l)) return true;
+    }
+    return false;
+}
+
 static __attribute__((noinline)) int image_add(Page *p, const Node *n) {
     if (p->nimages >= PAGE_MAX_IMAGES) return -1;
     PageImage *im = &p->images[p->nimages];
     memset(im, 0, sizeof(*im));
+    im->share = -1;
     im->node = n;
     const char *src = dom_attr(n, "data-src");
     if (!src || !*src) src = dom_attr(n, "data-original");
@@ -147,8 +163,8 @@ static __attribute__((noinline)) int image_add(Page *p, const Node *n) {
     if (im->decl_w < 0 || im->decl_w > 4000) im->decl_w = 0;
     if (im->decl_h < 0 || im->decl_h > 4000) im->decl_h = 0;
     if (!src || !*src || !strncasecmp(src, "data:", 5) || (im->decl_w && im->decl_w <= 2) ||
-        (im->decl_h && im->decl_h <= 2)) {
-        im->state = IMG_SKIPPED;   /* missing, inline data, or a tracking pixel */
+        (im->decl_h && im->decl_h <= 2) || spacer_name(src)) {
+        im->state = IMG_SKIPPED;   /* missing, inline data, a tracking pixel or a spacer */
     } else {
         char abs[URL_MAX];
         url_resolve(p->base, src, abs, sizeof(abs));
@@ -729,12 +745,14 @@ static __attribute__((noinline)) void emit_image(L *c, Flow *f, Node *n, const S
     Page *p = c->p;
     PageImage *im = (n->index >= 0) ? &p->images[n->index] : NULL;
     /* skipped = blank placeholder or tracking pixel: nothing to show */
-    if (g_set.load_images && im && im->state == IMG_SKIPPED) return;
-    /* A picture that couldn't be loaded but whose size the page declared
-     * keeps a box of that size (drawn with its description clipped inside),
-     * as browsers of the time did: old layouts are built from fixed-size
-     * pictures, and letting the description flow as text breaks them. */
-    bool keep_box = g_set.load_images && im && im->state == IMG_FAILED && im->decl_w > 0 && im->decl_h > 0;
+    /* A picture that couldn't be loaded, or was skipped (a 1-pixel spacer or
+     * tracker, a duplicate), but whose size the page declared keeps a box of
+     * that size, as browsers of the time did: old layouts are built from
+     * fixed-size pictures and spacers. Failed ones show their description
+     * inside; skipped ones are invisible. */
+    bool keep_box = g_set.load_images && im && (im->state == IMG_FAILED || im->state == IMG_SKIPPED) &&
+                    im->decl_w > 0 && im->decl_h > 0;
+    if (g_set.load_images && im && im->state == IMG_SKIPPED && !keep_box) return;
     if (!keep_box && (!g_set.load_images || !im || im->state == IMG_FAILED || im->state == IMG_SKIPPED)) {
         const char *alt = dom_attr(n, "alt");
         char shown[200];
@@ -1471,7 +1489,7 @@ void page_init(Page *p) { memset(p, 0, sizeof(*p)); }
 void page_free_images(Page *p) {
     for (int i = 0; i < p->nimages; i++) {
         free(p->images[i].url);
-        gfx_image_free(&p->images[i].img);
+        if (p->images[i].share < 0) gfx_image_free(&p->images[i].img);   /* shared ones belong to another entry */
     }
     p->nimages = 0;
     p->image_bytes = 0;
@@ -1597,11 +1615,20 @@ static void dedupe_captions(Page *p) {
     free(caps);
 }
 
+/* Small pictures with a declared size (icons, tabs, arrows, spacers) are
+ * repeated on purpose by older table layouts: they're never hidden as
+ * duplicates. (They're still only downloaded once - see browser.c.) */
+static bool small_declared(const PageImage *im) {
+    return im->decl_w > 0 && im->decl_h > 0 && im->decl_w <= 200 && im->decl_h <= 200;
+}
+
 static void dedupe_images(Page *p) {
-    char keys[PAGE_MAX_IMAGES][160];
+    char (*keys)[160] = malloc(sizeof(*keys) * PAGE_MAX_IMAGES);
+    if (!keys) return;
     for (int i = 0; i < p->nimages; i++) {
         keys[i][0] = 0;
-        if (p->images[i].url && p->images[i].state != IMG_SKIPPED) image_key(p->images[i].url, keys[i], sizeof(keys[i]));
+        if (p->images[i].url && p->images[i].state != IMG_SKIPPED && !small_declared(&p->images[i]))
+            image_key(p->images[i].url, keys[i], sizeof(keys[i]));
     }
     for (int i = 0; i < p->nimages; i++) {
         if (!keys[i][0]) continue;
@@ -1613,10 +1640,11 @@ static void dedupe_images(Page *p) {
             break;
         }
     }
+    free(keys);
     /* Second check: the same description (alt text) on two nearby pictures
      * means the same photo, whatever the file names look like. */
     for (int i = 0; i < p->nimages; i++) {
-        if (p->images[i].state == IMG_SKIPPED || !p->images[i].node) continue;
+        if (p->images[i].state == IMG_SKIPPED || !p->images[i].node || small_declared(&p->images[i])) continue;
         const char *ai = dom_attr(p->images[i].node, "alt");
         if (!ai || strlen(ai) < 12) continue;
         for (int j = i - 1; j >= 0 && j >= i - 16; j--) {
@@ -1763,7 +1791,10 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
             if (b->text < 0 || b->text >= p->nimages) break;
             PageImage *im = &p->images[b->text];
             if (im->state == IMG_READY) {
-                gfx_image_draw(&im->img, bx, by, b->w, b->h, rgba(255, 255, 255, 255));
+                GfxImage *gi = (im->share >= 0 && im->share < p->nimages) ? &p->images[im->share].img : &im->img;
+                gfx_image_draw(gi, bx, by, b->w, b->h, rgba(255, 255, 255, 255));
+            } else if (im->state == IMG_SKIPPED) {
+                /* a spacer: keeps its space, draws nothing */
             } else if (im->state == IMG_FAILED) {
                 /* couldn't be loaded: a thin frame with the description inside */
                 bool light = luminance(p->bg) > 0.5f;

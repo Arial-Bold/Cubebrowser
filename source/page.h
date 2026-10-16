@@ -42,6 +42,7 @@ typedef struct {
     char *url;
     short decl_w, decl_h;
     unsigned char state;
+    short share;        /* >= 0: same picture as images[share], whose texture it uses (not freed here) */
     GfxImage img;
     const Node *node;   /* the <img> element (valid while the page is loaded) */
 } PageImage;
@@ -55,7 +56,7 @@ typedef struct {
     unsigned char state;
 } PageSheet;
 
-#define PAGE_MAX_IMAGES 64
+#define PAGE_MAX_IMAGES 512   /* old sites use hundreds of <img> tags (mostly spacers) */
 #define PAGE_MAX_FIELDS 128
 #define PAGE_MAX_FORMS 24
 #define PAGE_MAX_FLOATS 96
