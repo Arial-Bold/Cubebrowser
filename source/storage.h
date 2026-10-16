@@ -21,6 +21,7 @@ const char *storage_device_name(void);
 const char *storage_dir(void);               /* the data folder in use, e.g. "sd:/apps/cubebrowser/gcbrowser" */
 void storage_path(char *out, size_t cap, const char *name);   /* storage_dir() + "/" + name */
 const char *storage_program_dir(void);       /* folder holding the .dol, or NULL if unknown */
+const char *storage_program_file(void);      /* the .dol itself, or NULL if unknown */
 bool storage_dir_is_root(void);              /* data folder is sd:/gcbrowser */
 const char *storage_moved_from(void);        /* old folder if data was moved at start-up, else NULL */
 

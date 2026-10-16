@@ -31,6 +31,7 @@ typedef struct {
     /* Downloads */
     char dl_folder[128];
     int  dl_delete_zip, dl_connections;
+    int  update_auto;
     /* Leaving the browser */
     int  exit_action;
     char swiss_dol[256];
@@ -44,7 +45,7 @@ extern const char *const category_names[CAT_COUNT];
 
 typedef enum { ST_BOOL, ST_INT, ST_CHOICE, ST_STR, ST_BIND, ST_ACTION } SetType;
 
-enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA };
+enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE };
 enum { OSK_TEXTMODE_TEXT = 0, OSK_TEXTMODE_URL = 1, OSK_TEXTMODE_IP = 2 };
 
 typedef struct {

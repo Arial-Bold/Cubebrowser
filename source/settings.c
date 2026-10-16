@@ -141,6 +141,10 @@ const SetDef g_setdefs[] = {
       "More connections download big files faster on servers that allow it. 4 is fastest on GameCube." },
     { CAT_DATA, "dl.delzip", "Delete zip after unzipping", ST_BOOL, O(dl_delete_zip), 0, 1, 1, NULL, NULL,
       "Saves space by removing the .zip once its files are extracted." },
+    { CAT_DATA, NULL, "Check for updates", ST_ACTION, 0, SA_CHECK_UPDATE, 0, 0, NULL, NULL,
+      "Looks for a newer CubeBrowser on GitHub and can install it for you." },
+    { CAT_DATA, "upd.auto", "Check for updates at start", ST_BOOL, O(update_auto), 0, 1, 1, NULL, NULL,
+      "A quick check when the network connects. The start page says when there's a new version." },
     { CAT_DATA, NULL, "Move data folder", ST_ACTION, 0, SA_MOVE_DATA, 0, 0, NULL, NULL,
       "Where settings, bookmarks and cookies are kept. Press twice to confirm." },
     { CAT_DATA, NULL, "Clear cookies and logins", ST_ACTION, 0, SA_CLEAR_COOKIES, 0, 0, NULL, NULL,
@@ -210,6 +214,7 @@ void settings_defaults(Settings *s) {
     storage_path(s->ca_path, sizeof(s->ca_path), "cacert.pem");
     strcpy(s->dl_folder, "sd:/downloads");
     s->dl_connections = 4;
+    s->update_auto = 1;
     s->exit_action = 0;
     strcpy(s->swiss_dol, "sd:/ipl.dol");
 }

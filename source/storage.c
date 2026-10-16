@@ -15,6 +15,7 @@ static bool mounted;
 static const char *device = "none";
 static char data_dir[320] = STORAGE_ROOT_DIR;
 static char prog_dir[300];      /* "" = unknown; "sd:" = root of the card */
+static char prog_file[300];     /* the .dol itself, "" = unknown */
 static char moved_from[320];
 
 static bool is_dir(const char *p) {
@@ -40,6 +41,7 @@ static bool has_settings(const char *dir) {
  * our SD card. */
 static void find_program_dir(const char *argv0) {
     prog_dir[0] = 0;
+    prog_file[0] = 0;
     if (!argv0 || !*argv0) return;
     const char *colon = strstr(argv0, ":/");
     const char *path = colon ? colon + 1 : argv0;
@@ -47,6 +49,7 @@ static void find_program_dir(const char *argv0) {
     char full[300];
     if (snprintf(full, sizeof(full), "sd:%s", path) >= (int)sizeof(full)) return;
     if (!is_file(full)) return;
+    snprintf(prog_file, sizeof(prog_file), "%s", full);
     char *slash = strrchr(full, '/');
     *slash = 0;                       /* "sd:/apps/cb" or "sd:" */
     snprintf(prog_dir, sizeof(prog_dir), "%s", full);
@@ -175,6 +178,7 @@ bool storage_ok(void) { return mounted; }
 const char *storage_device_name(void) { return device; }
 const char *storage_dir(void) { return data_dir; }
 const char *storage_program_dir(void) { return prog_dir[0] ? prog_dir : NULL; }
+const char *storage_program_file(void) { return prog_file[0] ? prog_file : NULL; }
 bool storage_dir_is_root(void) { return strcmp(data_dir, STORAGE_ROOT_DIR) == 0; }
 const char *storage_moved_from(void) { return moved_from[0] ? moved_from : NULL; }
 

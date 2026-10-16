@@ -4,6 +4,7 @@
 #include "conn.h"
 #include "diag.h"
 #include "cookies.h"
+#include "update.h"
 #include <gccore.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -121,6 +122,10 @@ static void *worker_main(void *arg) {
             } else if (kind == JOB_DOWNLOAD) {
                 diag_note(DIAG_WORKER, "saving file %.120s", task_path);
                 task_ok = download_to_file(job_url, task_path, &dl_progress, &cancel_flag, task_err, sizeof(task_err));
+            } else if (kind == JOB_UPDATE_CHECK) {
+                update_worker_check(&cancel_flag);
+            } else if (kind == JOB_UPDATE_INSTALL) {
+                update_worker_install(&cancel_flag);
             } else if (kind == JOB_UNZIP) {
                 diag_note(DIAG_WORKER, "unzipping %.120s", task_path);
                 task_ok = unzip_file(task_path, task_dest, &uz_progress, &cancel_flag, task_err, sizeof(task_err));
@@ -257,7 +262,24 @@ bool fetch_take_task(bool *ok, char *err, size_t errlen) {
     return true;
 }
 
-void fetch_cancel(void) { if (state == FETCH_BUSY) cancel_flag = 1; }
+/* Page navigation cancels the current job, except a software update
+ * (cut off halfway, it would just have to start again). */
+void fetch_cancel(void) { if (state == FETCH_BUSY && kind != JOB_UPDATE_CHECK && kind != JOB_UPDATE_INSTALL) cancel_flag = 1; }
+void fetch_cancel_update(void) { if (state == FETCH_BUSY && (kind == JOB_UPDATE_CHECK || kind == JOB_UPDATE_INSTALL)) cancel_flag = 1; }
+
+bool fetch_start_update(bool install) {
+    if (state != FETCH_IDLE || !net_ready) return false;
+    memset(&dl_progress, 0, sizeof(dl_progress));
+    dl_progress.total = -1;
+    memset(&uz_progress, 0, sizeof(uz_progress));
+    return start_task(install ? JOB_UPDATE_INSTALL : JOB_UPDATE_CHECK);
+}
+
+bool fetch_take_update(void) {
+    if (state != FETCH_DONE || (kind != JOB_UPDATE_CHECK && kind != JOB_UPDATE_INSTALL)) return false;
+    state = FETCH_IDLE;
+    return true;
+}
 FetchState fetch_state(void) { return state; }
 JobKind fetch_job_kind(void) { return kind; }
 const char *fetch_stage(void) { return stage_buf; }
@@ -284,6 +306,7 @@ bool fetch_take_image(ImageResult *out) {
 void fetch_discard(void) {
     if (state != FETCH_DONE) return;
     if (kind == JOB_DOWNLOAD || kind == JOB_UNZIP) { state = FETCH_IDLE; return; }
+    if (kind == JOB_UPDATE_CHECK || kind == JOB_UPDATE_INSTALL) return;   /* update.c collects these */
     if (kind == JOB_IMAGE) image_free(&img_result.img);
     else http_result_free(&result);
     state = FETCH_IDLE;

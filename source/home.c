@@ -10,6 +10,8 @@
 #include "input.h"
 #include "settings.h"
 #include "version.h"
+#include "update.h"
+#include "fetch.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -288,15 +290,26 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
     caps(hx + 42, cy + (bar_h - gfx_line_height(FONT_UI, tsz)) / 2, tsz, 0.8f, color_alpha(gold, a0),
          color_alpha(rgba(0, 0, 0, 255), a0), "CubeBrowser");
     float title_end = hx + 42 + caps_width(tsz, 0.8f, "CubeBrowser");
-    const char *bubble = "WELCOME TO v" CB_VERSION;
+    /* the welcome bubble, or a clickable notice when an update is ready */
+    char bubble[48];
+    UpdateState us = update_state();
+    bool upd = us == UPD_AVAILABLE || us == UPD_INSTALLING || us == UPD_INSTALLED;
+    if (us == UPD_INSTALLED) snprintf(bubble, sizeof(bubble), "RESTART FOR v%s", update_latest_version());
+    else if (upd) snprintf(bubble, sizeof(bubble), "UPDATE AVAILABLE: v%s", update_latest_version());
+    else snprintf(bubble, sizeof(bubble), "WELCOME TO v%s", CB_VERSION);
     float bub_w = caps_width(9.5f, 1.1f, bubble) + 20, bub_h = 22;
     float bub_x = hx + hw - 22 - bub_w, bub_y = cy + (bar_h - bub_h) / 2;
     if (bub_x > title_end + 20) {
-        gfx_rect(bub_x, bub_y, bub_w, bub_h, color_alpha(white, a0));
-        gfx_tri(bub_x + 1, bub_y + 6, bub_x + 1, bub_y + 15, bub_x - 8, bub_y + 12, color_alpha(white, a0));
+        bool bhov = upd && ui_hover(ui_id("home-update", 0), bub_x - 8, bub_y, bub_w + 8, bub_h);
+        Color bg = upd ? (bhov ? white : gold) : white;
+        if (upd && g_set.animations && !bhov) bg = color_lerp(gold, white, 0.25f + 0.25f * sinf(ui_time() * 3));   /* gentle pulse */
+        gfx_rect(bub_x, bub_y, bub_w, bub_h, color_alpha(bg, a0));
+        gfx_tri(bub_x + 1, bub_y + 6, bub_x + 1, bub_y + 15, bub_x - 8, bub_y + 12, color_alpha(bg, a0));
         dashed_rect(bub_x + 3, bub_y + 3, bub_w - 6, bub_h - 6, color_alpha(navy, a0));
         caps(bub_x + 10, bub_y + (bub_h - gfx_line_height(FONT_UI, 9.5f)) / 2, 9.5f, 1.1f, color_alpha(navy, a0),
              rgba(0, 0, 0, 0), bubble);
+        if (upd && clicked(bhov, input_ok)) { act = HOME_OPEN_URL; *url = "about:update"; }
+        if (bhov) *hover_url = "about:update";
     }
     cy += bar_h + 8;
 
@@ -614,6 +627,201 @@ HomeAction home_help_draw(float x, float y, float w, float h, bool input_ok) {
         float sh = fmaxf(24, view_h * view_h / content_h), sy = view_y + (view_h - sh) * (help_scroll / max_s);
         gfx_rect(hx + hw - 4, view_y, 4, view_h, color_alpha(navy, 0.5f));
         gfx_rect(hx + hw - 4, sy, 4, sh, gold);
+    }
+    gfx_clear_clip();
+    return act;
+}
+
+
+/* ========================================================= Software Update
+ * about:update: checks GitHub, shows the release notes, installs, restarts. */
+
+void home_update_reset(void) { intro_start = ui_time(); }
+
+/* Flat button as on the old console sites; returns true when chosen. */
+static bool flat_button(const char *id, float x, float y, float h, const char *label, bool back, bool input_ok, float a,
+                        float *w_out) {
+    Color navy = rgba(26, 24, 66, 255), gold = opaque(theme()->accent), white = rgba(255, 255, 255, 255);
+    Color panel = opaque(theme()->panel_top);
+    float w = caps_width(10.5f, 1.2f, label) + 40;
+    if (w_out) *w_out = w;
+    UiId uid = ui_id(id, 0);
+    bool hov = ui_hover(uid, x, y, w, h);
+    cut_rect(x, y, w, h, 7, color_alpha(hov ? gold : panel, a));
+    cut_outline(x, y, w, h, 7, 1.5f, color_alpha(navy, a));
+    float ax = x + 14, ay = y + h / 2;
+    gfx_circle(ax, ay, 7, color_alpha(navy, a));
+    if (back) gfx_tri(ax + 2.5f, ay - 4, ax + 2.5f, ay + 4, ax - 4, ay, color_alpha(hov ? white : gold, a));
+    else gfx_tri(ax - 2.5f, ay - 4, ax - 2.5f, ay + 4, ax + 4, ay, color_alpha(hov ? white : gold, a));
+    caps(x + 28, y + (h - gfx_line_height(FONT_UI, 10.5f)) / 2, 10.5f, 1.2f, color_alpha(navy, a), rgba(0, 0, 0, 0), label);
+    return clicked(hov, input_ok);
+}
+
+HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
+    const Theme *t = theme();
+    HomeAction act = HOME_NONE;
+    Color base = opaque(color_lerp(t->panel_bottom, t->bg_top, 0.25f));
+    Color navy = rgba(26, 24, 66, 255), gold = opaque(t->accent), white = rgba(255, 255, 255, 255);
+    Color pale = opaque(color_lerp(t->panel_top, white, 0.62f)), orange = rgba(240, 132, 24, 255);
+    gfx_rrect(x, y, w, h, 14, base);
+    gfx_set_clip(x, y, w, h);
+    float m = 10, hx = x + m, hw = w - 2 * m, cy = y + m;
+    UpdateState us = update_state();
+
+    /* header bar */
+    float a0 = intro(0), bar_h = 34;
+    cut_rect(hx, cy, hw, bar_h, 12, color_alpha(navy, a0));
+    {
+        float ex = hx + 22, ey = cy + bar_h / 2, s = 11;
+        float top[8] = { ex, ey - s, ex + s, ey - s * 0.5f, ex, ey, ex - s, ey - s * 0.5f };
+        float left[8] = { ex - s, ey - s * 0.5f, ex, ey, ex, ey + s, ex - s, ey + s * 0.5f };
+        float right[8] = { ex, ey, ex + s, ey - s * 0.5f, ex + s, ey + s * 0.5f, ex, ey + s };
+        gfx_quad(top, color_alpha(rgba(170, 160, 240, 255), a0));
+        gfx_quad(left, color_alpha(rgba(110, 96, 210, 255), a0));
+        gfx_quad(right, color_alpha(rgba(76, 62, 168, 255), a0));
+    }
+    float tsz = w < 700 ? 21 : 23;
+    caps(hx + 42, cy + (bar_h - gfx_line_height(FONT_UI, tsz)) / 2, tsz, 0.8f, color_alpha(gold, a0),
+         color_alpha(rgba(0, 0, 0, 255), a0), "Software Update");
+    float title_end = hx + 42 + caps_width(tsz, 0.8f, "Software Update");
+    char bubble[48];
+    snprintf(bubble, sizeof(bubble), "YOU HAVE v%s", CB_VERSION);
+    float bub_w = caps_width(9.5f, 1.1f, bubble) + 20, bub_h = 22;
+    float bub_x = hx + hw - 22 - bub_w, bub_y = cy + (bar_h - bub_h) / 2;
+    if (bub_x > title_end + 20) {
+        gfx_rect(bub_x, bub_y, bub_w, bub_h, color_alpha(white, a0));
+        gfx_tri(bub_x + 1, bub_y + 6, bub_x + 1, bub_y + 15, bub_x - 8, bub_y + 12, color_alpha(white, a0));
+        dashed_rect(bub_x + 3, bub_y + 3, bub_w - 6, bub_h - 6, color_alpha(navy, a0));
+        caps(bub_x + 10, bub_y + (bub_h - gfx_line_height(FONT_UI, 9.5f)) / 2, 9.5f, 1.1f, color_alpha(navy, a0),
+             rgba(0, 0, 0, 0), bubble);
+    }
+    cy += bar_h + 8;
+
+    /* status panel */
+    float a1 = intro(1);
+    char line1[160] = "", line2[300] = "";
+    float progress = -1;   /* 0..1 shows a bar */
+    switch (us) {
+    case UPD_NONE:
+    case UPD_CHECKING:
+        snprintf(line1, sizeof(line1), "Checking GitHub for a newer version...");
+        snprintf(line2, sizeof(line2), "Releases come from github.com/%s", UPDATE_REPO);
+        break;
+    case UPD_LATEST:
+        snprintf(line1, sizeof(line1), "You have the latest version.");
+        snprintf(line2, sizeof(line2), "CubeBrowser v%s is up to date.", CB_VERSION);
+        break;
+    case UPD_AVAILABLE:
+        snprintf(line1, sizeof(line1), "Version %s is available!", update_latest_version());
+        snprintf(line2, sizeof(line2), "You have v%s. Installing keeps your settings, bookmarks and logins.", CB_VERSION);
+        break;
+    case UPD_CHECK_FAILED:
+        snprintf(line1, sizeof(line1), "Couldn't check for updates.");
+        snprintf(line2, sizeof(line2), "%s", update_error());
+        break;
+    case UPD_INSTALLING: {
+        const DownloadProgress *dp = fetch_download_progress();
+        const UnzipProgress *up = fetch_unzip_progress();
+        UpdateStep st = update_step();
+        snprintf(line1, sizeof(line1), "Installing version %s...", update_latest_version());
+        if (st == UPD_STEP_DOWNLOAD) {
+            if (dp->total > 0) {
+                progress = (float)dp->done / (float)dp->total * 0.8f;
+                snprintf(line2, sizeof(line2), "Downloading: %lld of %lld KB", dp->done / 1024, dp->total / 1024);
+            } else {
+                progress = 0;
+                snprintf(line2, sizeof(line2), "Connecting to GitHub...");
+            }
+        } else if (st == UPD_STEP_UNPACK) {
+            progress = 0.8f + (up->total ? 0.15f * (float)up->done / (float)up->total : 0);
+            snprintf(line2, sizeof(line2), "Unpacking and checking the new version...");
+        } else {
+            progress = 0.97f;
+            snprintf(line2, sizeof(line2), "Putting the new version in place...");
+        }
+        break;
+    }
+    case UPD_INSTALLED:
+        snprintf(line1, sizeof(line1), "Version %s is installed.", update_latest_version());
+        snprintf(line2, sizeof(line2), "Restart CubeBrowser to start using it. The old version was kept as a backup (.old).");
+        progress = 1;
+        break;
+    case UPD_FAILED:
+        snprintf(line1, sizeof(line1), "The update couldn't be installed.");
+        snprintf(line2, sizeof(line2), "%s", update_error());
+        break;
+    }
+    float ts = w < 700 ? 13.0f : 14.0f, tw = hw - 28;
+    float l2h = wrap(FONT_BODY, ts, 0, 0, tw, white, line2, false);
+    float ph = 12 + gfx_line_height(FONT_UI, 16) + 4 + l2h + (progress >= 0 ? 22 : 0) + 8;
+    cut_rect(hx, cy, hw, ph, 8, color_alpha(pale, a1));
+    cut_outline(hx, cy, hw, ph, 8, 1.5f, color_alpha(navy, a1));
+    gfx_rect(hx + 1, cy + 1, 5, ph - 2 - 8, color_alpha(orange, a1));
+    float ty = cy + 9;
+    if (us == UPD_CHECKING || us == UPD_INSTALLING || us == UPD_NONE) {
+        ui_spinner(hx + hw - 24, cy + 20, 18);
+    }
+    caps(hx + 15, ty, 16, 0.6f, color_alpha(navy, a1), rgba(0, 0, 0, 0), line1);
+    ty += gfx_line_height(FONT_UI, 16) + 4;
+    ty += wrap(FONT_BODY, ts, hx + 15, ty, tw, color_alpha(navy, a1), line2, true);
+    if (progress >= 0) {
+        float bx = hx + 15, bw = hw - 30, by = ty + 6;
+        gfx_rect(bx, by, bw, 10, color_alpha(navy, a1));
+        gfx_rect(bx + 2, by + 2, (bw - 4) * fminf(1, progress), 6, color_alpha(gold, a1));
+    }
+    cy += ph + 9;
+
+    /* buttons pinned at the bottom */
+    float row_h = 24, by = y + h - m - row_h, bx = hx, bw = 0;
+    float a3 = intro(3);
+    if (us == UPD_AVAILABLE || us == UPD_FAILED) {
+        if (flat_button("upd-install", bx, by, row_h, us == UPD_FAILED ? "TRY AGAIN" : "DOWNLOAD AND INSTALL", false, input_ok, a3, &bw))
+            act = HOME_UPDATE_INSTALL;
+        bx += bw + 10;
+    }
+    if (us == UPD_INSTALLED) {
+        if (flat_button("upd-restart", bx, by, row_h, "RESTART NOW", false, input_ok, a3, &bw)) act = HOME_UPDATE_RESTART;
+        bx += bw + 10;
+    }
+    if (us == UPD_LATEST || us == UPD_CHECK_FAILED) {
+        if (flat_button("upd-check", bx, by, row_h, "CHECK AGAIN", false, input_ok, a3, &bw)) act = HOME_UPDATE_CHECK;
+        bx += bw + 10;
+    }
+    if (us != UPD_INSTALLING) {
+        if (flat_button("upd-back", bx, by, row_h, "BACK TO START PAGE", true, input_ok, a3, &bw)) act = HOME_OPEN_URL;
+    } else {
+        if (flat_button("upd-stop", bx, by, row_h, "STOP", true, input_ok, a3, &bw)) act = HOME_UPDATE_STOP;
+    }
+
+    /* release notes in the space between */
+    const char *notes = update_notes();
+    if ((us == UPD_AVAILABLE || us == UPD_INSTALLING || us == UPD_INSTALLED || us == UPD_FAILED) && notes[0]) {
+        float a2 = intro(2);
+        caps(hx + 2, cy, 15, 1.0f, color_alpha(white, a2), color_alpha(rgba(20, 16, 50, 200), a2), "WHAT'S NEW");
+        float dx = hx + 2 + caps_width(15, 1.0f, "WHAT'S NEW") + 14;
+        dotted_hline(dx, cy + 9, hx + hw - dx, color_alpha(opaque(t->panel_top), 0.8f * a2));
+        cy += 21;
+        float nh = by - 8 - cy;
+        if (nh > 30) {
+            cut_rect(hx, cy, hw, nh, 8, color_alpha(pale, a2));
+            cut_outline(hx, cy, hw, nh, 8, 1.5f, color_alpha(navy, a2));
+            gfx_set_clip(hx + 4, cy + 4, hw - 8, nh - 8);
+            /* line by line, so the notes' own line breaks are kept */
+            float ny = cy + 7;
+            const char *p = notes;
+            char ln[400];
+            while (*p && ny < cy + nh) {
+                const char *e = strchr(p, '\n');
+                size_t n = e ? (size_t)(e - p) : strlen(p);
+                if (n >= sizeof(ln)) n = sizeof(ln) - 1;
+                memcpy(ln, p, n);
+                ln[n] = 0;
+                if (ln[0]) ny += wrap(FONT_BODY, ts, hx + 15, ny, tw, color_alpha(navy, a2), ln, true);
+                else ny += gfx_line_height(FONT_BODY, ts) * 0.5f;
+                p = e ? e + 1 : p + n;
+            }
+            gfx_set_clip(x, y, w, h);
+        }
     }
     gfx_clear_clip();
     return act;

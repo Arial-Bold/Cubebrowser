@@ -4,7 +4,8 @@
 #pragma once
 #include <stdbool.h>
 
-typedef enum { HOME_NONE, HOME_OPEN_URL, HOME_SEARCH, HOME_BOOKMARKS, HOME_HELP, HOME_SETTINGS } HomeAction;
+typedef enum { HOME_NONE, HOME_OPEN_URL, HOME_SEARCH, HOME_BOOKMARKS, HOME_HELP, HOME_SETTINGS,
+               HOME_UPDATE_INSTALL, HOME_UPDATE_RESTART, HOME_UPDATE_CHECK, HOME_UPDATE_STOP } HomeAction;
 
 /* Call when the start page is (re)opened: replays the intro animation. */
 void home_reset(void);
@@ -17,3 +18,8 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
  * "Back to start page" is chosen. Scrolls by itself. */
 void home_help_reset(void);
 HomeAction home_help_draw(float x, float y, float w, float h, bool input_ok);
+
+/* Software Update (about:update): status, release notes and buttons.
+ * Returns HOME_OPEN_URL for "Back to start page", or a HOME_UPDATE_* action. */
+void home_update_reset(void);
+HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok);

@@ -14,6 +14,7 @@
 #include "conn.h"
 #include "dolload.h"
 #include "cookies.h"
+#include "update.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -26,6 +27,7 @@ static float scroll, scroll_target;
 static int capture = -1;          /* def index waiting for a button press */
 static bool capture_armed;
 static int confirm_action = -1;   /* def index pressed once */
+static bool leave_now;            /* an action wants the browser shown */
 
 /* .dol picker */
 #define PICK_MAX 48
@@ -127,6 +129,11 @@ static void run_action(int idx) {
         ui_toast(msg);
         break;
     }
+    case SA_CHECK_UPDATE:
+        update_request_check(false);
+        browser_navigate("about:update");
+        leave_now = true;
+        break;
     case SA_SAVE_NOW:
         if (settings_save()) { dirty = false; ui_toast("Settings saved"); }
         else ui_toast("Couldn't save - is the SD card inserted?");
@@ -438,6 +445,7 @@ bool settings_ui_frame(bool interactive) {
     }
 
     if (pick_count >= 0) draw_picker(interactive && !osk_active());
+    if (leave_now) { leave_now = false; leave = true; }
 
     if (leave) {
         capture = -1;

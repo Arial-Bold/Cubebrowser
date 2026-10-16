@@ -9,7 +9,7 @@
 #include "unzip.h"
 
 typedef enum { FETCH_IDLE, FETCH_BUSY, FETCH_DONE } FetchState;
-typedef enum { JOB_PAGE, JOB_IMAGE, JOB_CSS, JOB_DOWNLOAD, JOB_UNZIP } JobKind;
+typedef enum { JOB_PAGE, JOB_IMAGE, JOB_CSS, JOB_DOWNLOAD, JOB_UNZIP, JOB_UPDATE_CHECK, JOB_UPDATE_INSTALL } JobKind;
 
 typedef struct {
     int tag;              /* caller's identifier */
@@ -40,4 +40,8 @@ const DownloadProgress *fetch_download_progress(void);
 const UnzipProgress *fetch_unzip_progress(void);
 bool        fetch_take_task(bool *ok, char *err, size_t errlen);   /* finished download/unzip */
 bool        is_download_name(const char *url);
+/* Software update jobs (update.c). Page loads never cancel these. */
+bool        fetch_start_update(bool install);
+bool        fetch_take_update(void);              /* true once one has finished; back to IDLE */
+void        fetch_cancel_update(void);
 void        fetch_retry_network(void);

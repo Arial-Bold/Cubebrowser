@@ -10,6 +10,7 @@
 #include "settings.h"
 #include "storage.h"
 #include "home.h"
+#include "update.h"
 #include "sound.h"
 #include "url.h"
 #include "image.h"
@@ -275,6 +276,11 @@ static void start_load(const char *url, const char *post) {
         { show_html(home_html, "about:home", false); home_reset(); }
         else if (!strcasecmp(url, "about:help"))
         { show_html(help_html, "about:help", false); home_help_reset(); }
+        else if (!strcasecmp(url, "about:update")) {
+            show_html("<title>Software Update</title>", "about:update", false);
+            home_update_reset();
+            if (update_state() == UPD_NONE || update_state() == UPD_CHECK_FAILED) update_request_check(false);
+        }
         else
             show_error(url, "There's no built-in page with that name.");
         if (restore_scroll >= 0) { page.scroll = page.scroll_target = restore_scroll; restore_scroll = -1; }
@@ -747,6 +753,7 @@ static int images_pending(void) {
 
 static void handle_fetch_result(void) {
     if (fetch_state() != FETCH_DONE) return;
+    if (fetch_job_kind() == JOB_UPDATE_CHECK || fetch_job_kind() == JOB_UPDATE_INSTALL) return;   /* update_poll() takes these */
     if (fetch_job_kind() == JOB_DOWNLOAD || fetch_job_kind() == JOB_UNZIP) { handle_task_result(); return; }
     if (queued) {
         /* a new page was requested while something was downloading */
@@ -996,6 +1003,13 @@ bool browser_take_settings_request(void) {
 void browser_frame(bool interactive) {
     const Theme *t = theme();
     bool modal = osk_active() || bm_open || dl_state != DL_IDLE;
+    /* software update: one quiet check once the network is up (if enabled) */
+    static bool auto_checked;
+    if (!auto_checked && fetch_net_ready()) {
+        auto_checked = true;
+        if (g_set.update_auto) update_request_check(true);
+    }
+    update_poll();
     handle_fetch_result();
 
     float sx, sy, sw, sh;
@@ -1071,7 +1085,19 @@ void browser_frame(bool interactive) {
     const char *home_hover = NULL;
     bool on_home = has_page && !strcmp(page.url, "about:home");
     bool on_help = has_page && !strcmp(page.url, "about:help");
-    if (on_help) {
+    bool on_update = has_page && !strcmp(page.url, "about:update");
+    if (on_update) {
+        HomeAction ua = home_update_draw(cx, cy, cw, ch, input_ok);
+        if (ua != HOME_NONE) sound_play(SFX_SELECT);
+        if (ua == HOME_OPEN_URL) navigate("about:home", NULL, true);
+        else if (ua == HOME_UPDATE_INSTALL) update_request_install();
+        else if (ua == HOME_UPDATE_CHECK) update_request_check(false);
+        else if (ua == HOME_UPDATE_STOP) fetch_cancel_update();
+        else if (ua == HOME_UPDATE_RESTART) {
+            char err[256];
+            if (!update_restart(err, sizeof(err))) { ui_toast(err); sound_play(SFX_ERROR); }
+        }
+    } else if (on_help) {
         /* Controls & Tips draws itself too (home.c) */
         if (home_help_draw(cx, cy, cw, ch, input_ok) == HOME_OPEN_URL) {
             sound_play(SFX_SELECT);
