@@ -97,6 +97,8 @@ static void run_image_job(void) {
         diag_note(DIAG_WORKER, "decoding picture (%u bytes)", (unsigned)r.body_len);
         ir.ok = image_decode((const unsigned char *)r.body, r.body_len, job_max_w, job_max_h, MAX_SRC_PIXELS,
                              &ir.img, ir.error, sizeof(ir.error));
+        if (!ir.ok) http_log_note("pic     | couldn't show: %.60s (%s, %u bytes) | %.70s", ir.error, r.content_type,
+                                  (unsigned)r.body_len, job_url);
     }
     http_result_free(&r);
     img_result = ir;

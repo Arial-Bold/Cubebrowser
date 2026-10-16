@@ -14,6 +14,7 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+#include <stdarg.h>
 #ifdef GEKKO
 #include <ogc/lwp_watchdog.h>
 #endif
@@ -175,6 +176,15 @@ static void plog_add(const char *line) {
     plog_dirty = true;
 }
 
+void http_log_note(const char *fmt, ...) {
+    char l[200];
+    va_list a;
+    va_start(a, fmt);
+    vsnprintf(l, sizeof(l), fmt, a);
+    va_end(a);
+    plog_add(l);
+}
+
 void http_log_flush(void) {
     if (!plog_dirty) return;
     plog_dirty = false;
@@ -251,6 +261,15 @@ static bool contains_nocase(const char *hay, const char *needle) {
     return false;
 }
 
+static void log_failure(const char *accept, const char *post, int status, double t_start, const char *error,
+                        const Url *u) {
+    const char *kind = !accept ? (post ? "form" : "page") : (strstr(accept, "css") ? "css " : (strstr(accept, "image") ? "pic " : "file"));
+    char l[200];
+    snprintf(l, sizeof(l), "%s %3d | FAILED after %5d ms: %.60s | %s%.50s", kind, status, (int)(ms_clock() - t_start), error,
+             u->host, u->path);
+    plog_add(l);
+}
+
 static int fetch_once(const char *url, const char *post, const char *accept, HttpResult *res,
                       const HttpHooks *hooks, char *location, size_t loclen) {
     Url u;
@@ -269,8 +288,10 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
     } else {
         http_close_idle();
         if (!conn_open(&kconn, u.host, u.port, tls, hooks ? hooks->cancel : NULL, hooks ? hooks->stage : NULL,
-                       res->error, sizeof(res->error)))
+                       res->error, sizeof(res->error))) {
+            log_failure(accept, post, 0, t_start, res->error, &u);
             return FO_FAIL;
+        }
         kopen = true;
         snprintf(kkey, sizeof(kkey), "%s", key);
     }
@@ -303,6 +324,7 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
         http_close_idle();
         if (reused) return FO_RETRY;   /* the server had closed the idle connection */
         snprintf(res->error, sizeof(res->error), "Couldn't send the request.");
+        log_failure(accept, post, 0, t_start, res->error, &u);
         return FO_FAIL;
     }
 
@@ -421,6 +443,7 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
     return FO_OK;
 
 fail:
+    log_failure(accept, post, res->status, t_start, res->error, &u);
     free(r);
     http_close_idle();
     return FO_FAIL;

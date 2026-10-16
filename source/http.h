@@ -36,6 +36,8 @@ bool http_fetch(const char *url, const char *post_body, const char *accept, Http
 void http_close_idle(void);
 /* Saves page.log (timings of recent requests) to the data folder if it changed. */
 void http_log_flush(void);
+/* Adds a free-form line to page.log (e.g. a picture that couldn't be decoded). */
+void http_log_note(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /* ---- streaming (downloads): the body is read piece by piece, never held whole ---- */
 

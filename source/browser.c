@@ -664,6 +664,8 @@ static void apply_image(ImageResult *ir) {
     PageImage *im = &page.images[idx];
     if (!ir->ok) {
         im->state = IMG_FAILED;
+        /* with a declared size its box is already in place: nothing moves */
+        if (im->decl_w && im->decl_h) return;
     } else if (page.image_bytes + ir->img.bytes > IMAGE_BUDGET) {
         image_free(&ir->img);
         im->state = IMG_SKIPPED;

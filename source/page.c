@@ -730,7 +730,12 @@ static __attribute__((noinline)) void emit_image(L *c, Flow *f, Node *n, const S
     PageImage *im = (n->index >= 0) ? &p->images[n->index] : NULL;
     /* skipped = blank placeholder or tracking pixel: nothing to show */
     if (g_set.load_images && im && im->state == IMG_SKIPPED) return;
-    if (!g_set.load_images || !im || im->state == IMG_FAILED || im->state == IMG_SKIPPED) {
+    /* A picture that couldn't be loaded but whose size the page declared
+     * keeps a box of that size (drawn with its description clipped inside),
+     * as browsers of the time did: old layouts are built from fixed-size
+     * pictures, and letting the description flow as text breaks them. */
+    bool keep_box = g_set.load_images && im && im->state == IMG_FAILED && im->decl_w > 0 && im->decl_h > 0;
+    if (!keep_box && (!g_set.load_images || !im || im->state == IMG_FAILED || im->state == IMG_SKIPPED)) {
         const char *alt = dom_attr(n, "alt");
         char shown[200];
         if (alt && *alt && g_set.show_alt) snprintf(shown, sizeof(shown), "[%s]", alt);
@@ -1754,6 +1759,24 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
             PageImage *im = &p->images[b->text];
             if (im->state == IMG_READY) {
                 gfx_image_draw(&im->img, bx, by, b->w, b->h, rgba(255, 255, 255, 255));
+            } else if (im->state == IMG_FAILED) {
+                /* couldn't be loaded: a thin frame with the description inside */
+                bool light = luminance(p->bg) > 0.5f;
+                Color edge = light ? rgba(0, 0, 0, 60) : rgba(255, 255, 255, 70);
+                Color ink = light ? rgba(60, 60, 70, 255) : rgba(220, 220, 230, 255);
+                gfx_rect(bx, by, b->w, 1, edge);
+                gfx_rect(bx, by + b->h - 1, b->w, 1, edge);
+                gfx_rect(bx, by, 1, b->h, edge);
+                gfx_rect(bx + b->w - 1, by, 1, b->h, edge);
+                const char *alt = dom_attr(im->node, "alt");
+                float ts = fminf(13.0f, b->h - 4);
+                if (alt && *alt && g_set.show_alt && ts >= 7 && b->w > 12) {
+                    clip_inter(x, y, w, h, bx + 2, by + 1, b->w - 4, b->h - 2);
+                    float lh = gfx_line_height(FONT_UI, ts);
+                    float ty = b->h > lh * 2 ? by + 3 : by + (b->h - lh) * 0.5f;
+                    gfx_text(FONT_UI, ts, bx + 3, ty, ink, alt, gfx_text_fit(FONT_UI, ts, alt, -1, b->w - 6));
+                    gfx_set_clip(x, y, w, h);
+                }
             } else {
                 Color base = luminance(p->bg) > 0.5f ? rgba(0, 0, 0, 22) : rgba(255, 255, 255, 30);
                 Color ink = luminance(p->bg) > 0.5f ? rgba(0, 0, 0, 70) : rgba(255, 255, 255, 90);
