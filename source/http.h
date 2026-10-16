@@ -60,11 +60,15 @@ void http_stream_close(HttpStream *st);
 typedef struct HttpKeep HttpKeep;
 HttpKeep *http_keep_new(void);
 void http_keep_free(HttpKeep *k);
-/* Fetches bytes first..last (inclusive) of url into out. Reuses the
- * connection between calls. *got counts bytes as they arrive. Returns the
- * number of bytes (last-first+1) or -1 with err filled. */
-long long http_range_get(HttpKeep *k, const char *url, long long first, long long last, unsigned char *out,
-                         volatile long long *got, const HttpHooks *hooks, char *err, size_t errlen);
+/* Receives one piece of a range response. Return false to refuse it (the
+ * block was handed to another connection): the fetch then stops. */
+typedef bool (*HttpSink)(void *ctx, const unsigned char *data, size_t len);
+
+/* Fetches bytes first..last (inclusive) of url, passing them to sink as they
+ * arrive. Reuses the connection between calls. Returns the number of bytes
+ * (last-first+1) or -1 with err filled. */
+long long http_range_get(HttpKeep *k, const char *url, long long first, long long last, HttpSink sink, void *ctx,
+                         const HttpHooks *hooks, char *err, size_t errlen);
 
 /* Filename from a Content-Disposition header value (empty if none). */
 void http_disposition_filename(const char *value, char *out, size_t outlen);

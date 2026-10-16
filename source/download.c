@@ -4,6 +4,8 @@
 #include "diag.h"
 #include "settings.h"
 #include "thr.h"
+#include "storage.h"
+#include "url.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -104,214 +106,303 @@ static double now_s(void) {
 }
 
 /* ===================================================== parallel downloading
- * One slow connection is limited by the network stack's small receive
- * window, so large files are fetched as 512 KB blocks over several
- * connections at once. Blocks are handed out in order and written in order,
- * so the .part file always holds one contiguous run of data and resuming
- * works exactly as for single-connection downloads. */
+ * One connection is limited by the network stack's small receive window
+ * (about 3 KB), so large files are fetched as 512 KB blocks over several
+ * connections at once. Blocks are written to the card in order, so the .part
+ * file always holds one contiguous run of data and resuming works exactly as
+ * for single-connection downloads.
+ *
+ * Things that go wrong on the GameCube, and what happens:
+ * - A connection freezes (lost packets, then long retransmit back-off): after
+ *   3 s without data its connection is dropped and the rest of the block is
+ *   requested again (the bytes already received are kept).
+ * - The thread can't respond, usually because it's stuck opening a new
+ *   connection (lwIP retries a lost connection request for ~90 s and can't be
+ *   interrupted): after 3 more seconds the block is taken away and given to
+ *   another connection. Whatever the stuck thread receives later is refused,
+ *   because each hand-over bumps the block's generation number.
+ * - Repeated freezes mean the adapter is overrun: use a connection fewer.
+ * - Stopping or finishing never waits more than a few seconds for stuck
+ *   threads; they clean up after themselves (the shared state is freed by
+ *   whoever leaves last). */
 
 #define BLOCK (512 * 1024)
 #define CONN_STACK (128 * 1024)
 #define CONN_PRIO 40
+#define MAX_CONNS 6
 
-enum { B_FREE, B_FILLING, B_READY };
+enum { B_FREE, B_FILLING, B_READY, B_ORPHAN /* partly filled, waiting for a new connection */ };
 
 typedef struct {
     unsigned char *data;
-    long long offset, len;
-    volatile long long got;       /* bytes of this block received so far */
+    long long offset, len, got;   /* got: bytes of this block in data (changed under the lock) */
     int state, owner;
-    /* stall watch (used only by the main loop) */
-    long long seen_offset, seen_got;
-    double moved_at;
+    unsigned gen;                 /* bumped whenever the block changes hands */
+    /* stall watch (main loop only) */
+    long long seen_got;
+    unsigned seen_gen;
+    double moved_at, abort_at;
 } Buf;
 
-#define MAX_CONNS 6
-
 typedef struct {
-    const char *url;
+    char url[URL_MAX];
     long long total, next;          /* next byte offset to hand out */
     Buf *bufs;
-    int nbufs, running;
+    int nbufs, made, running, refs;
     thr_mutex m;
     volatile int *cancel;
-    volatile int abort_conn[MAX_CONNS];   /* per connection: drop and retry the current block */
+    volatile int abort_conn[MAX_CONNS];   /* per connection: drop the connection and retry */
     volatile int active_limit;            /* connections allowed to take new blocks */
-    volatile bool fatal;
+    volatile bool fatal, stop;
     char err[256];
 } Par;
 
 typedef struct { Par *p; int id; } ConnArg;
+typedef struct { Par *p; Buf *b; int id; unsigned gen; } Sink;
+
+/* Last one out frees everything (a stuck thread may outlive the download). */
+static void par_release(Par *p) {
+    thr_lock(&p->m);
+    bool last = --p->refs == 0;
+    thr_unlock(&p->m);
+    if (!last) return;
+    for (int i = 0; i < p->made; i++) free(p->bufs[i].data);
+    free(p->bufs);
+    thr_mutex_free(&p->m);
+    free(p);
+}
+
+static bool block_sink(void *ctx, const unsigned char *data, size_t len) {
+    Sink *s = ctx;
+    Par *p = s->p;
+    Buf *b = s->b;
+    bool ok;
+    thr_lock(&p->m);
+    ok = b->gen == s->gen && b->owner == s->id && b->state == B_FILLING && b->got + (long long)len <= b->len;
+    if (ok) {
+        memcpy(b->data + b->got, data, len);
+        b->got += (long long)len;
+    }
+    thr_unlock(&p->m);
+    return ok;
+}
 
 static void *conn_main(void *arg) {
     Par *p = ((ConnArg *)arg)->p;
     int id = ((ConnArg *)arg)->id;
+    free(arg);
     HttpKeep *k = http_keep_new();
     HttpHooks hooks = { .cancel = &p->abort_conn[id] };
+    char err[256];
     for (;;) {
         Buf *b = NULL;
-        bool stop, idle = false;
+        unsigned gen = 0;
         thr_lock(&p->m);
-        stop = p->fatal || (p->cancel && *p->cancel) || p->next >= p->total || !k;
-        if (!stop && id >= p->active_limit) idle = true;   /* temporarily paused by the speed control */
-        if (!stop && !idle)
+        bool stop = p->stop || p->fatal || (p->cancel && *p->cancel) || !k;
+        if (!stop) {
+            /* a block taken from a stuck connection comes first: the whole
+             * download is waiting on it (any connection may take it, even one
+             * paused by the speed control) */
             for (int i = 0; i < p->nbufs; i++)
-                if (p->bufs[i].state == B_FREE) { b = &p->bufs[i]; break; }
-        if (b) {
-            b->state = B_FILLING;
-            b->owner = id;
-            b->offset = p->next;
-            b->len = p->total - p->next < BLOCK ? p->total - p->next : BLOCK;
-            b->got = 0;
-            p->next += b->len;
+                if (p->bufs[i].state == B_ORPHAN && (!b || p->bufs[i].offset < b->offset)) b = &p->bufs[i];
+            if (!b && id < p->active_limit && p->next < p->total)
+                for (int i = 0; i < p->nbufs; i++)
+                    if (p->bufs[i].state == B_FREE) {
+                        b = &p->bufs[i];
+                        b->offset = p->next;
+                        b->len = p->total - p->next < BLOCK ? p->total - p->next : BLOCK;
+                        b->got = 0;
+                        p->next += b->len;
+                        break;
+                    }
+            if (b) {
+                b->state = B_FILLING;
+                b->owner = id;
+                gen = ++b->gen;
+            }
         }
         thr_unlock(&p->m);
         if (stop) break;
-        if (!b) { thr_sleep_ms(idle ? 50 : 5); continue; }
-        bool ok = false;
-        char err[256] = "";
+        if (!b) { thr_sleep_ms(20); continue; }
+
+        Sink sink = { p, b, id, gen };
         int failures = 0, rescues = 0;
-        while (!ok) {
+        bool done = false, lost = false;
+        for (;;) {
             p->abort_conn[id] = 0;
-            /* continue from whatever part of the block already arrived */
-            long long from = b->offset + b->got;
-            long long r = http_range_get(k, p->url, from, b->offset + b->len - 1, b->data + b->got, &b->got, &hooks,
-                                         err, sizeof(err));
-            if (r >= 0 && b->got == b->len) { ok = true; break; }
-            if (p->cancel && *p->cancel) break;
-            if (p->abort_conn[id]) {            /* stall rescue: retry right away on a fresh connection */
-                if (++rescues > 30) break;
+            thr_lock(&p->m);
+            long long from = b->offset + b->got, last = b->offset + b->len - 1;
+            lost = b->gen != gen;
+            thr_unlock(&p->m);
+            if (lost) break;
+            err[0] = 0;
+            long long r = http_range_get(k, p->url, from, last, block_sink, &sink, &hooks, err, sizeof(err));
+            thr_lock(&p->m);
+            lost = b->gen != gen;      /* taken away while we were stuck */
+            if (!lost && r >= 0 && b->got == b->len) { b->state = B_READY; done = true; }
+            thr_unlock(&p->m);
+            if (done || lost) break;
+            if (p->stop || (p->cancel && *p->cancel)) break;
+            if (p->abort_conn[id]) {             /* stall rescue: retry at once on a fresh connection */
+                if (++rescues > 40) break;
                 continue;
             }
             if (++failures > 5) break;
-            thr_sleep_ms(500 * failures);       /* real error: brief back-off, then retry */
+            thr_sleep_ms(500 * failures);        /* real error: brief back-off, then retry */
         }
+        if (done || lost) continue;
         thr_lock(&p->m);
-        if (ok) b->state = B_READY;
-        else if (!p->fatal && !(p->cancel && *p->cancel)) { p->fatal = true; snprintf(p->err, sizeof(p->err), "%s", err); }
+        if (b->gen == gen && !p->stop && !p->fatal && !(p->cancel && *p->cancel)) {
+            p->fatal = true;
+            snprintf(p->err, sizeof(p->err), "%s", err[0] ? err : "The connection kept failing.");
+        }
         thr_unlock(&p->m);
-        if (!ok) break;
+        break;
     }
     http_keep_free(k);
     thr_lock(&p->m);
     p->running--;
     thr_unlock(&p->m);
+    par_release(p);
     return NULL;
 }
 
-/* Downloads from `have` to `total` into part (which already holds `have` bytes). */
+/* Downloads from `have` to `total` into part (which already holds `have` bytes).
+ * Returns 1 done, 0 failed (err set), -1 couldn't start (use one connection). */
 static int download_parallel(const char *url, const char *part, long long have, long long total, int conns,
                              DownloadProgress *pg, volatile int *cancel, char *err, size_t errlen) {
-    Par p;
-    memset(&p, 0, sizeof(p));
-    p.url = url;
-    p.total = total;
-    p.next = have;
-    p.cancel = cancel;
     if (conns > MAX_CONNS) conns = MAX_CONNS;
-    p.nbufs = conns * 2;
-    p.bufs = calloc((size_t)p.nbufs, sizeof(Buf));
-    if (!p.bufs || !thr_mutex_init(&p.m)) { free(p.bufs); return -1; }
-    int made = 0;
-    for (int i = 0; i < p.nbufs; i++) {
-        p.bufs[i].data = malloc(BLOCK);
-        if (!p.bufs[i].data) break;
-        made++;
+    Par *p = calloc(1, sizeof(Par));
+    if (!p) return -1;
+    snprintf(p->url, sizeof(p->url), "%s", url);
+    p->total = total;
+    p->next = have;
+    p->cancel = cancel;
+    p->nbufs = conns * 2;
+    p->bufs = calloc((size_t)p->nbufs, sizeof(Buf));
+    if (!p->bufs || !thr_mutex_init(&p->m)) { free(p->bufs); free(p); return -1; }
+    for (int i = 0; i < p->nbufs; i++) {
+        p->bufs[i].data = malloc(BLOCK);
+        if (!p->bufs[i].data) break;
+        p->made++;
     }
-    if (made < 2) {   /* not enough memory: let the caller use one connection */
-        for (int i = 0; i < made; i++) free(p.bufs[i].data);
-        free(p.bufs);
-        thr_mutex_free(&p.m);
-        return -1;
-    }
-    p.nbufs = made;
-    if (conns > made) conns = made;
-    p.active_limit = conns;
+    p->refs = 1;
+    if (p->made < 2) { par_release(p); return -1; }   /* not enough memory: let the caller use one connection */
+    p->nbufs = p->made;
+    if (conns > p->made) conns = p->made;
+    p->active_limit = conns;
     FILE *f = fopen(part, have ? "ab" : "wb");
     if (!f) {
-        for (int i = 0; i < made; i++) free(p.bufs[i].data);
-        free(p.bufs);
-        thr_mutex_free(&p.m);
+        par_release(p);
         snprintf(err, errlen, "Couldn't create the file on the SD card.");
         return 0;
     }
-    thr_t th[MAX_CONNS];
-    ConnArg args[MAX_CONNS];
     int started = 0;
     for (int i = 0; i < conns; i++) {
-        args[started].p = &p;
-        args[started].id = started;
-        if (thr_create(&th[started], conn_main, &args[started], CONN_STACK, CONN_PRIO)) started++;
+        ConnArg *a = malloc(sizeof(ConnArg));
+        if (!a) break;
+        a->p = p;
+        a->id = started;
+        thr_lock(&p->m);
+        p->refs++;
+        p->running++;
+        thr_unlock(&p->m);
+        thr_t th;
+        if (thr_create(&th, conn_main, a, CONN_STACK, CONN_PRIO)) {
+            thr_detach(th);   /* never joined: a stuck thread must not hold up the browser */
+            started++;
+        } else {
+            free(a);
+            thr_lock(&p->m);
+            p->refs--;
+            p->running--;
+            thr_unlock(&p->m);
+        }
     }
-    thr_lock(&p.m);
-    p.running = started;
-    if (p.active_limit > started) p.active_limit = started;
-    thr_unlock(&p.m);
-    pg->connections = p.active_limit;
+    if (!started) { fclose(f); par_release(p); return -1; }
+    thr_lock(&p->m);
+    if (p->active_limit > started) p->active_limit = started;
+    thr_unlock(&p->m);
+    pg->connections = p->active_limit;
 
     long long commit = have, mark = have;
-    double tmark = now_s();
-    int peak = 0, slow_secs = 0, steady_secs = 0, rescues = 0;
+    double tstart = now_s(), tmark = tstart, last_change = tstart, last_rescue = -100;
+    int rescues = 0, takeovers = 0, recent_rescues = 0, secs = 0;
     bool write_failed = false;
-    for (int i = 0; i < p.nbufs; i++) p.bufs[i].seen_offset = -1;
+    /* download log: one line per second, kept in memory and saved at the end
+     * (download.log in the data folder) so it doesn't compete with the file */
+    size_t logcap = 48 * 1024, loglen = 0;
+    char *dlog = malloc(logcap);
+    if (dlog)
+        loglen = (size_t)snprintf(dlog, logcap, "%s\nsize %lld, from %lld, %d connections\n sec  KB/s conns rescues takeovers\n",
+                                  url, total, have, started);
+    for (int i = 0; i < p->nbufs; i++) p->bufs[i].seen_gen = (unsigned)-1;
     diag_note(DIAG_WORKER, "download: %d connections", started);
-    while (started) {
-        if (cancel && *cancel)
-            for (int i = 0; i < MAX_CONNS; i++) p.abort_conn[i] = 1;
+
+    for (;;) {
+        bool cancelled = cancel && *cancel;
+        if (cancelled)
+            for (int i = 0; i < MAX_CONNS; i++) p->abort_conn[i] = 1;
         Buf *ready = NULL;
         long long inflight = 0;
         int moving = 0, filling = 0;
         double t = now_s();
-        thr_lock(&p.m);
-        bool all_handed_out = p.next >= p.total;
-        for (int i = 0; i < p.nbufs; i++) {
-            Buf *b = &p.bufs[i];
+        thr_lock(&p->m);
+        bool all_handed_out = p->next >= p->total;
+        for (int i = 0; i < p->nbufs; i++) {
+            Buf *b = &p->bufs[i];
             if (b->state == B_FREE) continue;
             if (b->offset == commit && b->state == B_READY) ready = b;
             inflight += b->state == B_READY ? b->len : b->got;
-            if (b->state == B_FILLING) {
-                filling++;
-                if (b->seen_offset != b->offset || b->seen_got != b->got) {
-                    b->seen_offset = b->offset;
-                    b->seen_got = b->got;
-                    b->moved_at = t;
-                }
-                if (t - b->moved_at < 2.0) moving++;
+            if (b->state != B_FILLING) continue;
+            filling++;
+            if (b->seen_gen != b->gen || b->seen_got != b->got) {
+                b->abort_at = 0;   /* data is flowing (or a new owner started) */
+                b->seen_gen = b->gen;
+                b->seen_got = b->got;
+                b->moved_at = t;
             }
+            if (t - b->moved_at < 2.0) moving++;
         }
-        /* Stall rescue: a connection that has received nothing for 4 seconds
-         * while others are still moving is almost certainly stuck in the
-         * network stack's retransmit back-off. Drop it and re-request the
-         * rest of its block on a fresh connection (the bytes already
-         * received are kept). If everything has gone quiet at once, it is
-         * more likely the whole network, so wait longer (10 s) first
-         * (unless it's the only block left in flight). */
-        if (!(cancel && *cancel))
-            for (int i = 0; i < p.nbufs; i++) {
-                Buf *b = &p.bufs[i];
+        if (!cancelled)
+            for (int i = 0; i < p->nbufs; i++) {
+                Buf *b = &p->bufs[i];
                 if (b->state != B_FILLING) continue;
-                double limit = (moving > 0 || filling == 1) ? 4.0 : 10.0;
-                if (t - b->moved_at > limit) {
-                    p.abort_conn[b->owner] = 1;
-                    b->moved_at = t;
+                /* Stall rescue: nothing for 3 s while others are moving (or
+                 * while it's the only block left). If everything has gone
+                 * quiet at once it's more likely the whole network: 10 s. */
+                double limit = (moving > 0 || filling == 1) ? 3.0 : 10.0;
+                if (b->abort_at == 0 && t - b->moved_at > limit) {
+                    p->abort_conn[b->owner] = 1;
+                    b->abort_at = t;
                     rescues++;
+                    recent_rescues = (t - last_rescue < 15.0) ? recent_rescues + 1 : 1;
+                    last_rescue = t;
+                } else if (b->abort_at > 0 && t - b->abort_at > 3.0) {
+                    /* the connection didn't recover: hand the block over */
+                    b->state = B_ORPHAN;
+                    b->owner = -1;
+                    b->gen++;
+                    b->abort_at = 0;
+                    b->moved_at = t;
+                    takeovers++;
                 }
             }
-        int running = p.running;
-        thr_unlock(&p.m);
+        int running = p->running;
+        thr_unlock(&p->m);
 
         if (ready) {
             if (!write_failed && fwrite(ready->data, 1, (size_t)ready->len, f) != (size_t)ready->len) {
                 write_failed = true;
-                p.fatal = true;
+                p->fatal = true;
             }
             commit += ready->len;
-            thr_lock(&p.m);
+            thr_lock(&p->m);
             ready->state = B_FREE;
-            thr_unlock(&p.m);
+            thr_unlock(&p->m);
             continue;
         }
-        if (running == 0) break;
+        if (commit >= total || p->fatal || cancelled || running == 0) break;
 
         /* progress and speed */
         pg->done = commit + inflight;
@@ -321,44 +412,66 @@ static int download_parallel(const char *url, const char *part, long long have, 
             pg->speed = pg->speed ? (pg->speed * 2 + inst) / 3 : inst;
             mark = pg->done;
             tmark = t;
-            /* Speed control: if throughput collapses (usually lost packets
-             * from pulling data in too fast), use one connection fewer; after
-             * a steady stretch, try one more again. */
-            if (all_handed_out) {
-                /* near the end fewer connections have work, so speed falls
-                 * naturally: that's not a reason to change anything */
-                slow_secs = steady_secs = 0;
-            } else {
-                if (inst > peak) peak = inst;
-                if (peak > 0 && inst < peak / 6) { slow_secs++; steady_secs = 0; }
-                else if (inst >= peak / 2) { steady_secs++; slow_secs = 0; }
+            secs++;
+            /* Connection control: two freezes within 15 s -> one connection
+             * fewer (minimum 2, at most one change per 10 s); 20 s without
+             * any freeze -> try one more (up to the number in Settings). */
+            if (!all_handed_out) {
+                if (recent_rescues >= 2 && p->active_limit > 2 && t - last_change >= 10.0) {
+                    p->active_limit--;
+                    last_change = t;
+                    recent_rescues = 0;
+                    diag_note(DIAG_WORKER, "download: stalls, now %d connections (%d rescues)", p->active_limit, rescues);
+                } else if (p->active_limit < started && t - last_rescue >= 20.0 && t - last_change >= 20.0) {
+                    p->active_limit++;
+                    last_change = t;
+                    diag_note(DIAG_WORKER, "download: steady, now %d connections", p->active_limit);
+                }
             }
-            if (slow_secs >= 4 && p.active_limit > 2) {
-                /* expect proportionally less from fewer connections */
-                peak = peak * (p.active_limit - 1) / p.active_limit;
-                p.active_limit--;
-                slow_secs = 0;
-                diag_note(DIAG_WORKER, "download: slow, now %d connections (%d rescues)", p.active_limit, rescues);
-            } else if (steady_secs >= 20 && p.active_limit < started) {
-                p.active_limit++;
-                steady_secs = 0;
-                diag_note(DIAG_WORKER, "download: steady, now %d connections", p.active_limit);
-            }
-            pg->connections = p.active_limit;
+            pg->connections = p->active_limit;
+            if (dlog && loglen + 64 < logcap)
+                loglen += (size_t)snprintf(dlog + loglen, logcap - loglen, "%4d %5d %5d %7d %9d\n", secs, inst / 1024,
+                                           p->active_limit, rescues, takeovers);
         }
         thr_sleep_ms(20);
     }
-    for (int i = 0; i < MAX_CONNS; i++) p.abort_conn[i] = 1;
-    for (int i = 0; i < started; i++) thr_join(th[i]);
+
+    /* Wind down: tell every connection to stop, wait a little, then leave
+     * any that are stuck inside the network stack to finish on their own. */
+    p->stop = true;
+    for (int i = 0; i < MAX_CONNS; i++) p->abort_conn[i] = 1;
+    int stuck = 0;
+    for (int w = 0; w < 150; w++) {   /* up to 3 s */
+        thr_lock(&p->m);
+        stuck = p->running;
+        thr_unlock(&p->m);
+        if (!stuck) break;
+        thr_sleep_ms(20);
+    }
     bool closed = fclose(f) == 0;
-    for (int i = 0; i < made; i++) free(p.bufs[i].data);
-    free(p.bufs);
-    thr_mutex_free(&p.m);
     pg->done = commit;
-    if (cancel && *cancel) { remove(part); snprintf(err, errlen, "Stopped."); return 0; }
+    bool was_cancelled = cancel && *cancel;
+    if (dlog) {
+        double el = now_s() - tstart;
+        if (loglen + 200 < logcap)
+            loglen += (size_t)snprintf(dlog + loglen, logcap - loglen,
+                                       "%s after %.0f s: %lld of %lld bytes, average %d KB/s, %d rescues, %d takeovers, %d threads still stuck\n%s\n",
+                                       commit >= total ? "finished" : (was_cancelled ? "stopped" : "failed"), el, commit, total,
+                                       el > 0 ? (int)((commit - have) / el / 1024) : 0, rescues, takeovers, stuck, p->err);
+        char lp[400];
+        storage_path(lp, sizeof(lp), "download.log");
+        FILE *lf = fopen(lp, "wb");   /* only the most recent download */
+        if (lf) { fwrite(dlog, 1, loglen, lf); fclose(lf); }
+        free(dlog);
+    }
+    char perr[256];
+    snprintf(perr, sizeof(perr), "%s", p->err);
+    par_release(p);   /* stuck threads keep it alive until they finish */
+
+    if (was_cancelled) { remove(part); snprintf(err, errlen, "Stopped."); return 0; }
     if (write_failed || !closed) { snprintf(err, errlen, "Couldn't write to the SD card. It may be full."); return 0; }
     if (commit < total) {
-        snprintf(err, errlen, "%s Choose Retry to continue where it stopped.", p.err[0] ? p.err : "The download ended early.");
+        snprintf(err, errlen, "%s Choose Retry to continue where it stopped.", perr[0] ? perr : "The download ended early.");
         return 0;
     }
     return 1;

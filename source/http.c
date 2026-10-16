@@ -537,8 +537,8 @@ static void keep_close(HttpKeep *k) {
     k->open = false;
 }
 
-long long http_range_get(HttpKeep *k, const char *url, long long first, long long last, unsigned char *out,
-                         volatile long long *got, const HttpHooks *hooks, char *err, size_t errlen) {
+long long http_range_get(HttpKeep *k, const char *url, long long first, long long last, HttpSink sink, void *ctx,
+                         const HttpHooks *hooks, char *err, size_t errlen) {
     err[0] = 0;
     Url u;
     if (!url_parse(url, &u) || strcmp(u.scheme, "about") == 0) { snprintf(err, errlen, "Bad address."); return -1; }
@@ -606,14 +606,15 @@ long long http_range_get(HttpKeep *k, const char *url, long long first, long lon
             return -1;
         }
         long long have = 0;
+        unsigned char piece[8192];   /* on this thread's stack */
         while (have < want) {
             if (hooks && hooks->cancel && *hooks->cancel) { keep_close(k); snprintf(err, errlen, "Stopped."); return -1; }
             long long chunk = want - have;
-            if (chunk > 65536) chunk = 65536;
-            int r = rd_some(&k->rd, (char *)out + have, (size_t)chunk);
+            if (chunk > (long long)sizeof(piece)) chunk = (long long)sizeof(piece);
+            int r = rd_some(&k->rd, (char *)piece, (size_t)chunk);
             if (r <= 0) { keep_close(k); snprintf(err, errlen, "Connection lost."); return -1; }
+            if (!sink(ctx, piece, (size_t)r)) { keep_close(k); snprintf(err, errlen, "Stopped."); return -1; }
             have += r;
-            if (got) *got += r;
         }
         if (close_after || k->rd.pos < k->rd.len) keep_close(k);   /* leftover bytes would be out of step */
         return want;
