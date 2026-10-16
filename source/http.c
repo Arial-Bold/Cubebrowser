@@ -6,11 +6,17 @@
 #include "netio.h"
 #include "settings.h"
 #include "cookies.h"
+#include "inflate.h"
+#include "storage.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
+#ifdef GEKKO
+#include <ogc/lwp_watchdog.h>
+#endif
 
 #define DEFAULT_ACCEPT "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"
 
@@ -97,6 +103,97 @@ static bool body_append(Body *b, const char *src, size_t n) {
     return !b->truncated;
 }
 
+/* ------------------------------------------------------------ gzip
+ * Pages and style sheets are requested with "Accept-Encoding: gzip": most
+ * servers then send them at a fifth of the size or less. */
+
+typedef struct { const unsigned char *p; size_t n, pos; } GzIn;
+
+static int gz_read(void *u, unsigned char *buf, int max) {
+    GzIn *in = u;
+    size_t left = in->n - in->pos;
+    if (left > (size_t)max) left = (size_t)max;
+    memcpy(buf, in->p + in->pos, left);
+    in->pos += left;
+    return (int)left;
+}
+
+static int gz_write(void *u, const unsigned char *data, size_t len) {
+    return body_append((Body *)u, (const char *)data, len) ? 0 : -3;
+}
+
+/* Replaces a gzip body with its contents. Returns false if it wasn't
+ * readable at all (the body is then left as it was). */
+static bool gunzip_body(Body *b, size_t limit) {
+    const unsigned char *d = (const unsigned char *)b->data;
+    size_t n = b->len, pos = 10;
+    if (n < 18 || d[0] != 0x1f || d[1] != 0x8b || d[2] != 8) return false;
+    unsigned flags = d[3];
+    if (flags & 4) { if (pos + 2 > n) return false; pos += 2 + (size_t)(d[pos] | d[pos + 1] << 8); }   /* extra */
+    if (flags & 8) { while (pos < n && d[pos]) pos++; pos++; }                                        /* name */
+    if (flags & 16) { while (pos < n && d[pos]) pos++; pos++; }                                       /* comment */
+    if (flags & 2) pos += 2;                                                                          /* header crc */
+    if (pos >= n) return false;
+    Body out = { 0 };
+    out.limit = limit;
+    GzIn in = { d, n, pos };
+    uint64_t got = 0;
+    int r = inflate_stream(gz_read, &in, gz_write, &out, &got, NULL);
+    if (r != 0 && out.len == 0) { free(out.data); return false; }
+    if (r == -2 || (r == -3 && !out.truncated)) out.truncated = true;   /* cut short: keep what we have */
+    if (!out.data) { out.data = calloc(1, 1); out.len = 0; }
+    bool was_truncated = b->truncated;
+    free(b->data);
+    *b = out;
+    if (was_truncated) b->truncated = true;
+    return true;
+}
+
+/* ------------------------------------------------------------ page.log
+ * One line per request with where the time went, kept in memory and saved
+ * to the data folder a moment after loading stops (see fetch.c). */
+
+#define PLOG_LINES 160
+static char plog[PLOG_LINES][200];
+static int plog_next, plog_count;
+static bool plog_dirty;
+
+static double ms_clock(void) {
+#ifdef GEKKO
+    return (double)ticks_to_millisecs(gettime());
+#else
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+#endif
+}
+
+static void plog_add(const char *line) {
+    snprintf(plog[plog_next], sizeof(plog[0]), "%s", line);
+    plog_next = (plog_next + 1) % PLOG_LINES;
+    if (plog_count < PLOG_LINES) plog_count++;
+    plog_dirty = true;
+}
+
+void http_log_flush(void) {
+    if (!plog_dirty) return;
+    plog_dirty = false;
+    char path[400];
+    storage_path(path, sizeof(path), "page.log");
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fputs("CubeBrowser page.log: the most recent requests, oldest first. Times in milliseconds.\n"
+          "dns = finding the site, conn = connecting, tls = secure setup (\"reused\" = an open connection was used),\n"
+          "wait = from sending the request until the reply starts, body = receiving it.\n"
+          "size = bytes received (and after unpacking, when the server compressed it).\n\n", f);
+    int start = (plog_next - plog_count + PLOG_LINES) % PLOG_LINES;
+    for (int i = 0; i < plog_count; i++) {
+        fputs(plog[(start + i) % PLOG_LINES], f);
+        fputc('\n', f);
+    }
+    fclose(f);
+}
+
 static bool read_exact(Reader *r, Body *b, size_t n, const HttpHooks *h) {
     char tmp[4096];
     while (n > 0) {
@@ -165,6 +262,7 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
     char key[300];
     snprintf(key, sizeof(key), "%s:%u:%d", u.host, u.port, tls ? 1 : 0);
     bool reused = false;
+    double t_start = ms_clock();
     if (kopen && strcmp(key, kkey) == 0) {
         reused = true;
         kconn.cancel = hooks ? hooks->cancel : NULL;
@@ -188,7 +286,7 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
     extra_headers(extra, sizeof(extra), &u, tls, post, hooks);
     int n = snprintf(req, sizeof(req),
                      "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: %s\r\n"
-                     "Accept-Language: en\r\nAccept-Encoding: identity\r\nConnection: keep-alive\r\n%s",
+                     "Accept-Language: en\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n%s",
                      post ? "POST" : "GET", u.path, hosthdr, user_agent_strings[g_set.user_agent],
                      accept ? accept : DEFAULT_ACCEPT, extra);
     if (post && n < (int)sizeof(req))
@@ -208,12 +306,14 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
         return FO_FAIL;
     }
 
+    double t_sent = ms_clock();
     Reader *r = calloc(1, sizeof(Reader));
     if (!r) { http_close_idle(); snprintf(res->error, sizeof(res->error), "Out of memory."); return FO_FAIL; }
     r->c = &kconn;
     char line[1024];
     long content_length = -1;
-    bool chunked = false, server_close = false, complete = false;
+    bool chunked = false, server_close = false, complete = false, gzipped = false;
+    double t_first = 0;
     Body b = { 0 };
 
     /* status line, skipping any 1xx interim responses */
@@ -229,6 +329,7 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
         if (res->status >= 200 || res->status < 100) break;
         while (rd_line(r, line, sizeof(line)) > 0) {}
     }
+    t_first = ms_clock();
     if (!strncmp(line, "HTTP/1.0", 8)) server_close = true;
     stage(hooks, "Receiving...");
     for (int i = 0; i < 200; i++) {
@@ -242,6 +343,7 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
         while (*val == ' ' || *val == '\t') val++;
         if (!strcasecmp(line, "content-length")) content_length = atol(val);
         else if (!strcasecmp(line, "transfer-encoding") && strstr(val, "chunked")) chunked = true;
+        else if (!strcasecmp(line, "content-encoding") && contains_nocase(val, "gzip")) gzipped = true;
         else if (!strcasecmp(line, "content-type")) snprintf(res->content_type, sizeof(res->content_type), "%s", val);
         else if (!strcasecmp(line, "location")) snprintf(location, loclen, "%s", val);
         else if (!strcasecmp(line, "connection") && contains_nocase(val, "close")) server_close = true;
@@ -292,6 +394,24 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
         goto fail;
     }
     if (!b.data) { b.data = calloc(1, 1); b.len = 0; }
+    size_t wire_len = b.len;
+    if (gzipped && b.len > 0 && !gunzip_body(&b, (size_t)g_set.max_page_kb * 1024)) {
+        free(b.data);
+        snprintf(res->error, sizeof(res->error), "The site sent compressed data I couldn't unpack.");
+        goto fail;
+    }
+    {   /* page.log line */
+        double t_end = ms_clock();
+        const char *kind = !accept ? (post ? "form" : "page") : (strstr(accept, "css") ? "css " : (strstr(accept, "image") ? "pic " : "file"));
+        char opened[64], size[64], l[200];
+        if (reused) snprintf(opened, sizeof(opened), "%-27s", "reused");
+        else snprintf(opened, sizeof(opened), "dns %4d conn %4d tls %5d", kconn.ms_dns, kconn.ms_connect, tls ? kconn.ms_tls : 0);
+        if (gzipped) snprintf(size, sizeof(size), "%4u KB gzip > %4u KB", (unsigned)((wire_len + 1023) / 1024), (unsigned)((b.len + 1023) / 1024));
+        else snprintf(size, sizeof(size), "%4u KB", (unsigned)((wire_len + 1023) / 1024));
+        snprintf(l, sizeof(l), "%s %3d | %s | wait %5d body %5d total %5d | %-21s | %s%.60s", kind, res->status, opened,
+                 (int)(t_first - t_sent), (int)(t_end - t_first), (int)(t_end - t_start), size, u.host, u.path);
+        plog_add(l);
+    }
     res->body = b.data;
     res->body_len = b.len;
     res->truncated = b.truncated;

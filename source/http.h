@@ -34,6 +34,8 @@ typedef struct {
 bool http_fetch(const char *url, const char *post_body, const char *accept, HttpResult *res,
                 const HttpHooks *hooks);
 void http_close_idle(void);
+/* Saves page.log (timings of recent requests) to the data folder if it changed. */
+void http_log_flush(void);
 
 /* ---- streaming (downloads): the body is read piece by piece, never held whole ---- */
 

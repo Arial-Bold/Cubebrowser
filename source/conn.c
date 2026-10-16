@@ -155,20 +155,27 @@ static void describe_error(int r, char *err, size_t errlen) {
     snprintf(err, errlen, "Secure connection failed: %s", tmp);
 }
 
+static u32 ms_now(void) { return (u32)ticks_to_millisecs(gettime()); }
+
 bool conn_open(Conn *c, const char *host, unsigned short port, bool tls, volatile int *cancel,
                void (*stage)(const char *), char *err, size_t errlen) {
     memset(c, 0, sizeof(*c));
     c->fd = -1;
     c->cancel = cancel;
     if (stage) stage("Looking up site...");
-    u32 ip;
-    if (netio_resolve(host, &ip) != 0) {
+    u32 ip, t0 = ms_now();
+    int resolved = netio_resolve(host, &ip);
+    u32 t1 = ms_now();
+    c->ms_dns = (int)(t1 - t0);
+    if (resolved != 0) {
         snprintf(err, errlen, "Couldn't find \"%s\". Check the address or DNS setting.", host);
         return false;
     }
     if (cancel && *cancel) { snprintf(err, errlen, "Stopped."); return false; }
     if (stage) stage("Connecting...");
     c->fd = netio_connect(ip, port);
+    u32 t2 = ms_now();
+    c->ms_connect = (int)(t2 - t1);
     if (c->fd < 0) {
         snprintf(err, errlen, "Couldn't connect to %s.", host);
         return false;
@@ -210,6 +217,7 @@ bool conn_open(Conn *c, const char *host, unsigned short port, bool tls, volatil
         return false;
     }
     c->verified = g_set.verify_certs && mbedtls_ssl_get_verify_result(&c->ssl) == 0;
+    c->ms_tls = (int)(ms_now() - t2);
     return true;
 }
 

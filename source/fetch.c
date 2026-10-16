@@ -106,9 +106,13 @@ static void run_image_job(void) {
 static void *worker_main(void *arg) {
     (void)arg;
     bring_up();
+    int idle_ticks = 0;
     for (;;) {
         if (retry_net && netio_state() == NET_FAILED) { retry_net = 0; bring_up(); }
+        /* save page.log once loading has been quiet for 2 seconds */
+        if (!job_pending && ++idle_ticks == 200) http_log_flush();
         if (job_pending) {
+            idle_ticks = 0;
             job_pending = 0;
             if (kind == JOB_IMAGE) {
                 run_image_job();

@@ -10,6 +10,8 @@ typedef struct {
     bool verified;              /* certificate chain checked successfully */
     mbedtls_ssl_context ssl;
     volatile int *cancel;
+    /* how long opening took, in milliseconds (for page.log) */
+    int ms_dns, ms_connect, ms_tls;
 } Conn;
 
 /* One-time setup: seeds the RNG, loads the CA bundle. err gets a message on failure. */
