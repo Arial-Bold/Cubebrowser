@@ -687,12 +687,25 @@ static void share_image_result(int idx) {
     }
 }
 
+/* Pictures the image helper failed on during this page; after a few, the
+ * rest go straight to the site. Reset when a new page loads. */
+static int helper_failures;
+
 static void apply_image(ImageResult *ir) {
     int idx = TAG_IDX(ir->tag);
     diag_note(DIAG_MAIN, "picture %d arrived: %s %dx%d", idx, ir->ok ? "ok" : ir->error, ir->img.w, ir->img.h);
     if (!TAG_CURRENT(ir->tag) || idx >= page.nimages) { image_free(&ir->img); return; }
     PageImage *im = &page.images[idx];
     bool moved = true;
+    if (!ir->ok && !im->direct && g_set.image_proxy && im->url) {
+        /* the image helper couldn't get it (archive.org often refuses it):
+         * try the site directly before giving up */
+        image_free(&ir->img);
+        im->direct = 1;
+        im->state = IMG_NONE;
+        helper_failures++;
+        return;
+    }
     if (!ir->ok) {
         im->state = IMG_FAILED;
         /* with a declared size its box is already in place: nothing moves */
@@ -711,8 +724,17 @@ static void apply_image(ImageResult *ir) {
     share_image_result(idx);
 }
 
-static void image_request_url(const char *src, int max_w, int max_h, char *out, size_t n) {
-    if (!g_set.image_proxy) { snprintf(out, n, "%s", src); return; }
+/* Archived pages: archive.org refuses most requests from the image helper,
+ * and their pictures are small anyway, so fetch them directly. */
+static bool archive_picture(const char *src) {
+    return !strncasecmp(src, "https://web.archive.org/", 24) || !strncasecmp(src, "http://web.archive.org/", 23);
+}
+
+static void image_request_url(const char *src, bool direct, int max_w, int max_h, char *out, size_t n) {
+    if (!g_set.image_proxy || direct || helper_failures >= 3 || archive_picture(src)) {
+        snprintf(out, n, "%s", src);
+        return;
+    }
     static char enc[URL_MAX];
     url_encode_component(src, enc, sizeof(enc));
     const Theme *t = theme();
@@ -782,7 +804,7 @@ static void schedule_images(float view_top, float view_h, float max_w) {
     }
     static char req[URL_MAX];
     int max_h = (int)settings_max_picture_height();
-    image_request_url(im->url, (int)max_w, max_h, req, sizeof(req));
+    image_request_url(im->url, im->direct, (int)max_w, max_h, req, sizeof(req));
     int tag = TAG_MAKE(pick);
     if (req[0] && fetch_start_image(req, (int)max_w, max_h, tag)) im->state = IMG_LOADING;
     else if (!req[0]) { im->state = IMG_SKIPPED; page.relayout = true; }
@@ -871,6 +893,7 @@ static void handle_fetch_result(void) {
     page.secure = r.secure;
     page.verified = r.verified;
     page.truncated = r.truncated;
+    helper_failures = 0;
     has_page = true;
     page_gen++;
     last_layout_w = 0;
@@ -981,6 +1004,73 @@ static void draw_bookmarks(bool interactive) {
     }
 }
 
+/* ------------------------------------------------------ drop-down picker */
+
+#define SEL_MAX 200
+static SelectOption *sel_opts;
+static int sel_field = -1, sel_n, sel_cur, sel_scroll, sel_gen;
+
+static void open_select(int f) {
+    if (!sel_opts) sel_opts = malloc(sizeof(SelectOption) * SEL_MAX);
+    if (!sel_opts) return;
+    sel_n = page_select_options(&page, f, sel_opts, SEL_MAX, &sel_cur);
+    if (sel_n <= 0) { ui_toast("This menu has no choices"); return; }
+    sel_field = f;
+    sel_gen = page_gen;
+    sel_scroll = sel_cur - 3;
+    sound_play(SFX_OPEN);
+}
+
+static void choose_select(int i) {
+    int f = sel_field;
+    sel_field = -1;
+    char url[URL_MAX];
+    int r = page_select_choose(&page, f, &sel_opts[i], url, sizeof(url));
+    if (r == SELECT_GO) navigate(url, NULL, true);
+    else if (r == SELECT_SUBMIT) submit_form(f, -1);
+}
+
+static void draw_select(bool interactive) {
+    const Theme *t = theme();
+    float sx, sy, sw, sh;
+    ui_safe_area(&sx, &sy, &sw, &sh);
+    float open = ui_anim(ui_id("sel-open", 0), 1.0f, 0.25f);
+    gfx_rect(0, 0, gfx_width(), 480, color_alpha(t->shadow, 0.6f * open));
+    const int visible = sel_n < 7 ? sel_n : 7;
+    float row_h = 36, gap = 5;
+    float pw = fminf(520, sw - 20), ph = 70 + visible * (row_h + gap) + (sel_n > visible ? 26 : 8);
+    float px = sx + (sw - pw) * 0.5f, py = sy + (sh - ph) * 0.5f + (1 - open) * 60;
+    ui_set_input(interactive);
+    ui_panel(px, py, pw, ph, 20);
+    gfx_text(FONT_UI, 22, px + 22, py + 14, t->text, "Choose one", -1);
+    if (ui_icon_button(ui_id("sel-close", 0), px + pw - 30, py + 28, 16, ICON_CLOSE, true)) {
+        sel_field = -1;
+        sound_play(SFX_CLOSE);
+        return;
+    }
+    int dir = ui_dpad_unhandled();
+    float sd = input_scroll_delta();
+    if ((dir == DIR_DOWN || sd > 20) && sel_scroll + visible < sel_n) sel_scroll++;
+    if ((dir == DIR_UP || sd < -20) && sel_scroll > 0) sel_scroll--;
+    if (sel_scroll > sel_n - visible) sel_scroll = sel_n - visible;
+    if (sel_scroll < 0) sel_scroll = 0;
+    float ly = py + 58;
+    for (int i = sel_scroll; i < sel_n && i < sel_scroll + visible; i++) {
+        float y = ly + (i - sel_scroll) * (row_h + gap);
+        if (ui_button(ui_id("sel-row", i), px + 20, y, pw - 40, row_h, sel_opts[i].label, 16,
+                      i == sel_cur ? UIB_ACCENT : UIB_FLAT)) {
+            sound_play(SFX_SELECT);
+            choose_select(i);
+            return;
+        }
+    }
+    if (sel_n > visible) {
+        char more[48];
+        snprintf(more, sizeof(more), "%d-%d of %d", sel_scroll + 1, sel_scroll + visible, sel_n);
+        gfx_text_centered(FONT_UI, 14, px + pw * 0.5f, py + ph - 22, t->text_dim, more);
+    }
+}
+
 static void draw_clock(float right_x, float y) {
     const Theme *t = theme();
     time_t now = netio_now() + g_set.tz_minutes * 60 + (g_set.dst ? 3600 : 0);
@@ -1046,7 +1136,8 @@ bool browser_take_settings_request(void) {
 
 void browser_frame(bool interactive) {
     const Theme *t = theme();
-    bool modal = osk_active() || bm_open || dl_state != DL_IDLE;
+    if (sel_field >= 0 && sel_gen != page_gen) sel_field = -1;   /* the page changed under it */
+    bool modal = osk_active() || bm_open || dl_state != DL_IDLE || sel_field >= 0;
     /* software update: one quiet check once the network is up (if enabled) */
     static bool auto_checked;
     if (!auto_checked && fetch_net_ready()) {
@@ -1210,7 +1301,7 @@ void browser_frame(bool interactive) {
                 int ft = page.fields[hover_field].type;
                 if (ft == FIELD_SUBMIT) submit_form(hover_field, hover_field);
                 else if (ft == FIELD_CHECK || ft == FIELD_RADIO) page_toggle_field(&page, hover_field);
-                else if (ft == FIELD_SELECT) ui_toast("Changing drop-down choices isn't supported yet");
+                else if (ft == FIELD_SELECT) open_select(hover_field);
                 else edit_field(hover_field);
             } else if (page_link_is_download(&page, hover_link) || input_held(ACT_SLOW)) {
                 save_link(page_link_url(&page, hover_link));
@@ -1273,6 +1364,15 @@ void browser_frame(bool interactive) {
 
     /* ---- modal layers */
     if (dl_state != DL_IDLE) draw_download(interactive && !osk_active());
+    if (sel_field >= 0) {
+        bool sel_input = interactive && !osk_active() && !bm_open && dl_state == DL_IDLE;
+        draw_select(sel_input);
+        if (sel_field >= 0 && sel_input && input_pressed(ACT_BACK)) {
+            input_consume(ACT_BACK);
+            sel_field = -1;
+            sound_play(SFX_CLOSE);
+        }
+    }
     if (bm_open) {
         bool bm_input = interactive && !osk_active();
         draw_bookmarks(bm_input);

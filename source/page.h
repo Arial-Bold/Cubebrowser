@@ -29,6 +29,7 @@ typedef struct {
     char name[64];
     char value[256];
     char label[64];     /* submit/select caption */
+    const Node *node;   /* <select>: its element, for the choices (valid while the page is loaded) */
 } Field;
 
 typedef struct {
@@ -43,6 +44,7 @@ typedef struct {
     short decl_w, decl_h;
     unsigned char state;
     short share;        /* >= 0: same picture as images[share], whose texture it uses (not freed here) */
+    unsigned char direct;   /* fetch from the site itself, not through the image helper */
     GfxImage img;
     const Node *node;   /* the <img> element (valid while the page is loaded) */
 } PageImage;
@@ -117,6 +119,16 @@ const char *page_link_url(Page *p, int link);
 bool page_link_is_download(Page *p, int link);
 bool page_build_submit(Page *p, int field_idx, int submit_field, char *url_out, size_t url_len, char **post_out);
 void page_toggle_field(Page *p, int field);
+
+/* Drop-down menus. page_select_options lists a <select>'s choices (returns
+ * how many, and which one is chosen now). page_select_choose makes one the
+ * current choice; it returns SELECT_GO with url filled in for old-style jump
+ * menus (choosing an entry opens that page), SELECT_SUBMIT when choosing
+ * submits the form, else SELECT_STAY. */
+typedef struct { char label[64]; char value[256]; } SelectOption;
+enum { SELECT_STAY, SELECT_GO, SELECT_SUBMIT };
+int  page_select_options(Page *p, int field, SelectOption *out, int max, int *current);
+int  page_select_choose(Page *p, int field, const SelectOption *opt, char *url, size_t urllen);
 
 /* Stylesheets: next external sheet to download (-1 if none), and delivery. */
 int  page_next_sheet(Page *p);

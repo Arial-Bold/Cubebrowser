@@ -146,6 +146,7 @@ static __attribute__((noinline)) int image_add(Page *p, const Node *n) {
     PageImage *im = &p->images[p->nimages];
     memset(im, 0, sizeof(*im));
     im->share = -1;
+    im->direct = 0;
     im->node = n;
     const char *src = dom_attr(n, "data-src");
     if (!src || !*src) src = dom_attr(n, "data-original");
@@ -272,7 +273,10 @@ static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) 
                 val = dom_attr(chosen, "value");
             }
             c->index = field_add(p, *form, FIELD_SELECT, dom_attr(c, "name"), val ? val : label);
-            if (c->index >= 0) snprintf(p->fields[c->index].label, 64, "%s", label);
+            if (c->index >= 0) {
+                snprintf(p->fields[c->index].label, 64, "%s", label);
+                p->fields[c->index].node = c;
+            }
             break;
         }
         }
@@ -1914,6 +1918,90 @@ void page_toggle_field(Page *p, int f) {
                 p->fields[i].checked = 0;
         fd->checked = 1;
     }
+}
+
+/* ------------------------------------------------------- drop-down menus */
+
+int page_select_options(Page *p, int f, SelectOption *out, int max, int *current) {
+    *current = 0;
+    if (f < 0 || f >= p->nfields || p->fields[f].type != FIELD_SELECT || !p->fields[f].node) return 0;
+    Field *fd = &p->fields[f];
+    int n = 0;
+    bool found = false;
+    for (const Node *o = fd->node->first; o && n < max; o = o->next) {
+        const Node *q = o->tag == TAG_OPTGROUP ? o->first : o;
+        for (; q && n < max; q = (o->tag == TAG_OPTGROUP) ? q->next : NULL) {
+            if (q->tag != TAG_OPTION) continue;
+            SelectOption *so = &out[n];
+            text_of(q, so->label, sizeof(so->label));
+            const char *v = dom_attr(q, "value");
+            snprintf(so->value, sizeof(so->value), "%s", v ? v : so->label);
+            if (!so->label[0]) snprintf(so->label, sizeof(so->label), "%s", so->value[0] ? so->value : "-");
+            if (!found && !strcmp(so->value, fd->value) && !strcmp(so->label, fd->label)) { *current = n; found = true; }
+            n++;
+        }
+    }
+    return n;
+}
+
+static bool contains_ci(const char *hay, const char *needle) {
+    size_t n = strlen(needle);
+    for (; *hay; hay++)
+        if (!strncasecmp(hay, needle, n)) return true;
+    return false;
+}
+
+/* Does an option's value look like somewhere to go (for jump menus)? */
+static bool jump_target(const char *v) {
+    if (!v[0] || v[0] == '#' || !strncasecmp(v, "javascript:", 11)) return false;
+    static const char *const none[] = { "gonowhere", "none", "null", "0", "-", "nothing", NULL };
+    for (int i = 0; none[i]; i++)
+        if (!strcasecmp(v, none[i])) return false;
+    return strchr(v, '/') || strchr(v, '.') || !strncasecmp(v, "http", 4);
+}
+
+/* Resolves a jump-menu address. On an archive.org copy of a page the menu
+ * values were never rewritten, so they are resolved against the original
+ * site and sent back through the archive at the same date. */
+static void archive_resolve(const char *base, const char *v, char *out, size_t cap) {
+    const char *pre = NULL;
+    if (!strncasecmp(base, "https://web.archive.org/web/", 28)) pre = base + 28;
+    else if (!strncasecmp(base, "http://web.archive.org/web/", 27)) pre = base + 27;
+    const char *orig = pre ? strstr(pre, "/http") : NULL;
+    if (!orig) { url_resolve(base, v, out, cap); return; }
+    char stamp[64];
+    size_t sl = (size_t)(orig - pre);
+    if (sl >= sizeof(stamp)) { url_resolve(base, v, out, cap); return; }
+    memcpy(stamp, pre, sl);
+    stamp[sl] = 0;
+    char abs[URL_MAX];
+    url_resolve(orig + 1, v, abs, sizeof(abs));
+    if (!strncasecmp(abs, "https://web.archive.org/", 24) || !strncasecmp(abs, "http://web.archive.org/", 23)) {
+        snprintf(out, cap, "%s", abs);
+        return;
+    }
+    if ((size_t)snprintf(out, cap, "https://web.archive.org/web/%s/%s", stamp, abs) >= cap) out[0] = 0;
+}
+
+int page_select_choose(Page *p, int f, const SelectOption *opt, char *url, size_t urllen) {
+    url[0] = 0;
+    if (f < 0 || f >= p->nfields || p->fields[f].type != FIELD_SELECT) return SELECT_STAY;
+    Field *fd = &p->fields[f];
+    snprintf(fd->value, sizeof(fd->value), "%s", opt->value);
+    snprintf(fd->label, sizeof(fd->label), "%s", opt->label);
+    p->relayout = true;   /* the box shows the new caption */
+    const char *js = fd->node ? dom_attr(fd->node, "onchange") : NULL;
+    if (!js) return SELECT_STAY;
+    /* Old sites' "jump menus": onchange="location.href = this.options[...].value",
+     * or a pop-up helper that is given the value as a web address. */
+    bool goes = contains_ci(js, "location") || contains_ci(js, "href") || contains_ci(js, "url=") ||
+                contains_ci(js, "window.open");
+    if (goes && jump_target(opt->value)) {
+        archive_resolve(p->base, opt->value, url, urllen);
+        return url[0] ? SELECT_GO : SELECT_STAY;
+    }
+    if (contains_ci(js, "submit") && fd->form >= 0) return SELECT_SUBMIT;
+    return SELECT_STAY;
 }
 
 bool page_build_submit(Page *p, int field_idx, int submit_field, char *url_out, size_t url_len, char **post_out) {
