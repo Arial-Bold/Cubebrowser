@@ -155,7 +155,7 @@ static bool gunzip_body(Body *b, size_t limit) {
  * to the data folder a moment after loading stops (see fetch.c). */
 
 #define PLOG_LINES 160
-static char plog[PLOG_LINES][200];
+static char plog[PLOG_LINES][240];
 static int plog_next, plog_count;
 static bool plog_dirty;
 
@@ -254,6 +254,43 @@ static int extra_headers(char *out, size_t cap, const Url *u, bool tls, const ch
     return n;
 }
 
+/* What to show for a request in page.log. Pictures that go through the image
+ * helper show the original picture address (decoded, archive.org prefix
+ * dropped), ending with the file name, since that is the part that matters. */
+static void log_target(const Url *u, char *out, size_t cap) {
+    const char *q = strstr(u->path, "url=");
+    if (strcasecmp(u->host, "images.weserv.nl") || !q) {
+        snprintf(out, cap, "%s%.60s", u->host, u->path);
+        return;
+    }
+    char dec[URL_MAX];
+    size_t n = 0;
+    for (const char *s = q + 4; *s && *s != '&' && n + 1 < sizeof(dec); s++) {
+        if (*s == '%' && isxdigit((unsigned char)s[1]) && isxdigit((unsigned char)s[2])) {
+            char hx[3] = {s[1], s[2], 0};
+            dec[n++] = (char)strtol(hx, NULL, 16);
+            s += 2;
+        } else dec[n++] = *s;
+    }
+    dec[n] = 0;
+    const char *show = dec;
+    if (!strncmp(show, "https://", 8)) show += 8;
+    else if (!strncmp(show, "http://", 7)) show += 7;
+    /* web.archive.org/web/<stamp>im_/http://site/... -> site/... */
+    if (!strncmp(show, "web.archive.org/web/", 20)) {
+        const char *inner = strstr(show + 20, "/http");
+        if (inner) {
+            show = inner + 1;
+            if (!strncmp(show, "https://", 8)) show += 8;
+            else if (!strncmp(show, "http://", 7)) show += 7;
+            else if (!strncmp(show, "http:/", 6)) show += 6;
+        }
+    }
+    size_t len = strlen(show);
+    if (len > 70) snprintf(out, cap, "helper: ...%s", show + len - 67);
+    else snprintf(out, cap, "helper: %s", show);
+}
+
 static bool contains_nocase(const char *hay, const char *needle) {
     size_t n = strlen(needle);
     for (; *hay; hay++)
@@ -264,9 +301,9 @@ static bool contains_nocase(const char *hay, const char *needle) {
 static void log_failure(const char *accept, const char *post, int status, double t_start, const char *error,
                         const Url *u) {
     const char *kind = !accept ? (post ? "form" : "page") : (strstr(accept, "css") ? "css " : (strstr(accept, "image") ? "pic " : "file"));
-    char l[200];
-    snprintf(l, sizeof(l), "%s %3d | FAILED after %5d ms: %.60s | %s%.50s", kind, status, (int)(ms_clock() - t_start), error,
-             u->host, u->path);
+    char l[240], tgt[100];
+    log_target(u, tgt, sizeof(tgt));
+    snprintf(l, sizeof(l), "%s %3d | FAILED after %5d ms: %.60s | %s", kind, status, (int)(ms_clock() - t_start), error, tgt);
     plog_add(l);
 }
 
@@ -425,13 +462,14 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
     {   /* page.log line */
         double t_end = ms_clock();
         const char *kind = !accept ? (post ? "form" : "page") : (strstr(accept, "css") ? "css " : (strstr(accept, "image") ? "pic " : "file"));
-        char opened[64], size[64], l[200];
+        char opened[64], size[64], l[240], tgt[100];
+        log_target(&u, tgt, sizeof(tgt));
         if (reused) snprintf(opened, sizeof(opened), "%-27s", "reused");
         else snprintf(opened, sizeof(opened), "dns %4d conn %4d tls %5d", kconn.ms_dns, kconn.ms_connect, tls ? kconn.ms_tls : 0);
         if (gzipped) snprintf(size, sizeof(size), "%4u KB gzip > %4u KB", (unsigned)((wire_len + 1023) / 1024), (unsigned)((b.len + 1023) / 1024));
         else snprintf(size, sizeof(size), "%4u KB", (unsigned)((wire_len + 1023) / 1024));
-        snprintf(l, sizeof(l), "%s %3d | %s | wait %5d body %5d total %5d | %-21s | %s%.60s", kind, res->status, opened,
-                 (int)(t_first - t_sent), (int)(t_end - t_first), (int)(t_end - t_start), size, u.host, u.path);
+        snprintf(l, sizeof(l), "%s %3d | %s | wait %5d body %5d total %5d | %-21s | %s", kind, res->status, opened,
+                 (int)(t_first - t_sent), (int)(t_end - t_first), (int)(t_end - t_start), size, tgt);
         plog_add(l);
     }
     res->body = b.data;
