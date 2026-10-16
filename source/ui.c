@@ -22,7 +22,7 @@ static int frame;
 static UiId hover_id, prev_hover_id;
 static int dpad_left = -1;
 static Anim anims[ANIM_SLOTS];
-static char toast_msg[128];
+static char toast_msg[200];
 static int toast_until;
 
 UiId ui_id(const char *s, int n) {
@@ -361,11 +361,21 @@ void ui_draw_toast(void) {
     float in = ui_anim(0x70A57u, 1.0f, 0.2f);
     float ts = 18;
     float tw = gfx_text_width(FONT_UI, ts, toast_msg, -1);
+    float maxw = gfx_width() - 80;           /* keep long messages on screen (4:3 is narrow) */
+    if (tw > maxw) {
+        ts = fmaxf(13.0f, ts * maxw / tw);
+        tw = gfx_text_width(FONT_UI, ts, toast_msg, -1);
+    }
+    int tn = -1;
+    if (tw > maxw) {
+        tn = gfx_text_fit(FONT_UI, ts, toast_msg, -1, maxw);
+        tw = gfx_text_width(FONT_UI, ts, toast_msg, tn);
+    }
     float w = tw + 40, h = 40;
     float x = (gfx_width() - w) * 0.5f, y = 400 - in * 20;
     gfx_shadow(x + 2, y + 4, w, h, 20, 6, color_alpha(t->shadow, a));
     gfx_rrect_vgrad(x, y, w, h, 20, color_alpha(t->accent_hi, a), color_alpha(t->accent, a));
     gfx_text(FONT_UI, ts, x + 20, y + (h - gfx_line_height(FONT_UI, ts)) * 0.5f, color_alpha(t->text_on_accent, a),
-             toast_msg, -1);
+             toast_msg, tn);
     if (frame + 1 >= toast_until) toast_msg[0] = 0;
 }

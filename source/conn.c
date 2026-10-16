@@ -86,6 +86,11 @@ bool tls_global_init(char *err, size_t errlen) {
     mbedtls_x509_crt_init(&ca);
     size_t len = 0;
     char *pem = storage_read(g_set.ca_path, &len);
+    if (!pem) {   /* fall back to the copy in the data folder */
+        char def[400];
+        storage_path(def, sizeof(def), "cacert.pem");
+        pem = storage_read(def, &len);
+    }
     if (pem) {
         r = mbedtls_x509_crt_parse(&ca, (const unsigned char *)pem, len + 1);  /* PEM needs the NUL */
         free(pem);

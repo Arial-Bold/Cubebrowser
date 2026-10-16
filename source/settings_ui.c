@@ -77,7 +77,8 @@ static void str_done(bool ok, const char *text, void *user) {
 
 static void run_action(int idx) {
     const SetDef *d = &g_setdefs[idx];
-    bool needs_confirm = (d->min == SA_CLEAR_BOOKMARKS || d->min == SA_RESET_ALL || d->min == SA_CLEAR_COOKIES);
+    bool needs_confirm = (d->min == SA_CLEAR_BOOKMARKS || d->min == SA_RESET_ALL || d->min == SA_CLEAR_COOKIES ||
+                          d->min == SA_MOVE_DATA);
     if (needs_confirm && confirm_action != idx) {
         confirm_action = idx;
         ui_toast("Press again to confirm");
@@ -102,6 +103,30 @@ static void run_action(int idx) {
         pick_scroll = 0;
         if (!pick_count) { ui_toast("No .dol files found on the SD card"); pick_count = -1; }
         break;
+    case SA_MOVE_DATA: {
+        if (!storage_ok()) { ui_toast("No SD card found"); break; }
+        /* save first so the newest settings, bookmarks and cookies go along */
+        settings_save();
+        cookies_save_if_needed();
+        char old[300], msg[300];
+        snprintf(old, sizeof(old), "%s/", storage_dir());
+        bool to_root = !storage_dir_is_root();
+        if (storage_move_data(to_root, msg, sizeof(msg))) {
+            /* a certificate file inside the old folder moved with it */
+            if (!strncmp(g_set.ca_path, old, strlen(old))) {
+                char name[128];
+                snprintf(name, sizeof(name), "%s", g_set.ca_path + strlen(old));
+                storage_path(g_set.ca_path, sizeof(g_set.ca_path), name);
+            }
+            settings_save();
+            dirty = false;
+            sound_play(SFX_SELECT);
+        } else {
+            sound_play(SFX_ERROR);
+        }
+        ui_toast(msg);
+        break;
+    }
     case SA_SAVE_NOW:
         if (settings_save()) { dirty = false; ui_toast("Settings saved"); }
         else ui_toast("Couldn't save - is the SD card inserted?");
@@ -126,6 +151,31 @@ static void step_value(const SetDef *d, int dir) {
     } else {
         sound_play(SFX_ERROR);
     }
+}
+
+/* Draws text inside maxw: shrinks it a little first (down to 13 px), then
+ * cuts it short with "..." if it still doesn't fit. Needed in 4:3, where
+ * the option column is narrow. cx is the centre when centered, else the left. */
+static void text_fit(float x, float mid_y, float maxw, float size, bool centered, Color c, const char *s) {
+    if (maxw < 10) return;
+    float w = gfx_text_width(FONT_UI, size, s, -1);
+    if (w > maxw) {
+        size = fmaxf(13.0f, size * maxw / w);
+        w = gfx_text_width(FONT_UI, size, s, -1);
+    }
+    char cut[160];
+    if (w > maxw) {
+        float dots = gfx_text_width(FONT_UI, size, "...", -1);
+        int n = gfx_text_fit(FONT_UI, size, s, -1, maxw - dots);
+        if (n > (int)sizeof(cut) - 4) n = (int)sizeof(cut) - 4;
+        while (n > 0 && s[n - 1] == ' ') n--;
+        memcpy(cut, s, (size_t)n);
+        strcpy(cut + n, "...");
+        s = cut;
+        w = gfx_text_width(FONT_UI, size, s, -1);
+    }
+    float y = mid_y - gfx_line_height(FONT_UI, size) * 0.5f;
+    gfx_text(FONT_UI, size, centered ? x - w * 0.5f : x, y, c, s, -1);
 }
 
 static void draw_toggle(UiId id, float x, float y, bool on) {
@@ -216,7 +266,8 @@ bool settings_ui_frame(bool interactive) {
 
     /* categories */
     float top = sy + hh + 16;
-    float cat_w = 180, bh = 38, gap = 6;
+    float cat_w = gfx_width() < 700 ? 148 : 180;   /* narrower in 4:3 so option values fit */
+    float bh = 38, gap = 6;
     float list_h = sh - hh - 16 - 8;
     ui_panel(sx + 4, top, cat_w + 16, list_h, 18);
     for (int c = 0; c < CAT_COUNT; c++) {
@@ -255,7 +306,7 @@ bool settings_ui_frame(bool interactive) {
     scroll += (scroll_target - scroll) * (g_set.animations ? 0.3f : 1.0f);
 
     gfx_set_clip(ox, rows_y, ow, rows_h);
-    float ctrl_w = fminf(250, ow * 0.45f);
+    float ctrl_w = fminf(250, ow * 0.48f);
     float ctrl_x = ox + ow - ctrl_w - 18;
     for (int r = 0; r < n; r++) {
         int i = idxs[r];
@@ -267,11 +318,12 @@ bool settings_ui_frame(bool interactive) {
         if (r % 2 == 0) gfx_rrect(ox + 8, y + 2, ow - 16, row_h - 4, 10, rgba(255, 255, 255, 18));
         char value[300];
         settings_format_value(d, value, sizeof(value));
-        float ly = y + (row_h - gfx_line_height(FONT_UI, 17)) * 0.5f;
+        float mid = y + row_h * 0.5f;
+        float label_w = ctrl_x - (ox + 20) - 12;     /* room left of the control */
         UiId rid = ui_id("row", i);
         switch (d->type) {
         case ST_BOOL:
-            gfx_text(FONT_UI, 17, ox + 20, ly, t->text, d->label, -1);
+            text_fit(ox + 20, mid, label_w + ctrl_w - 56, 17, false, t->text, d->label);
             if (ui_click(rid, ox + 8, y + 2, ow - 16, row_h - 4)) {
                 *setdef_int(d) = !*setdef_int(d);
                 sound_play(SFX_SELECT);
@@ -281,11 +333,12 @@ bool settings_ui_frame(bool interactive) {
             break;
         case ST_INT:
         case ST_CHOICE: {
-            gfx_text(FONT_UI, 17, ox + 20, ly, t->text, d->label, -1);
+            text_fit(ox + 20, mid, label_w, 17, false, t->text, d->label);
             float cy = y + row_h * 0.5f;
             if (ui_icon_button(ui_id("dec", i), ctrl_x + 14, cy, 13, ICON_LEFT, true)) step_value(d, -1);
             if (ui_icon_button(ui_id("inc", i), ctrl_x + ctrl_w - 14, cy, 13, ICON_RIGHT, true)) step_value(d, +1);
-            gfx_text_centered(FONT_UI, 17, ctrl_x + ctrl_w * 0.5f, ly - 3, t->text, value);
+            /* between the two arrow buttons */
+            text_fit(ctrl_x + ctrl_w * 0.5f, mid - 3, ctrl_w - 56, 17, true, t->text, value);
             if (d->type == ST_INT) {
                 float frac = (float)(*setdef_int(d) - d->min) / (float)(d->max - d->min);
                 float bx = ctrl_x + 36, bw = ctrl_w - 72;
@@ -296,7 +349,7 @@ bool settings_ui_frame(bool interactive) {
             break;
         }
         case ST_STR: {
-            gfx_text(FONT_UI, 17, ox + 20, ly, t->text, d->label, -1);
+            text_fit(ox + 20, mid, label_w, 17, false, t->text, d->label);
             bool hov = ui_hover(rid, ox + 8, y + 2, ow - 16, row_h - 4);
             gfx_rrect(ctrl_x, y + 8, ctrl_w, row_h - 16, 9, t->field_bg);
             gfx_rrect_outline(ctrl_x, y + 8, ctrl_w, row_h - 16, 9, hov ? 2.0f : 1.0f, hov ? t->accent : t->panel_edge);
@@ -312,7 +365,7 @@ bool settings_ui_frame(bool interactive) {
             break;
         }
         case ST_BIND: {
-            gfx_text(FONT_UI, 17, ox + 20, ly, t->text, d->label, -1);
+            text_fit(ox + 20, mid, label_w, 17, false, t->text, d->label);
             bool waiting = (capture == i);
             const char *lbl = waiting ? "Press a button..." : value;
             if (ui_button(rid, ctrl_x, y + 6, ctrl_w, row_h - 12, lbl, 17, waiting ? UIB_ACCENT : UIB_NORMAL)) {
@@ -324,6 +377,8 @@ bool settings_ui_frame(bool interactive) {
         }
         case ST_ACTION: {
             const char *lbl = (confirm_action == i) ? "Press again to confirm" : d->label;
+            if (d->min == SA_MOVE_DATA && confirm_action != i)
+                lbl = storage_dir_is_root() ? "Move data folder next to CubeBrowser" : "Move data folder to SD card root";
             if (ui_button(rid, ox + 20, y + 6, ow - 40, row_h - 12, lbl, 17,
                           confirm_action == i ? UIB_ACCENT : UIB_NORMAL))
                 run_action(i);
@@ -331,8 +386,15 @@ bool settings_ui_frame(bool interactive) {
         }
         }
         if (!help && ui_input() && input_cursor_y() >= y && input_cursor_y() < y + row_h &&
-            input_cursor_x() >= ox && input_cursor_x() < ox + ow)
+            input_cursor_x() >= ox && input_cursor_x() < ox + ow) {
             help = d->help;
+            if (d->type == ST_ACTION && d->min == SA_MOVE_DATA) {
+                static char where[360];
+                snprintf(where, sizeof(where), "Settings, bookmarks and cookies are in %s. Press twice to confirm.",
+                         storage_ok() ? storage_dir() : "(no SD card)");
+                help = where;
+            }
+        }
     }
     gfx_clear_clip();
     ui_set_input(input_ok);

@@ -45,7 +45,9 @@ static void *watchdog_main(void *arg) {
                          "drawn:  %s\n",
                          frames, notes[DIAG_MAIN], notes[DIAG_PAGE], notes[DIAG_WORKER], notes[DIAG_DRAW]);
         if (n > 0) {
-            FILE *f = fopen(STORAGE_DIR "/freeze.log", "wb");
+            char path[400];
+            storage_path(path, sizeof(path), "freeze.log");
+            FILE *f = fopen(path, "wb");
             if (f) { fwrite(buf, 1, (size_t)n, f); fclose(f); }
         }
     }

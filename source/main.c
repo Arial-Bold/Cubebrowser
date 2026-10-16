@@ -57,8 +57,7 @@ static void draw_transition(int from, int to, float p) {
 }
 
 int main(int argc, char **argv) {
-    (void)argc; (void)argv;
-    bool sd = storage_init();
+    bool sd = storage_init(argc > 0 && argv ? argv[0] : NULL);
     diag_init();
     settings_load();
     gfx_init(g_set.video_mode, g_set.widescreen != 0, g_set.full_width != 0);
@@ -84,6 +83,11 @@ int main(int argc, char **argv) {
 
     if (reset) ui_toast("Settings were reset to defaults");
     else if (!sd) ui_toast("No SD card found - settings and bookmarks won't be saved");
+    else if (storage_moved_from()) {
+        static char msg[400];
+        snprintf(msg, sizeof(msg), "Settings moved from %s to %s", storage_moved_from(), storage_dir());
+        ui_toast(msg);
+    }
 
     for (;;) {
         diag_frame();

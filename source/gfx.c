@@ -232,7 +232,9 @@ static void gpu_recover(void) {
     char line[400];
     int n = snprintf(line, sizeof(line), "GPU reset %u: %u vertices, %u pictures this frame | %s | %s\n", gpu_resets,
                      frame_verts, frame_images, diag_get(DIAG_PAGE), diag_get(DIAG_DRAW));
-    FILE *f = fopen(STORAGE_DIR "/gpu-reset.log", "ab");
+    char path[400];
+    storage_path(path, sizeof(path), "gpu-reset.log");
+    FILE *f = fopen(path, "ab");
     if (f) { fwrite(line, 1, (size_t)n, f); fclose(f); }
 }
 

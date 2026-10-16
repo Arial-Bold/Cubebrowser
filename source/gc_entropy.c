@@ -8,7 +8,6 @@
 #include <stdlib.h>
 
 #define RING 64
-#define SEED_PATH STORAGE_DIR "/seed.bin"
 
 static unsigned char pool[32];
 static u64 ring[RING];
@@ -36,7 +35,9 @@ void entropy_init(void) {
     LWP_MutexLock(lock);
     fold("cubebrowser-entropy-v1", 22);
     size_t len = 0;
-    char *seed = storage_read(SEED_PATH, &len);
+    char path[400];
+    storage_path(path, sizeof(path), "seed.bin");
+    char *seed = storage_read(path, &len);
     if (seed) {
         fold(seed, len);
         free(seed);
@@ -63,7 +64,10 @@ void entropy_add_event(u32 value) {
 }
 
 void entropy_save_seed(const unsigned char *seed32) {
-    storage_write_atomic(SEED_PATH, STORAGE_DIR "/seed.tmp", seed32, 32);
+    char path[400], tmp[400];
+    storage_path(path, sizeof(path), "seed.bin");
+    storage_path(tmp, sizeof(tmp), "seed.tmp");
+    storage_write_atomic(path, tmp, seed32, 32);
 }
 
 /* Timing jitter: the time a small, data-dependent workload takes varies with

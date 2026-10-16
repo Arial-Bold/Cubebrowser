@@ -1,4 +1,4 @@
-/* settings.c - defaults, validation and INI persistence (sd:/gcbrowser/settings.ini). */
+/* settings.c - defaults, validation and INI persistence (settings.ini in the data folder). */
 #include "settings.h"
 #include "storage.h"
 #include "theme.h"
@@ -136,10 +136,12 @@ const SetDef g_setdefs[] = {
       "Lists the programs on your card so you can choose Swiss." },
     { CAT_DATA, "dl.folder", "Download folder", ST_STR, O(dl_folder), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
       "Where downloaded files are saved. Swiss can open them from here." },
-    { CAT_DATA, "dl.conns", "Download connections", ST_INT, O(dl_connections), 1, 6, 1, NULL, NULL,
+    { CAT_DATA, "dl.conns", "Connections per file", ST_INT, O(dl_connections), 1, 6, 1, NULL, NULL,
       "More connections download big files faster on servers that allow it." },
     { CAT_DATA, "dl.delzip", "Delete zip after unzipping", ST_BOOL, O(dl_delete_zip), 0, 1, 1, NULL, NULL,
       "Saves space by removing the .zip once its files are extracted." },
+    { CAT_DATA, NULL, "Move data folder", ST_ACTION, 0, SA_MOVE_DATA, 0, 0, NULL, NULL,
+      "Where settings, bookmarks and cookies are kept. Press twice to confirm." },
     { CAT_DATA, NULL, "Clear cookies and logins", ST_ACTION, 0, SA_CLEAR_COOKIES, 0, 0, NULL, NULL,
       "Signs you out of every site. Press twice to confirm." },
     { CAT_DATA, NULL, "Clear history", ST_ACTION, 0, SA_CLEAR_HISTORY, 0, 0, NULL, NULL,
@@ -204,7 +206,7 @@ void settings_defaults(Settings *s) {
     s->verify_certs = 1;
     s->cookies = 1;
     s->keep_logins = 1;
-    strcpy(s->ca_path, "sd:/gcbrowser/cacert.pem");
+    storage_path(s->ca_path, sizeof(s->ca_path), "cacert.pem");
     strcpy(s->dl_folder, "sd:/downloads");
     s->dl_connections = 4;
     s->exit_action = 0;
@@ -274,8 +276,11 @@ static char *trim(char *s) {
 bool settings_load(void) {
     settings_defaults(&g_set);
     size_t len;
-    char *data = storage_read(STORAGE_DIR "/settings.ini", &len);
-    if (!data) data = storage_read(STORAGE_DIR "/settings.tmp", &len);  /* interrupted save */
+    char ini[400], tmp[400];
+    storage_path(ini, sizeof(ini), "settings.ini");
+    storage_path(tmp, sizeof(tmp), "settings.tmp");
+    char *data = storage_read(ini, &len);
+    if (!data) data = storage_read(tmp, &len);  /* interrupted save */
     if (!data) return false;
     char *save = NULL;
     for (char *line = strtok_r(data, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
@@ -297,6 +302,8 @@ bool settings_load(void) {
         }
     }
     free(data);
+    /* the old fixed default follows the data folder if it has moved */
+    if (!strcmp(g_set.ca_path, STORAGE_ROOT_DIR "/cacert.pem")) storage_path(g_set.ca_path, sizeof(g_set.ca_path), "cacert.pem");
     settings_validate(&g_set);
     return true;
 }
@@ -319,7 +326,10 @@ bool settings_save(void) {
                 n += snprintf(buf + n, cap - n, "%s=%d\n", d->key, *setdef_int(d));
         }
     }
-    bool ok = storage_write_atomic(STORAGE_DIR "/settings.ini", STORAGE_DIR "/settings.tmp", buf, n);
+    char ini[400], tmp[400];
+    storage_path(ini, sizeof(ini), "settings.ini");
+    storage_path(tmp, sizeof(tmp), "settings.tmp");
+    bool ok = storage_write_atomic(ini, tmp, buf, n);
     free(buf);
     return ok;
 }

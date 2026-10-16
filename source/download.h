@@ -10,6 +10,7 @@ typedef struct {
     volatile long long done, total;   /* bytes; total -1 if unknown */
     volatile int speed;               /* bytes per second (smoothed) */
     volatile bool resumed;
+    volatile int connections;         /* connections in use (0 or 1 = single) */
 } DownloadProgress;
 
 /* dest_path is the final file name; data goes to dest_path + ".part" until complete. */

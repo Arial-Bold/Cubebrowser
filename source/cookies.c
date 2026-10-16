@@ -9,8 +9,17 @@
 #include <strings.h>
 
 #define MAX_COOKIES 300
-#define COOKIE_FILE STORAGE_DIR "/cookies.txt"
-#define COOKIE_TMP  STORAGE_DIR "/cookies.tmp"
+/* file names in the data folder (see storage.h) */
+static const char *cookie_file(void) {
+    static char p[400];
+    storage_path(p, sizeof(p), "cookies.txt");
+    return p;
+}
+static const char *cookie_tmp(void) {
+    static char p[400];
+    storage_path(p, sizeof(p), "cookies.tmp");
+    return p;
+}
 
 typedef struct {
     char name[64];
@@ -250,12 +259,12 @@ void cookies_clear(void) {
     memset(jar, 0, sizeof(Cookie) * MAX_COOKIES);
     dirty = false;
     jar_unlock();
-    remove(COOKIE_FILE);
+    remove(cookie_file());
 }
 
 void cookies_save_if_needed(void) {
     if (!dirty || !jar) return;
-    if (!g_set.keep_logins || !g_set.cookies) { dirty = false; remove(COOKIE_FILE); return; }
+    if (!g_set.keep_logins || !g_set.cookies) { dirty = false; remove(cookie_file()); return; }
     size_t cap = 64 * 1024, n = 0;
     char *buf = malloc(cap);
     if (!buf) return;
@@ -269,16 +278,16 @@ void cookies_save_if_needed(void) {
     }
     dirty = false;
     jar_unlock();
-    storage_write_atomic(COOKIE_FILE, COOKIE_TMP, buf, n);
+    storage_write_atomic(cookie_file(), cookie_tmp(), buf, n);
     free(buf);
 }
 
 void cookies_init(void) {
     lock_init();
     if (!ensure_jar()) return;
-    if (!g_set.keep_logins) { remove(COOKIE_FILE); return; }
+    if (!g_set.keep_logins) { remove(cookie_file()); return; }
     size_t len;
-    char *data = storage_read(COOKIE_FILE, &len);
+    char *data = storage_read(cookie_file(), &len);
     if (!data) return;
     char *save = NULL;
     int k = 0;

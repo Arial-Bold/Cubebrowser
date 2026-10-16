@@ -28,7 +28,6 @@
 
 #define HIST_MAX 32
 #define BOOKMARK_MAX 64
-#define BOOKMARK_FILE STORAGE_DIR "/bookmarks.txt"
 
 /* A history entry remembers how to get the page back: its address, any form
  * data it was submitted with, and (for recent pages) the page itself. */
@@ -104,7 +103,9 @@ static const char help_html[] =
 static void bookmarks_load(void) {
     nbookmarks = 0;
     size_t len;
-    char *data = storage_read(BOOKMARK_FILE, &len);
+    char file[400];
+    storage_path(file, sizeof(file), "bookmarks.txt");
+    char *data = storage_read(file, &len);
     if (!data) return;
     char *save = NULL;
     for (char *line = strtok_r(data, "\n", &save); line && nbookmarks < BOOKMARK_MAX; line = strtok_r(NULL, "\n", &save)) {
@@ -126,7 +127,10 @@ static void bookmarks_save(void) {
     if (!buf) return;
     for (int i = 0; i < nbookmarks; i++)
         n += snprintf(buf + n, cap - n, "%s\t%s\n", bookmarks[i].url, bookmarks[i].title);
-    if (!storage_write_atomic(BOOKMARK_FILE, STORAGE_DIR "/bookmarks.tmp", buf, n))
+    char file[400], tmp[400];
+    storage_path(file, sizeof(file), "bookmarks.txt");
+    storage_path(tmp, sizeof(tmp), "bookmarks.tmp");
+    if (!storage_write_atomic(file, tmp, buf, n))
         ui_toast("Couldn't save bookmarks to the SD card");
     free(buf);
 }
@@ -587,8 +591,10 @@ static void draw_download(bool interactive) {
                 fmt_size(pg->speed, speed, sizeof(speed));
                 strcat(speed, "/s");
             }
-            if (total > 0) snprintf(line, sizeof(line), "%s of %s   %s", a, b, speed);
-            else snprintf(line, sizeof(line), "%s   %s", a, speed);
+            char conns[24] = "";
+            if (pg->connections > 1) snprintf(conns, sizeof(conns), "   %d connections", pg->connections);
+            if (total > 0) snprintf(line, sizeof(line), "%s of %s   %s%s", a, b, speed, conns);
+            else snprintf(line, sizeof(line), "%s   %s%s", a, speed, conns);
             gfx_text(FONT_BODY, 17, tx, ty, t->text, line, -1);
             if (total > 0 && pg->speed > 0) {
                 long long left = (total - done) / pg->speed;
