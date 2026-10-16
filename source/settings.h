@@ -39,8 +39,7 @@ typedef struct {
 
 extern Settings g_set;
 
-typedef enum { CAT_NETWORK, CAT_TIME, CAT_CONTROLLER, CAT_KEYBOARD, CAT_DISPLAY, CAT_BROWSING,
-               CAT_SECURITY, CAT_DATA, CAT_COUNT } SetCategory;
+typedef enum { CAT_NETWORK, CAT_CONTROLS, CAT_DISPLAY, CAT_BROWSING, CAT_SECURITY, CAT_DATA, CAT_COUNT } SetCategory;
 extern const char *const category_names[CAT_COUNT];
 
 typedef enum { ST_BOOL, ST_INT, ST_CHOICE, ST_STR, ST_BIND, ST_ACTION } SetType;

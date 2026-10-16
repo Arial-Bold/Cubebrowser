@@ -12,7 +12,7 @@
 Settings g_set;
 
 const char *const category_names[CAT_COUNT] = {
-    "Network", "Time", "Controller", "Keyboard", "Display", "Browsing", "Security", "Data"
+    "Network", "Controls", "Display", "Browsing", "Security", "Data"
 };
 
 static const char *const video_mode_names[] = { "Auto", "480i", "480p", NULL };
@@ -36,7 +36,11 @@ const char *const user_agent_strings[] = {
 #define O(f) offsetof(Settings, f)
 
 const SetDef g_setdefs[] = {
-    /* Network */
+    /* Network: updates first, then the connection, then the clock */
+    { CAT_NETWORK, NULL, "Check for updates", ST_ACTION, 0, SA_CHECK_UPDATE, 0, 0, NULL, NULL,
+      "Looks for a newer CubeBrowser on GitHub and can install it for you." },
+    { CAT_NETWORK, "upd.auto", "Check for updates at start", ST_BOOL, O(update_auto), 0, 1, 1, NULL, NULL,
+      "A quick check when the network connects. The start page says when there's a new version." },
     { CAT_NETWORK, "net.dhcp", "Automatic IP (DHCP)", ST_BOOL, O(dhcp), 0, 1, 1, NULL, NULL,
       "Get an address from your router. Changes apply next launch." },
     { CAT_NETWORK, "net.ip", "IP address", ST_STR, O(ip), OSK_TEXTMODE_IP, 16, 0, NULL, NULL,
@@ -49,37 +53,37 @@ const SetDef g_setdefs[] = {
       "Leave blank to use the router's DNS. Example: 1.1.1.1" },
     { CAT_NETWORK, "net.ntp", "Time server", ST_STR, O(ntp), OSK_TEXTMODE_URL, 64, 0, NULL, NULL,
       "Sets the clock at startup so secure sites can be checked." },
-    /* Time */
-    { CAT_TIME, "time.tz", "Time zone", ST_INT, O(tz_minutes), -720, 840, 30, NULL, NULL,
+    /* Time (shown on the Network page) */
+    { CAT_NETWORK, "time.tz", "Time zone", ST_INT, O(tz_minutes), -720, 840, 30, NULL, NULL,
       "Offset from UTC. Used for the clock display." },
-    { CAT_TIME, "time.dst", "Daylight saving", ST_BOOL, O(dst), 0, 1, 1, NULL, NULL,
+    { CAT_NETWORK, "time.dst", "Daylight saving", ST_BOOL, O(dst), 0, 1, 1, NULL, NULL,
       "Adds one hour to the displayed time." },
-    /* Controller */
-    { CAT_CONTROLLER, "pad.deadzone", "Stick dead zone", ST_INT, O(deadzone), 0, 40, 2, NULL, NULL,
+    /* Controls: controller */
+    { CAT_CONTROLS, "pad.deadzone", "Stick dead zone", ST_INT, O(deadzone), 0, 40, 2, NULL, NULL,
       "Raise this if the pointer drifts on its own." },
-    { CAT_CONTROLLER, "pad.speed", "Pointer speed", ST_INT, O(cursor_speed), 1, 10, 1, NULL, NULL,
+    { CAT_CONTROLS, "pad.speed", "Pointer speed", ST_INT, O(cursor_speed), 1, 10, 1, NULL, NULL,
       "How fast the pointer moves at full tilt." },
-    { CAT_CONTROLLER, "pad.accel", "Acceleration", ST_INT, O(accel), 0, 10, 1, NULL, NULL,
+    { CAT_CONTROLS, "pad.accel", "Acceleration", ST_INT, O(accel), 0, 10, 1, NULL, NULL,
       "Higher values give finer control on small stick movements." },
-    { CAT_CONTROLLER, "pad.scroll", "Scroll speed", ST_INT, O(scroll_speed), 1, 10, 1, NULL, NULL,
+    { CAT_CONTROLS, "pad.scroll", "Scroll speed", ST_INT, O(scroll_speed), 1, 10, 1, NULL, NULL,
       "C-Stick and L/R page scrolling speed." },
-    { CAT_CONTROLLER, "pad.magnet", "Pointer snap", ST_BOOL, O(magnet), 0, 1, 1, NULL, NULL,
+    { CAT_CONTROLS, "pad.magnet", "Pointer snap", ST_BOOL, O(magnet), 0, 1, 1, NULL, NULL,
       "Gently pulls the pointer onto nearby buttons." },
-    { CAT_CONTROLLER, "pad.rumble", "Rumble", ST_BOOL, O(rumble), 0, 1, 1, NULL, NULL,
+    { CAT_CONTROLS, "pad.rumble", "Rumble", ST_BOOL, O(rumble), 0, 1, 1, NULL, NULL,
       "Light rumble feedback when pointing at and pressing buttons." },
-    { CAT_CONTROLLER, "bind.click", "Click", ST_BIND, O(bind[ACT_CLICK]), 0, BTN_COUNT - 1, 1, NULL, NULL,
+    { CAT_CONTROLS, "bind.click", "Click", ST_BIND, O(bind[ACT_CLICK]), 0, BTN_COUNT - 1, 1, NULL, NULL,
       "Select a binding, then press the button you want." },
-    { CAT_CONTROLLER, "bind.back", "Back", ST_BIND, O(bind[ACT_BACK]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
-    { CAT_CONTROLLER, "bind.address", "Address bar", ST_BIND, O(bind[ACT_ADDRESS]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
-    { CAT_CONTROLLER, "bind.bookmarks", "Bookmarks", ST_BIND, O(bind[ACT_BOOKMARKS]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
-    { CAT_CONTROLLER, "bind.menu", "Settings menu", ST_BIND, O(bind[ACT_MENU]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
-    { CAT_CONTROLLER, "bind.slow", "Slow pointer", ST_BIND, O(bind[ACT_SLOW]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
-    { CAT_CONTROLLER, "bind.pageup", "Page up", ST_BIND, O(bind[ACT_PAGE_UP]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
-    { CAT_CONTROLLER, "bind.pagedown", "Page down", ST_BIND, O(bind[ACT_PAGE_DOWN]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
-    /* Keyboard */
-    { CAT_KEYBOARD, "osk.layout", "Key layout", ST_CHOICE, O(osk_layout), 0, 1, 1, osk_layout_names, NULL,
+    { CAT_CONTROLS, "bind.back", "Back", ST_BIND, O(bind[ACT_BACK]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
+    { CAT_CONTROLS, "bind.address", "Address bar", ST_BIND, O(bind[ACT_ADDRESS]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
+    { CAT_CONTROLS, "bind.bookmarks", "Bookmarks", ST_BIND, O(bind[ACT_BOOKMARKS]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
+    { CAT_CONTROLS, "bind.menu", "Settings menu", ST_BIND, O(bind[ACT_MENU]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
+    { CAT_CONTROLS, "bind.slow", "Slow pointer", ST_BIND, O(bind[ACT_SLOW]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
+    { CAT_CONTROLS, "bind.pageup", "Page up", ST_BIND, O(bind[ACT_PAGE_UP]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
+    { CAT_CONTROLS, "bind.pagedown", "Page down", ST_BIND, O(bind[ACT_PAGE_DOWN]), 0, BTN_COUNT - 1, 1, NULL, NULL, NULL },
+    /* Controls: on-screen keyboard */
+    { CAT_CONTROLS, "osk.layout", "Key layout", ST_CHOICE, O(osk_layout), 0, 1, 1, osk_layout_names, NULL,
       "Arrangement of letters on the on-screen keyboard." },
-    { CAT_KEYBOARD, "osk.repeat", "Key repeat speed", ST_INT, O(key_repeat), 1, 10, 1, NULL, NULL,
+    { CAT_CONTROLS, "osk.repeat", "Key repeat speed", ST_INT, O(key_repeat), 1, 10, 1, NULL, NULL,
       "How fast held Backspace and arrow shortcuts repeat." },
     /* Display */
     { CAT_DISPLAY, "disp.aspect", "Aspect ratio", ST_CHOICE, O(widescreen), 0, 1, 1, aspect_names, NULL,
@@ -137,14 +141,8 @@ const SetDef g_setdefs[] = {
       "Lists the programs on your card so you can choose Swiss." },
     { CAT_DATA, "dl.folder", "Download folder", ST_STR, O(dl_folder), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
       "Where downloaded files are saved. Swiss can open them from here." },
-    { CAT_DATA, "dl.conns", "Connections per file", ST_INT, O(dl_connections), 1, 4, 1, NULL, NULL,
-      "More connections download big files faster on servers that allow it. 4 is fastest on GameCube." },
     { CAT_DATA, "dl.delzip", "Delete zip after unzipping", ST_BOOL, O(dl_delete_zip), 0, 1, 1, NULL, NULL,
       "Saves space by removing the .zip once its files are extracted." },
-    { CAT_DATA, NULL, "Check for updates", ST_ACTION, 0, SA_CHECK_UPDATE, 0, 0, NULL, NULL,
-      "Looks for a newer CubeBrowser on GitHub and can install it for you." },
-    { CAT_DATA, "upd.auto", "Check for updates at start", ST_BOOL, O(update_auto), 0, 1, 1, NULL, NULL,
-      "A quick check when the network connects. The start page says when there's a new version." },
     { CAT_DATA, NULL, "Move data folder", ST_ACTION, 0, SA_MOVE_DATA, 0, 0, NULL, NULL,
       "Where settings, bookmarks and cookies are kept. Press twice to confirm." },
     { CAT_DATA, NULL, "Clear cookies and logins", ST_ACTION, 0, SA_CLEAR_COOKIES, 0, 0, NULL, NULL,

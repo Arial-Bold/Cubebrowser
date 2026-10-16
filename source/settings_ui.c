@@ -416,7 +416,25 @@ bool settings_ui_frame(bool interactive) {
     /* help line */
     float hy = oy + oh - help_h;
     gfx_rect(ox + 14, hy - 2, ow - 28, 1.5f, color_alpha(t->panel_edge, 0.6f));
-    if (help) gfx_text(FONT_UI, 15, ox + 20, hy + 10, t->text_dim, help, gfx_text_fit(FONT_UI, 15, help, -1, ow - 40));
+    if (help) {
+        /* Too long for the line: wait a moment, glide along to show the rest,
+         * pause at the end, then start over. Restarts for each new item. */
+        static const char *shown_help;
+        static float help_since;
+        if (help != shown_help) { shown_help = help; help_since = ui_time(); }
+        float avail = ow - 40, tw = gfx_text_width(FONT_UI, 15, help, -1);
+        if (tw <= avail) {
+            gfx_text(FONT_UI, 15, ox + 20, hy + 10, t->text_dim, help, -1);
+        } else {
+            const float pause = 1.5f, speed = 45.0f;   /* seconds, units per second */
+            float over = tw - avail + 8, run = over / speed;
+            float k = fmodf(ui_time() - help_since, pause + run + pause);
+            float off = k < pause ? 0 : (k < pause + run ? (k - pause) * speed : over);
+            gfx_set_clip(ox + 20, hy, avail, help_h);
+            gfx_text(FONT_UI, 15, ox + 20 - off, hy + 10, t->text_dim, help, -1);
+            gfx_clear_clip();
+        }
+    }
 
     /* button capture for remapping */
     if (capture >= 0 && interactive && !modal) {
