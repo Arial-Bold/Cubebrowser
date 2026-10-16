@@ -274,7 +274,7 @@ static void start_load(const char *url, const char *post) {
         if (!strcasecmp(url, "about:home") || !strcasecmp(url, "about:blank") || !strcasecmp(url, "about:"))
         { show_html(home_html, "about:home", false); home_reset(); }
         else if (!strcasecmp(url, "about:help"))
-            show_html(help_html, "about:help", false);
+        { show_html(help_html, "about:help", false); home_help_reset(); }
         else
             show_error(url, "There's no built-in page with that name.");
         if (restore_scroll >= 0) { page.scroll = page.scroll_target = restore_scroll; restore_scroll = -1; }
@@ -1070,7 +1070,14 @@ void browser_frame(bool interactive) {
     int hover_link = -1, hover_field = -1;
     const char *home_hover = NULL;
     bool on_home = has_page && !strcmp(page.url, "about:home");
-    if (on_home) {
+    bool on_help = has_page && !strcmp(page.url, "about:help");
+    if (on_help) {
+        /* Controls & Tips draws itself too (home.c) */
+        if (home_help_draw(cx, cy, cw, ch, input_ok) == HOME_OPEN_URL) {
+            sound_play(SFX_SELECT);
+            navigate("about:home", NULL, true);
+        }
+    } else if (on_home) {
         /* the start page draws itself (home.c) */
         const char *go = NULL;
         HomeAction ha = home_draw(cx, cy, cw, ch, input_ok, &go, &home_hover);

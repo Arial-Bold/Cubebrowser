@@ -12,3 +12,8 @@ void home_reset(void);
 /* Draws the start page into the content area and handles its input.
  * *url is set for HOME_OPEN_URL; *hover_url to the pointed-at site (or NULL). */
 HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const char **url, const char **hover_url);
+
+/* Controls & Tips (about:help) in the same style. Returns HOME_OPEN_URL when
+ * "Back to start page" is chosen. Scrolls by itself. */
+void home_help_reset(void);
+HomeAction home_help_draw(float x, float y, float w, float h, bool input_ok);

@@ -428,3 +428,193 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
     gfx_clear_clip();
     return act;
 }
+
+/* ======================================================== Controls & Tips
+ * about:help, drawn in the same style as the start page. Badges show the
+ * buttons as currently assigned in Settings > Controller. Taller than the
+ * screen, so it scrolls with the C-Stick, L/R and the D-Pad. */
+
+static float help_scroll, help_scroll_target;
+
+void home_help_reset(void) { intro_start = ui_time(); help_scroll = help_scroll_target = 0; }
+
+typedef struct { const char *badge; const char *text; } HelpRow;
+
+static const char *bind_name(int act) {
+    int b = g_set.bind[act];
+    return (b >= 0 && b < BTN_COUNT) ? button_names[b] : "?";
+}
+
+/* One control: navy badge with the button in gold, then the description. */
+static void help_row(float x, float y, float w, float h, const char *badge, const char *text, float a) {
+    Color navy = rgba(26, 24, 66, 255), gold = opaque(theme()->accent);
+    Color pale = opaque(color_lerp(theme()->panel_top, rgba(255, 255, 255, 255), 0.62f));
+    float bw = fminf(84, w * 0.3f);
+    gfx_rect(x + 2, y + 2, w, h, color_alpha(rgba(10, 8, 30, 255), 0.45f * a));    /* hard shadow */
+    gfx_rect(x, y, bw, h, color_alpha(navy, a));
+    gfx_rect(x + bw, y, w - bw, h, color_alpha(pale, a));
+    gfx_rect(x + bw, y, 4, h, color_alpha(rgba(240, 132, 24, 255), a));              /* orange edge */
+    float bs = 11.5f;
+    while (bs > 8 && caps_width(bs, 1.0f, badge) > bw - 10) bs -= 0.5f;
+    caps(x + (bw - caps_width(bs, 1.0f, badge)) / 2, y + (h - gfx_line_height(FONT_UI, bs)) / 2, bs, 1.0f,
+         color_alpha(gold, a), rgba(0, 0, 0, 0), badge);
+    float ts = 13.5f, room = w - bw - 16;
+    while (ts > 10 && gfx_text_width(FONT_BODY, ts, text, -1) > room) ts -= 0.5f;
+    gfx_text(FONT_BODY, ts, x + bw + 11, y + (h - gfx_line_height(FONT_BODY, ts)) / 2, color_alpha(navy, a), text,
+             gfx_text_fit(FONT_BODY, ts, text, -1, room));
+}
+
+/* Section heading with a dotted rule, as on the start page. */
+static void help_heading(float x, float y, float w, const char *text, float a) {
+    Color white = rgba(255, 255, 255, 255), shadow = rgba(20, 16, 50, 200);
+    caps(x + 2, y, 15, 1.0f, color_alpha(white, a), color_alpha(shadow, a), text);
+    float dx = x + 2 + caps_width(15, 1.0f, text) + 14;
+    dotted_hline(dx, y + 9, x + w - dx, color_alpha(opaque(theme()->panel_top), 0.8f * a));
+}
+
+/* Lays out (and with draw set, draws) the scrolling part; returns its height. */
+static float help_body(float x, float y, float w, bool draw) {
+    char zbadge[40], lr[40];
+    snprintf(zbadge, sizeof(zbadge), "%s + %s", bind_name(ACT_SLOW), bind_name(ACT_CLICK));
+    snprintf(lr, sizeof(lr), "%s / %s", bind_name(ACT_PAGE_UP), bind_name(ACT_PAGE_DOWN));
+    HelpRow pad[] = {
+        { "STICK", "Move the pointer" },
+        { bind_name(ACT_CLICK), "Click a link or button" },
+        { bind_name(ACT_SLOW), "Hold for a slow pointer" },
+        { bind_name(ACT_BACK), "Go back a page" },
+        { bind_name(ACT_ADDRESS), "Type an address or search" },
+        { bind_name(ACT_BOOKMARKS), "Bookmarks" },
+        { bind_name(ACT_MENU), "Settings" },
+        { "C-STICK", "Scroll the page" },
+        { lr, "Page up / page down" },
+        { "D-PAD", "Jump between links" },
+        { zbadge, "Save a link to the SD card" },
+    };
+    HelpRow kb[] = {
+        { "B", "Delete" }, { "Y", "Space" }, { "X", "Shift" },
+        { "L / R", "Move the text cursor" }, { "START", "Accept the text" },
+    };
+    static const char *const tips_text[] = {
+        "Downloads: links to files such as .dol, .iso or .zip offer to save them to the SD card. Zip files "
+        "can be unzipped right away, and an interrupted download continues where it stopped.",
+        "What works: text, links, pictures, tables, lists and forms such as search boxes. JavaScript isn't "
+        "supported, so sites are shown in a simpler layout. Light, text-based sites work best.",
+        "Every button except the D-Pad can be changed in Settings > Controller.",
+    };
+    float gap = 8, rh = 26, cw = (w - gap) / 2, yy = y;
+    int n = (int)(sizeof(pad) / sizeof(pad[0]));
+    if (draw) help_heading(x, yy, w, "CONTROLLER", intro(1));
+    yy += 22;
+    for (int i = 0; i < n; i++) {
+        float rx = x + (i % 2) * (cw + gap), ry = yy + (i / 2) * (rh + 6);
+        if (draw) help_row(rx, ry, cw, rh, pad[i].badge, pad[i].text, intro(2 + i / 2));
+    }
+    yy += ((n + 1) / 2) * (rh + 6) + 8;
+    n = (int)(sizeof(kb) / sizeof(kb[0]));
+    if (draw) help_heading(x, yy, w, "ON-SCREEN KEYBOARD", intro(8));
+    yy += 22;
+    for (int i = 0; i < n; i++) {
+        float rx = x + (i % 2) * (cw + gap), ry = yy + (i / 2) * (rh + 6);
+        if (draw) help_row(rx, ry, cw, rh, kb[i].badge, kb[i].text, intro(9));
+    }
+    yy += ((n + 1) / 2) * (rh + 6) + 8;
+    if (draw) help_heading(x, yy, w, "TIPS", intro(10));
+    yy += 22;
+    float ts = w < 700 ? 13.0f : 14.0f, tw = w - 28, th = 0;
+    for (int i = 0; i < 3; i++) th += wrap(FONT_BODY, ts, 0, 0, tw, rgba(0, 0, 0, 255), tips_text[i], false) + 6;
+    float ph = th + 10;
+    if (draw) {
+        float a = intro(11);
+        Color navy = rgba(26, 24, 66, 255);
+        Color pale = opaque(color_lerp(theme()->panel_top, rgba(255, 255, 255, 255), 0.62f));
+        cut_rect(x, yy, w, ph, 8, color_alpha(pale, a));
+        cut_outline(x, yy, w, ph, 8, 1.5f, color_alpha(navy, a));
+        gfx_rect(x + 1, yy + 1, 5, ph - 2 - 8, color_alpha(rgba(240, 132, 24, 255), a));
+        float ty = yy + 7;
+        for (int i = 0; i < 3; i++) ty += wrap(FONT_BODY, ts, x + 15, ty, tw, color_alpha(navy, a), tips_text[i], true) + 6;
+    }
+    yy += ph + 10;
+    return yy - y;
+}
+
+HomeAction home_help_draw(float x, float y, float w, float h, bool input_ok) {
+    const Theme *t = theme();
+    HomeAction act = HOME_NONE;
+    Color base = opaque(color_lerp(t->panel_bottom, t->bg_top, 0.25f));
+    Color panel = opaque(t->panel_top);
+    Color navy = rgba(26, 24, 66, 255), gold = opaque(t->accent), white = rgba(255, 255, 255, 255);
+    gfx_rrect(x, y, w, h, 14, base);
+    gfx_set_clip(x, y, w, h);
+    float m = 10, hx = x + m, hw = w - 2 * m, cy = y + m;
+
+    /* header bar, as on the start page */
+    float a0 = intro(0), bar_h = 34;
+    cut_rect(hx, cy, hw, bar_h, 12, color_alpha(navy, a0));
+    {
+        float ex = hx + 22, ey = cy + bar_h / 2, s = 11;
+        float top[8] = { ex, ey - s, ex + s, ey - s * 0.5f, ex, ey, ex - s, ey - s * 0.5f };
+        float left[8] = { ex - s, ey - s * 0.5f, ex, ey, ex, ey + s, ex - s, ey + s * 0.5f };
+        float right[8] = { ex, ey, ex + s, ey - s * 0.5f, ex + s, ey + s * 0.5f, ex, ey + s };
+        gfx_quad(top, color_alpha(rgba(170, 160, 240, 255), a0));
+        gfx_quad(left, color_alpha(rgba(110, 96, 210, 255), a0));
+        gfx_quad(right, color_alpha(rgba(76, 62, 168, 255), a0));
+    }
+    float tsz = w < 700 ? 21 : 23;
+    caps(hx + 42, cy + (bar_h - gfx_line_height(FONT_UI, tsz)) / 2, tsz, 0.8f, color_alpha(gold, a0),
+         color_alpha(rgba(0, 0, 0, 255), a0), "Controls & Tips");
+    float title_end = hx + 42 + caps_width(tsz, 0.8f, "Controls & Tips");
+    char bubble[48];
+    snprintf(bubble, sizeof(bubble), "PRESS %s TO GO BACK", bind_name(ACT_BACK));
+    float bub_w = caps_width(9.5f, 1.1f, bubble) + 20, bub_h = 22;
+    float bub_x = hx + hw - 22 - bub_w, bub_y = cy + (bar_h - bub_h) / 2;
+    if (bub_x > title_end + 20) {
+        gfx_rect(bub_x, bub_y, bub_w, bub_h, color_alpha(white, a0));
+        gfx_tri(bub_x + 1, bub_y + 6, bub_x + 1, bub_y + 15, bub_x - 8, bub_y + 12, color_alpha(white, a0));
+        dashed_rect(bub_x + 3, bub_y + 3, bub_w - 6, bub_h - 6, color_alpha(navy, a0));
+        caps(bub_x + 10, bub_y + (bub_h - gfx_line_height(FONT_UI, 9.5f)) / 2, 9.5f, 1.1f, color_alpha(navy, a0),
+             rgba(0, 0, 0, 0), bubble);
+    }
+    cy += bar_h + 8;
+
+    /* back button pinned at the bottom */
+    float row_h = 24, by = y + h - m - row_h;
+    const char *blabel = "BACK TO START PAGE";
+    float bw = caps_width(10.5f, 1.2f, blabel) + 40;
+    float a3 = intro(12);
+    UiId bid = ui_id("help-back", 0);
+    bool bhov = ui_hover(bid, hx, by, bw, row_h);
+    cut_rect(hx, by, bw, row_h, 7, color_alpha(bhov ? gold : panel, a3));
+    cut_outline(hx, by, bw, row_h, 7, 1.5f, color_alpha(navy, a3));
+    {
+        float ax = hx + 14, ay = by + row_h / 2;
+        gfx_circle(ax, ay, 7, color_alpha(navy, a3));
+        gfx_tri(ax + 2.5f, ay - 4, ax + 2.5f, ay + 4, ax - 4, ay, color_alpha(bhov ? white : gold, a3));   /* points back */
+    }
+    caps(hx + 28, by + (row_h - gfx_line_height(FONT_UI, 10.5f)) / 2, 10.5f, 1.2f, color_alpha(navy, a3), rgba(0, 0, 0, 0), blabel);
+    if (clicked(bhov, input_ok)) act = HOME_OPEN_URL;
+
+    /* scrolling body between the header and the button */
+    float view_y = cy, view_h = by - 8 - cy;
+    float content_h = help_body(hx, 0, hw, false);
+    if (input_ok) {
+        help_scroll_target += input_scroll_delta();
+        int d = ui_dpad_unhandled();
+        if (d == DIR_DOWN) help_scroll_target += 60;
+        if (d == DIR_UP) help_scroll_target -= 60;
+    }
+    float max_s = content_h - view_h;
+    if (max_s < 0) max_s = 0;
+    if (help_scroll_target > max_s) help_scroll_target = max_s;
+    if (help_scroll_target < 0) help_scroll_target = 0;
+    help_scroll += (help_scroll_target - help_scroll) * (g_set.animations ? 0.3f : 1.0f);
+    gfx_set_clip(x, view_y, w, view_h);
+    help_body(hx, view_y - help_scroll, hw - (max_s > 0 ? 10 : 0), true);
+    gfx_set_clip(x, y, w, h);
+    if (max_s > 0) {   /* scroll bar */
+        float sh = fmaxf(24, view_h * view_h / content_h), sy = view_y + (view_h - sh) * (help_scroll / max_s);
+        gfx_rect(hx + hw - 4, view_y, 4, view_h, color_alpha(navy, 0.5f));
+        gfx_rect(hx + hw - 4, sy, 4, sh, gold);
+    }
+    gfx_clear_clip();
+    return act;
+}
