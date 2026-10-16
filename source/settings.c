@@ -121,6 +121,10 @@ const SetDef g_setdefs[] = {
     /* Security */
     { CAT_SECURITY, "sec.verify", "Verify certificates", ST_BOOL, O(verify_certs), 0, 1, 1, NULL, NULL,
       "Keep this on. Turning it off removes HTTPS protection." },
+    { CAT_SECURITY, "sec.cookies", "Cookies", ST_BOOL, O(cookies), 0, 1, 1, NULL, NULL,
+      "Lets sites remember you, which logins need. Off: no site can recognise you." },
+    { CAT_SECURITY, "sec.keep", "Keep logins after restart", ST_BOOL, O(keep_logins), 0, 1, 1, NULL, NULL,
+      "Saves cookies to the SD card. Anyone with the card could use your logins." },
     { CAT_SECURITY, "sec.ca", "Certificate file", ST_STR, O(ca_path), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
       "Trusted root certificates (PEM). Applies next launch." },
     /* Data */
@@ -134,6 +138,8 @@ const SetDef g_setdefs[] = {
       "Where downloaded files are saved. Swiss can open them from here." },
     { CAT_DATA, "dl.delzip", "Delete zip after unzipping", ST_BOOL, O(dl_delete_zip), 0, 1, 1, NULL, NULL,
       "Saves space by removing the .zip once its files are extracted." },
+    { CAT_DATA, NULL, "Clear cookies and logins", ST_ACTION, 0, SA_CLEAR_COOKIES, 0, 0, NULL, NULL,
+      "Signs you out of every site. Press twice to confirm." },
     { CAT_DATA, NULL, "Clear history", ST_ACTION, 0, SA_CLEAR_HISTORY, 0, 0, NULL, NULL,
       "Forget Back/Forward pages." },
     { CAT_DATA, NULL, "Delete all bookmarks", ST_ACTION, 0, SA_CLEAR_BOOKMARKS, 0, 0, NULL, NULL,
@@ -194,6 +200,8 @@ void settings_defaults(Settings *s) {
     s->image_proxy = 1;
     s->max_page_kb = 1024;
     s->verify_certs = 1;
+    s->cookies = 1;
+    s->keep_logins = 1;
     strcpy(s->ca_path, "sd:/gcbrowser/cacert.pem");
     strcpy(s->dl_folder, "sd:/downloads");
     s->exit_action = 0;

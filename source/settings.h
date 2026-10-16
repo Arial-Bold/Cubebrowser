@@ -27,6 +27,7 @@ typedef struct {
     /* Security */
     int  verify_certs;
     char ca_path[128];
+    int  cookies, keep_logins;
     /* Downloads */
     char dl_folder[128];
     int  dl_delete_zip;
@@ -43,7 +44,7 @@ extern const char *const category_names[CAT_COUNT];
 
 typedef enum { ST_BOOL, ST_INT, ST_CHOICE, ST_STR, ST_BIND, ST_ACTION } SetType;
 
-enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL };
+enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES };
 enum { OSK_TEXTMODE_TEXT = 0, OSK_TEXTMODE_URL = 1, OSK_TEXTMODE_IP = 2 };
 
 typedef struct {

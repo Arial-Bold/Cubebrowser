@@ -3,6 +3,7 @@
 #include "netio.h"
 #include "conn.h"
 #include "diag.h"
+#include "cookies.h"
 #include <gccore.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -57,6 +58,7 @@ bool is_download_name(const char *url) {
 
 /* Page downloads stop before the body if it isn't something we can display. */
 static volatile bool job_force_save;
+static char job_referer[URL_MAX];
 
 static bool page_wants_body(const char *url, const char *ct) {
     if (job_force_save) return false;
@@ -85,7 +87,7 @@ static void run_image_job(void) {
     ImageResult ir;
     memset(&ir, 0, sizeof(ir));
     ir.tag = job_tag;
-    HttpHooks hooks = { &cancel_flag, &progress, no_stage };
+    HttpHooks hooks = { &cancel_flag, &progress, no_stage, NULL, strstr(job_url, "images.weserv.nl") != NULL, NULL };
     HttpResult r;
     if (!http_fetch(job_url, NULL, "image/jpeg,image/png,image/gif;q=0.8,image/bmp;q=0.5", &r, &hooks)) {
         snprintf(ir.error, sizeof(ir.error), "%s", r.error);
@@ -124,13 +126,15 @@ static void *worker_main(void *arg) {
                 result = r;
             } else {
                 diag_note(DIAG_WORKER, "downloading page %.120s", job_url);
-                HttpHooks hooks = { &cancel_flag, &progress, set_stage, page_wants_body };
+                HttpHooks hooks = { &cancel_flag, &progress, set_stage, page_wants_body, false,
+                                    job_referer[0] ? job_referer : NULL };
                 HttpResult r;
                 http_fetch(job_url, job_post, NULL, &r, &hooks);
                 free(job_post);
                 job_post = NULL;
                 result = r;
             }
+            cookies_save_if_needed();   /* keep logins on the card as they change */
             state = FETCH_DONE;
             diag_note(DIAG_WORKER, "idle");
         }
@@ -147,6 +151,13 @@ bool fetch_start_save(const char *url) {
     if (!fetch_start(url, NULL)) return false;
     job_force_save = true;
     return true;
+}
+
+void fetch_set_referer(const char *page_url) {
+    if (page_url && (!strncasecmp(page_url, "http://", 7) || !strncasecmp(page_url, "https://", 8)))
+        snprintf(job_referer, sizeof(job_referer), "%s", page_url);
+    else
+        job_referer[0] = 0;
 }
 
 bool fetch_start(const char *url, const char *post_body) {

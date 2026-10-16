@@ -15,6 +15,7 @@
 #include "diag.h"
 #include "unzip.h"
 #include "dolload.h"
+#include "cookies.h"
 #include <sys/stat.h>
 #include <ctype.h>
 #include <math.h>
@@ -291,6 +292,7 @@ static void start_load(const char *url, const char *post) {
         free(pending_post);
         pending_post = post ? strdup(post) : NULL;
     }
+    fetch_set_referer(has_page ? page.url : NULL);
     if (fetch_state() != FETCH_IDLE) {
         /* stop the current download; this one starts as soon as it finishes */
         fetch_cancel();
@@ -952,6 +954,7 @@ static void exit_pressed(void) {
     }
     exit_armed_until = 0;
     settings_save();
+    cookies_save_if_needed();
     if (g_set.exit_action == 1) { system_restart(); return; }
     char err[256];
     if (!dol_check(g_set.swiss_dol, err, sizeof(err))) {
@@ -979,6 +982,7 @@ static void exit_pressed(void) {
 }
 
 void browser_init(void) {
+    cookies_init();
     page_init(&page);
     bookmarks_load();
     browser_navigate(g_set.home);

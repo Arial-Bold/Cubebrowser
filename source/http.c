@@ -5,6 +5,7 @@
 #include "conn.h"
 #include "netio.h"
 #include "settings.h"
+#include "cookies.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -115,6 +116,37 @@ static void stage(const HttpHooks *h, const char *msg) {
 
 enum { FO_FAIL, FO_OK, FO_RETRY };
 
+/* Extra request headers: Cookie, and Referer/Origin (many login forms
+ * check where a submission came from). */
+static int extra_headers(char *out, size_t cap, const Url *u, bool tls, const char *post, const HttpHooks *hooks) {
+    int n = 0;
+    out[0] = 0;
+    if (!hooks || !hooks->no_cookies) {
+        static char ck[4096];
+        cookies_for(u->host, u->path, tls, netio_now(), ck, sizeof(ck));
+        if (ck[0]) n += snprintf(out + n, cap - (size_t)n, "Cookie: %s\r\n", ck);
+    }
+    const char *ref = hooks ? hooks->referer : NULL;
+    /* never reveal an https page to an http site */
+    if (ref && (!strncasecmp(ref, "http://", 7) || (!strncasecmp(ref, "https://", 8) && tls)) && (size_t)n < cap) {
+        char clean[URL_MAX];
+        snprintf(clean, sizeof(clean), "%s", ref);
+        char *h = strchr(clean, '#');
+        if (h) *h = 0;
+        n += snprintf(out + n, cap - (size_t)n, "Referer: %s\r\n", clean);
+        if (post && (size_t)n < cap) {
+            Url r;
+            if (url_parse(clean, &r)) {
+                bool def = (!strcmp(r.scheme, "https") && r.port == 443) || (!strcmp(r.scheme, "http") && r.port == 80);
+                if (def) n += snprintf(out + n, cap - (size_t)n, "Origin: %s://%s\r\n", r.scheme, r.host);
+                else n += snprintf(out + n, cap - (size_t)n, "Origin: %s://%s:%u\r\n", r.scheme, r.host, r.port);
+            }
+        }
+    }
+    if ((size_t)n >= cap) { out[0] = 0; n = 0; }
+    return n;
+}
+
 static bool contains_nocase(const char *hay, const char *needle) {
     size_t n = strlen(needle);
     for (; *hay; hay++)
@@ -147,16 +179,18 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
     res->secure = tls;
     res->verified = kconn.verified;
 
-    static char req[URL_MAX + 1024];
+    static char req[URL_MAX + 8192];
     bool default_port = (tls && u.port == 443) || (!tls && u.port == 80);
     char hosthdr[300];
     if (default_port) snprintf(hosthdr, sizeof(hosthdr), "%s", u.host);
     else snprintf(hosthdr, sizeof(hosthdr), "%s:%u", u.host, u.port);
+    static char extra[6144];
+    extra_headers(extra, sizeof(extra), &u, tls, post, hooks);
     int n = snprintf(req, sizeof(req),
                      "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: %s\r\n"
-                     "Accept-Language: en\r\nAccept-Encoding: identity\r\nConnection: keep-alive\r\n",
+                     "Accept-Language: en\r\nAccept-Encoding: identity\r\nConnection: keep-alive\r\n%s",
                      post ? "POST" : "GET", u.path, hosthdr, user_agent_strings[g_set.user_agent],
-                     accept ? accept : DEFAULT_ACCEPT);
+                     accept ? accept : DEFAULT_ACCEPT, extra);
     if (post && n < (int)sizeof(req))
         n += snprintf(req + n, sizeof(req) - n,
                       "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %u\r\n",
@@ -212,6 +246,7 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
         else if (!strcasecmp(line, "location")) snprintf(location, loclen, "%s", val);
         else if (!strcasecmp(line, "connection") && contains_nocase(val, "close")) server_close = true;
         else if (!strcasecmp(line, "content-disposition")) http_disposition_filename(val, res->filename, sizeof(res->filename));
+        else if (!strcasecmp(line, "set-cookie") && !(hooks && hooks->no_cookies)) cookies_receive(u.host, u.path, tls, val, netio_now());
     }
     res->length = content_length;
     if (hooks && hooks->want_body && res->status >= 200 && res->status < 300 &&
@@ -368,7 +403,8 @@ HttpStream *http_stream_open(const char *url, long long range_from, const HttpHo
         bool tls = !strcmp(u.scheme, "https");
         if (!conn_open(&st->conn, u.host, u.port, tls, hooks ? hooks->cancel : NULL, hooks ? hooks->stage : NULL, err, errlen))
             break;
-        char req[URL_MAX + 1024];
+        static char req[URL_MAX + 8192], extra[6144];
+        extra_headers(extra, sizeof(extra), &u, tls, NULL, hooks);
         bool default_port = (tls && u.port == 443) || (!tls && u.port == 80);
         char hosthdr[300], range[64] = "";
         if (default_port) snprintf(hosthdr, sizeof(hosthdr), "%s", u.host);
@@ -376,8 +412,8 @@ HttpStream *http_stream_open(const char *url, long long range_from, const HttpHo
         if (range_from > 0) snprintf(range, sizeof(range), "Range: bytes=%lld-\r\n", range_from);
         int n = snprintf(req, sizeof(req),
                          "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\n"
-                         "Accept-Encoding: identity\r\n%sConnection: close\r\n\r\n",
-                         u.path, hosthdr, user_agent_strings[g_set.user_agent], range);
+                         "Accept-Encoding: identity\r\n%s%sConnection: close\r\n\r\n",
+                         u.path, hosthdr, user_agent_strings[g_set.user_agent], range, extra);
         if (n >= (int)sizeof(req) || !conn_write_all(&st->conn, req, (size_t)n)) {
             snprintf(err, errlen, "Couldn't send the request.");
             conn_close(&st->conn);
@@ -410,6 +446,7 @@ HttpStream *http_stream_open(const char *url, long long range_from, const HttpHo
             else if (!strcasecmp(line, "content-type")) snprintf(info->content_type, sizeof(info->content_type), "%s", val);
             else if (!strcasecmp(line, "location")) snprintf(location, sizeof(location), "%s", val);
             else if (!strcasecmp(line, "content-disposition")) http_disposition_filename(val, info->filename, sizeof(info->filename));
+            else if (!strcasecmp(line, "set-cookie") && !(hooks && hooks->no_cookies)) cookies_receive(u.host, u.path, tls, val, netio_now());
             else if (!strcasecmp(line, "content-range")) {   /* bytes 100-999/1000 */
                 const char *slash = strrchr(val, '/');
                 if (slash && slash[1] != '*') rtotal = atoll(slash + 1);

@@ -13,6 +13,7 @@
 #include "storage.h"
 #include "conn.h"
 #include "dolload.h"
+#include "cookies.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -76,7 +77,7 @@ static void str_done(bool ok, const char *text, void *user) {
 
 static void run_action(int idx) {
     const SetDef *d = &g_setdefs[idx];
-    bool needs_confirm = (d->min == SA_CLEAR_BOOKMARKS || d->min == SA_RESET_ALL);
+    bool needs_confirm = (d->min == SA_CLEAR_BOOKMARKS || d->min == SA_RESET_ALL || d->min == SA_CLEAR_COOKIES);
     if (needs_confirm && confirm_action != idx) {
         confirm_action = idx;
         ui_toast("Press again to confirm");
@@ -92,6 +93,7 @@ static void run_action(int idx) {
         dirty = true;
         ui_toast("All settings reset");
         break;
+    case SA_CLEAR_COOKIES: cookies_clear(); ui_toast("Signed out of all sites"); break;
     case SA_FIND_DOL:
         if (!storage_ok()) { ui_toast("No SD card found"); break; }
         if (!pick_list) pick_list = malloc(sizeof(*pick_list) * PICK_MAX);
@@ -377,6 +379,7 @@ bool settings_ui_frame(bool interactive) {
 
     if (leave) {
         capture = -1;
+        cookies_save_if_needed();
         if (dirty) {
             if (settings_save()) ui_toast("Settings saved");
             else ui_toast("Couldn't save settings - is the SD card inserted?");
