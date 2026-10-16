@@ -3,6 +3,7 @@
 #include "storage.h"
 #include "theme.h"
 #include "gfx.h"
+#include "version.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +28,7 @@ static const char *const search_engine_prefixes[] = {
 };
 const char *const user_agent_names[] = { "CubeBrowser", "Lynx (text mode)", "Classic phone", NULL };
 const char *const user_agent_strings[] = {
-    "Mozilla/5.0 (Nintendo GameCube; PowerPC) CubeBrowser/1.0",
+    "Mozilla/5.0 (Nintendo GameCube; PowerPC) CubeBrowser/" CB_VERSION,
     "Lynx/2.9.0 libwww-FM/2.14 SSL-MM/1.4.1 OpenSSL/3.0",
     "Mozilla/5.0 (Linux; U; Android 2.3.6; en-us) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1",
 };

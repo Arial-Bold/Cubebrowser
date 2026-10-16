@@ -9,6 +9,7 @@
 #include "input.h"
 #include "settings.h"
 #include "storage.h"
+#include "home.h"
 #include "sound.h"
 #include "url.h"
 #include "image.h"
@@ -63,20 +64,10 @@ static bool queued;
 static char queued_url[URL_MAX];
 static char *queued_post;
 
+/* The start page is drawn by home.c; this only gives it a title (and is
+ * what shows if something ever asks the page engine to draw it). */
 static const char home_html[] =
-    "<title>Start</title>"
-    "<h1>Welcome to CubeBrowser</h1>"
-    "<p>Press <b>X</b> to type an address or search. Point with the Control Stick and press <b>A</b> "
-    "to follow links. The <b>D-Pad</b> jumps between links, and the <b>C-Stick</b> scrolls.</p>"
-    "<h3>Light sites that work well</h3><ul>"
-    "<li><a href=\"https://lite.duckduckgo.com/lite/\">DuckDuckGo Lite</a> - search</li>"
-    "<li><a href=\"https://en.m.wikipedia.org/wiki/GameCube\">Wikipedia (mobile)</a> - encyclopedia</li>"
-    "<li><a href=\"https://text.npr.org/\">NPR Text</a> - news</li>"
-    "<li><a href=\"https://lite.cnn.com/\">CNN Lite</a> - news</li>"
-    "<li><a href=\"http://68k.news/\">68k.news</a> - headlines made for vintage computers</li>"
-    "<li><a href=\"http://frogfind.com/\">FrogFind</a> - search that simplifies pages</li>"
-    "<li><a href=\"https://wiby.me/\">Wiby</a> - a search engine for classic web pages</li>"
-    "</ul><p><a href=\"about:help\">Controls and tips</a></p>";
+    "<title>Start</title><h1>CubeBrowser</h1><p>Press <b>X</b> to type an address or search.</p>";
 
 static const char help_html[] =
     "<title>Controls</title><h1>Controls</h1><ul>"
@@ -281,7 +272,7 @@ static void start_load(const char *url, const char *post) {
         free(cur_post);
         cur_post = NULL;
         if (!strcasecmp(url, "about:home") || !strcasecmp(url, "about:blank") || !strcasecmp(url, "about:"))
-            show_html(home_html, "about:home", false);
+        { show_html(home_html, "about:home", false); home_reset(); }
         else if (!strcasecmp(url, "about:help"))
             show_html(help_html, "about:help", false);
         else
@@ -1075,7 +1066,22 @@ void browser_frame(bool interactive) {
     }
 
     int hover_link = -1, hover_field = -1;
-    if (has_page) {
+    const char *home_hover = NULL;
+    bool on_home = has_page && !strcmp(page.url, "about:home");
+    if (on_home) {
+        /* the start page draws itself (home.c) */
+        const char *go = NULL;
+        HomeAction ha = home_draw(cx, cy, cw, ch, input_ok, &go, &home_hover);
+        if (ha != HOME_NONE) sound_play(ha == HOME_BOOKMARKS ? SFX_OPEN : SFX_SELECT);
+        switch (ha) {
+        case HOME_OPEN_URL: navigate(go, NULL, true); break;
+        case HOME_SEARCH: open_address_bar(); break;
+        case HOME_BOOKMARKS: bm_open = true; bm_scroll = 0; confirm_delete = -1; break;
+        case HOME_HELP: navigate("about:help", NULL, true); break;
+        case HOME_SETTINGS: settings_request = true; break;
+        default: break;
+        }
+    } else if (has_page) {
         /* scrolling */
         if (input_ok) {
             page.scroll_target += input_scroll_delta();
@@ -1152,6 +1158,8 @@ void browser_frame(bool interactive) {
         sbx += 24;
     } else if (hover_link >= 0) {
         snprintf(status, sizeof(status), "%s", page_link_url(&page, hover_link));
+    } else if (home_hover) {
+        snprintf(status, sizeof(status), "%s", home_hover);
     } else if (has_page && sheets_pending() && netio_state() == NET_UP) {
         snprintf(status, sizeof(status), "Loading page styles...");
         ui_spinner(sbx + 8, sby + 10, 14);
