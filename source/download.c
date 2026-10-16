@@ -114,14 +114,16 @@ static double now_s(void) {
  *
  * Things that go wrong on the GameCube, and what happens:
  * - A connection freezes (lost packets, then long retransmit back-off): after
- *   3 s without data its connection is dropped and the rest of the block is
+ *   4 s without data its connection is dropped and the rest of the block is
  *   requested again (the bytes already received are kept).
  * - The thread can't respond, usually because it's stuck opening a new
  *   connection (lwIP retries a lost connection request for ~90 s and can't be
- *   interrupted): after 3 more seconds the block is taken away and given to
+ *   interrupted): after 4 more seconds the block is taken away and given to
  *   another connection. Whatever the stuck thread receives later is refused,
  *   because each hand-over bumps the block's generation number.
- * - Repeated freezes mean the adapter is overrun: use a connection fewer.
+ * - The number of connections stays as set in Settings: on the console,
+ *   freezes happen at any count, and fewer connections was only ever slower
+ *   (2: ~65 KB/s, 4: ~139 KB/s).
  * - Stopping or finishing never waits more than a few seconds for stuck
  *   threads; they clean up after themselves (the shared state is freed by
  *   whoever leaves last). */
@@ -326,8 +328,8 @@ static int download_parallel(const char *url, const char *part, long long have, 
     pg->connections = p->active_limit;
 
     long long commit = have, mark = have;
-    double tstart = now_s(), tmark = tstart, last_change = tstart, last_rescue = -100;
-    int rescues = 0, takeovers = 0, recent_rescues = 0, secs = 0;
+    double tstart = now_s(), tmark = tstart;
+    int rescues = 0, takeovers = 0, secs = 0;
     bool write_failed = false;
     /* download log: one line per second, kept in memory and saved at the end
      * (download.log in the data folder) so it doesn't compete with the file */
@@ -348,7 +350,6 @@ static int download_parallel(const char *url, const char *part, long long have, 
         int moving = 0, filling = 0;
         double t = now_s();
         thr_lock(&p->m);
-        bool all_handed_out = p->next >= p->total;
         for (int i = 0; i < p->nbufs; i++) {
             Buf *b = &p->bufs[i];
             if (b->state == B_FREE) continue;
@@ -368,17 +369,15 @@ static int download_parallel(const char *url, const char *part, long long have, 
             for (int i = 0; i < p->nbufs; i++) {
                 Buf *b = &p->bufs[i];
                 if (b->state != B_FILLING) continue;
-                /* Stall rescue: nothing for 3 s while others are moving (or
+                /* Stall rescue: nothing for 4 s while others are moving (or
                  * while it's the only block left). If everything has gone
                  * quiet at once it's more likely the whole network: 10 s. */
-                double limit = (moving > 0 || filling == 1) ? 3.0 : 10.0;
+                double limit = (moving > 0 || filling == 1) ? 4.0 : 10.0;
                 if (b->abort_at == 0 && t - b->moved_at > limit) {
                     p->abort_conn[b->owner] = 1;
                     b->abort_at = t;
                     rescues++;
-                    recent_rescues = (t - last_rescue < 15.0) ? recent_rescues + 1 : 1;
-                    last_rescue = t;
-                } else if (b->abort_at > 0 && t - b->abort_at > 3.0) {
+                } else if (b->abort_at > 0 && t - b->abort_at > 4.0) {
                     /* the connection didn't recover: hand the block over */
                     b->state = B_ORPHAN;
                     b->owner = -1;
@@ -413,21 +412,6 @@ static int download_parallel(const char *url, const char *part, long long have, 
             mark = pg->done;
             tmark = t;
             secs++;
-            /* Connection control: two freezes within 15 s -> one connection
-             * fewer (minimum 2, at most one change per 10 s); 20 s without
-             * any freeze -> try one more (up to the number in Settings). */
-            if (!all_handed_out) {
-                if (recent_rescues >= 2 && p->active_limit > 2 && t - last_change >= 10.0) {
-                    p->active_limit--;
-                    last_change = t;
-                    recent_rescues = 0;
-                    diag_note(DIAG_WORKER, "download: stalls, now %d connections (%d rescues)", p->active_limit, rescues);
-                } else if (p->active_limit < started && t - last_rescue >= 20.0 && t - last_change >= 20.0) {
-                    p->active_limit++;
-                    last_change = t;
-                    diag_note(DIAG_WORKER, "download: steady, now %d connections", p->active_limit);
-                }
-            }
             pg->connections = p->active_limit;
             if (dlog && loglen + 64 < logcap)
                 loglen += (size_t)snprintf(dlog + loglen, logcap - loglen, "%4d %5d %5d %7d %9d\n", secs, inst / 1024,
