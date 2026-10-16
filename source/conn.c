@@ -26,6 +26,25 @@ static mbedtls_ctr_drbg_context drbg;
 static mbedtls_x509_crt ca;
 static mbedtls_ssl_config conf;
 static bool inited, ca_ok;
+
+/* The random generator is shared by every connection, and downloads now use
+ * several at once, so calls into it are serialised. */
+#ifdef GEKKO
+#include <ogc/mutex.h>
+static mutex_t rng_lock;
+static bool rng_lock_ok;
+#endif
+
+static int rng_locked(void *ctx, unsigned char *out, size_t len) {
+#ifdef GEKKO
+    if (rng_lock_ok) LWP_MutexLock(rng_lock);
+#endif
+    int r = mbedtls_ctr_drbg_random(ctx, out, len);
+#ifdef GEKKO
+    if (rng_lock_ok) LWP_MutexUnlock(rng_lock);
+#endif
+    return r;
+}
 static int ca_count;
 
 /* Clock for certificate validity checks: SNTP time when available. */
@@ -83,7 +102,10 @@ bool tls_global_init(char *err, size_t errlen) {
         snprintf(err, errlen, "TLS config failed (-0x%04X)", -r);
         return false;
     }
-    mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &drbg);
+#ifdef GEKKO
+    rng_lock_ok = LWP_MutexInit(&rng_lock, false) >= 0;
+#endif
+    mbedtls_ssl_conf_rng(&conf, rng_locked, &drbg);
     mbedtls_ssl_conf_ca_chain(&conf, &ca, NULL);
     mbedtls_ssl_conf_min_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_2);
     inited = true;

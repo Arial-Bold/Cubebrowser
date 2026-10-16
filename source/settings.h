@@ -30,7 +30,7 @@ typedef struct {
     int  cookies, keep_logins;
     /* Downloads */
     char dl_folder[128];
-    int  dl_delete_zip;
+    int  dl_delete_zip, dl_connections;
     /* Leaving the browser */
     int  exit_action;
     char swiss_dol[256];

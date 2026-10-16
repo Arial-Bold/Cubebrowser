@@ -55,6 +55,17 @@ HttpStream *http_stream_open(const char *url, long long range_from, const HttpHo
 int  http_stream_read(HttpStream *st, void *buf, size_t len);   /* >0 bytes, 0 end, <0 error */
 void http_stream_close(HttpStream *st);
 
+/* ---- block downloads: many byte ranges over one kept-open connection ---- */
+
+typedef struct HttpKeep HttpKeep;
+HttpKeep *http_keep_new(void);
+void http_keep_free(HttpKeep *k);
+/* Fetches bytes first..last (inclusive) of url into out. Reuses the
+ * connection between calls. *got counts bytes as they arrive. Returns the
+ * number of bytes (last-first+1) or -1 with err filled. */
+long long http_range_get(HttpKeep *k, const char *url, long long first, long long last, unsigned char *out,
+                         volatile long long *got, const HttpHooks *hooks, char *err, size_t errlen);
+
 /* Filename from a Content-Disposition header value (empty if none). */
 void http_disposition_filename(const char *value, char *out, size_t outlen);
 void http_result_free(HttpResult *res);

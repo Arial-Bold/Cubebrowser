@@ -8,6 +8,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <strings.h>
+#include <ogc/mutex.h>
 
 static volatile NetState state = NET_OFF;
 static char status[96] = "Network not started";
@@ -153,8 +155,49 @@ static int dns_query(u32 server_be, const char *host, u32 *ip_be) {
     return -1;
 }
 
+/* Small DNS cache: parallel download connections (and repeat visits) to the
+ * same site don't each repeat the lookup. Entries last five minutes. */
+#define DNS_CACHE 16
+typedef struct { char host[128]; u32 ip; u64 when; } DnsEntry;
+static DnsEntry dns_cache[DNS_CACHE];
+static int dns_next;
+static mutex_t dns_lock;
+static bool dns_lock_ok;
+
+static bool dns_cached(const char *host, u32 *ip) {
+    if (!dns_lock_ok) dns_lock_ok = LWP_MutexInit(&dns_lock, false) >= 0;
+    bool hit = false;
+    if (dns_lock_ok) LWP_MutexLock(dns_lock);
+    u64 now = gettime();
+    for (int i = 0; i < DNS_CACHE; i++)
+        if (dns_cache[i].host[0] && !strcasecmp(dns_cache[i].host, host) &&
+            ticks_to_secs(now - dns_cache[i].when) < 300) { *ip = dns_cache[i].ip; hit = true; break; }
+    if (dns_lock_ok) LWP_MutexUnlock(dns_lock);
+    return hit;
+}
+
+static void dns_store(const char *host, u32 ip) {
+    if (strlen(host) >= sizeof(dns_cache[0].host)) return;
+    if (dns_lock_ok) LWP_MutexLock(dns_lock);
+    DnsEntry *e = &dns_cache[dns_next];
+    dns_next = (dns_next + 1) % DNS_CACHE;
+    snprintf(e->host, sizeof(e->host), "%s", host);
+    e->ip = ip;
+    e->when = gettime();
+    if (dns_lock_ok) LWP_MutexUnlock(dns_lock);
+}
+
+static int resolve_uncached(const char *host, u32 *ip_be);
+
 int netio_resolve(const char *host, u32 *ip_be) {
     if (parse_ipv4(host, ip_be)) return 0;
+    if (dns_cached(host, ip_be)) return 0;
+    int r = resolve_uncached(host, ip_be);
+    if (r == 0) dns_store(host, *ip_be);
+    return r;
+}
+
+static int resolve_uncached(const char *host, u32 *ip_be) {
     /* The GameCube network library has no built-in name lookup, so we ask a
      * DNS server ourselves: the DNS setting if filled in, then the router
      * (most home routers answer DNS), then public servers as a backup. */

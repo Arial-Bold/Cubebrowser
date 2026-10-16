@@ -136,6 +136,8 @@ const SetDef g_setdefs[] = {
       "Lists the programs on your card so you can choose Swiss." },
     { CAT_DATA, "dl.folder", "Download folder", ST_STR, O(dl_folder), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
       "Where downloaded files are saved. Swiss can open them from here." },
+    { CAT_DATA, "dl.conns", "Download connections", ST_INT, O(dl_connections), 1, 6, 1, NULL, NULL,
+      "More connections download big files faster on servers that allow it." },
     { CAT_DATA, "dl.delzip", "Delete zip after unzipping", ST_BOOL, O(dl_delete_zip), 0, 1, 1, NULL, NULL,
       "Saves space by removing the .zip once its files are extracted." },
     { CAT_DATA, NULL, "Clear cookies and logins", ST_ACTION, 0, SA_CLEAR_COOKIES, 0, 0, NULL, NULL,
@@ -204,6 +206,7 @@ void settings_defaults(Settings *s) {
     s->keep_logins = 1;
     strcpy(s->ca_path, "sd:/gcbrowser/cacert.pem");
     strcpy(s->dl_folder, "sd:/downloads");
+    s->dl_connections = 4;
     s->exit_action = 0;
     strcpy(s->swiss_dol, "sd:/ipl.dol");
 }

@@ -122,7 +122,7 @@ static int extra_headers(char *out, size_t cap, const Url *u, bool tls, const ch
     int n = 0;
     out[0] = 0;
     if (!hooks || !hooks->no_cookies) {
-        static char ck[4096];
+        char ck[4096];   /* local: several download connections build headers at once */
         cookies_for(u->host, u->path, tls, netio_now(), ck, sizeof(ck));
         if (ck[0]) n += snprintf(out + n, cap - (size_t)n, "Cookie: %s\r\n", ck);
     }
@@ -409,7 +409,7 @@ HttpStream *http_stream_open(const char *url, long long range_from, const HttpHo
         char hosthdr[300], range[64] = "";
         if (default_port) snprintf(hosthdr, sizeof(hosthdr), "%s", u.host);
         else snprintf(hosthdr, sizeof(hosthdr), "%s:%u", u.host, u.port);
-        if (range_from > 0) snprintf(range, sizeof(range), "Range: bytes=%lld-\r\n", range_from);
+        if (range_from >= 0) snprintf(range, sizeof(range), "Range: bytes=%lld-\r\n", range_from);   /* also shows if parts are supported */
         int n = snprintf(req, sizeof(req),
                          "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\n"
                          "Accept-Encoding: identity\r\n%s%sConnection: close\r\n\r\n",
@@ -513,4 +513,111 @@ void http_stream_close(HttpStream *st) {
     if (!st) return;
     conn_close(&st->conn);
     free(st);
+}
+
+/* ============================================================ block fetch */
+
+struct HttpKeep {
+    Conn conn;
+    Reader rd;
+    bool open;
+    char key[300];
+};
+
+HttpKeep *http_keep_new(void) { return calloc(1, sizeof(HttpKeep)); }
+
+void http_keep_free(HttpKeep *k) {
+    if (!k) return;
+    if (k->open) conn_close(&k->conn);
+    free(k);
+}
+
+static void keep_close(HttpKeep *k) {
+    if (k->open) conn_close(&k->conn);
+    k->open = false;
+}
+
+long long http_range_get(HttpKeep *k, const char *url, long long first, long long last, unsigned char *out,
+                         volatile long long *got, const HttpHooks *hooks, char *err, size_t errlen) {
+    err[0] = 0;
+    Url u;
+    if (!url_parse(url, &u) || strcmp(u.scheme, "about") == 0) { snprintf(err, errlen, "Bad address."); return -1; }
+    bool tls = strcmp(u.scheme, "https") == 0;
+    char key[300];
+    snprintf(key, sizeof(key), "%s:%u:%d", u.host, u.port, tls ? 1 : 0);
+    if (k->open && strcmp(key, k->key)) keep_close(k);
+    long long want = last - first + 1;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        bool reused = k->open;
+        if (!k->open) {
+            if (!conn_open(&k->conn, u.host, u.port, tls, hooks ? hooks->cancel : NULL, NULL, err, errlen)) return -1;
+            k->open = true;
+            snprintf(k->key, sizeof(k->key), "%s", key);
+        }
+        k->conn.cancel = hooks ? hooks->cancel : NULL;
+        char req[URL_MAX + 8192], extra[6144];   /* on this thread's stack (download threads have 128 KB) */
+        extra_headers(extra, sizeof(extra), &u, tls, NULL, hooks);
+        bool def = (tls && u.port == 443) || (!tls && u.port == 80);
+        char hosthdr[300];
+        if (def) snprintf(hosthdr, sizeof(hosthdr), "%s", u.host);
+        else snprintf(hosthdr, sizeof(hosthdr), "%s:%u", u.host, u.port);
+        int n = snprintf(req, sizeof(req),
+                         "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\nAccept-Encoding: identity\r\n"
+                         "Range: bytes=%lld-%lld\r\n%sConnection: keep-alive\r\n\r\n",
+                         u.path, hosthdr, user_agent_strings[g_set.user_agent], first, last, extra);
+        if (n >= (int)sizeof(req)) { snprintf(err, errlen, "Address too long."); return -1; }
+        memset(&k->rd, 0, sizeof(k->rd));
+        k->rd.c = &k->conn;
+        if (!conn_write_all(&k->conn, req, (size_t)n)) {
+            keep_close(k);
+            if (reused) continue;   /* the server had closed the idle connection: reconnect once */
+            snprintf(err, errlen, "Couldn't send the request.");
+            return -1;
+        }
+        char line[1024];
+        int status = 0;
+        if (rd_line(&k->rd, line, sizeof(line)) < 0 || strncmp(line, "HTTP/", 5)) {
+            keep_close(k);
+            if (reused) continue;
+            snprintf(err, errlen, "No response from the server.");
+            return -1;
+        }
+        const char *sp = strchr(line, ' ');
+        status = sp ? atoi(sp + 1) : 0;
+        long long clen = -1;
+        bool close_after = !strncmp(line, "HTTP/1.0", 8), chunked = false;
+        for (int i = 0; i < 200; i++) {
+            int l = rd_line(&k->rd, line, sizeof(line));
+            if (l < 0) { keep_close(k); snprintf(err, errlen, "Connection closed early."); return -1; }
+            if (l == 0) break;
+            char *colon = strchr(line, ':');
+            if (!colon) continue;
+            *colon = 0;
+            char *val = colon + 1;
+            while (*val == ' ' || *val == '\t') val++;
+            if (!strcasecmp(line, "content-length")) clen = atoll(val);
+            else if (!strcasecmp(line, "connection") && contains_nocase(val, "close")) close_after = true;
+            else if (!strcasecmp(line, "transfer-encoding") && strstr(val, "chunked")) chunked = true;
+            else if (!strcasecmp(line, "set-cookie") && !(hooks && hooks->no_cookies)) cookies_receive(u.host, u.path, tls, val, netio_now());
+        }
+        if (status != 206 || chunked || clen != want) {
+            keep_close(k);
+            snprintf(err, errlen, status == 206 ? "Unexpected response size." : "The server stopped allowing partial downloads (error %d).", status);
+            return -1;
+        }
+        long long have = 0;
+        while (have < want) {
+            if (hooks && hooks->cancel && *hooks->cancel) { keep_close(k); snprintf(err, errlen, "Stopped."); return -1; }
+            long long chunk = want - have;
+            if (chunk > 65536) chunk = 65536;
+            int r = rd_some(&k->rd, (char *)out + have, (size_t)chunk);
+            if (r <= 0) { keep_close(k); snprintf(err, errlen, "Connection lost."); return -1; }
+            have += r;
+            if (got) *got += r;
+        }
+        if (close_after || k->rd.pos < k->rd.len) keep_close(k);   /* leftover bytes would be out of step */
+        return want;
+    }
+    snprintf(err, errlen, "Couldn't reconnect.");
+    return -1;
 }
