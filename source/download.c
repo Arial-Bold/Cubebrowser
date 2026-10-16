@@ -135,8 +135,17 @@ static double now_s(void) {
 
 #define BLOCK (512 * 1024)
 #define CONN_STACK (128 * 1024)
-#define CONN_PRIO 40
-#define MAX_CONNS 6
+/* Above the UI thread (64): each connection may only have ~3 KB in flight,
+ * so the server waits for us to read before it sends more. If these threads
+ * had to wait for the UI to finish a frame first, every round trip got
+ * longer. They spend nearly all their time blocked on the network, so the
+ * UI isn't starved. (The block-writing loop stays on the worker thread at
+ * its normal, lower priority.) */
+#define CONN_PRIO 80
+/* More than 4 at once overruns the network adapter (each connection can
+ * have ~3 KB in flight) and it starts dropping packets: on the console 6
+ * connections gave ~60 KB/s against ~120-139 KB/s for 4. */
+#define MAX_CONNS 4
 
 enum { B_FREE, B_FILLING, B_READY, B_ORPHAN /* partly filled, waiting for a new connection */ };
 
@@ -535,7 +544,7 @@ bool download_to_file(const char *url, const char *dest, DownloadProgress *pg, v
         char final_url[URL_MAX];
         snprintf(final_url, sizeof(final_url), "%s", info.url);   /* after redirects */
         http_stream_close(hs);
-        int r = download_parallel(final_url, part, have, info.total, conns > 6 ? 6 : conns, pg, cancel, err, errlen);
+        int r = download_parallel(final_url, part, have, info.total, conns > MAX_CONNS ? MAX_CONNS : conns, pg, cancel, err, errlen);
         if (r == 1) {
             remove(dest);
             if (rename(part, dest) != 0) { snprintf(err, errlen, "Couldn't finish saving the file."); return false; }
