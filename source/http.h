@@ -66,7 +66,8 @@ typedef bool (*HttpSink)(void *ctx, const unsigned char *data, size_t len);
 
 /* Fetches bytes first..last (inclusive) of url, passing them to sink as they
  * arrive. Reuses the connection between calls. Returns the number of bytes
- * (last-first+1) or -1 with err filled. */
+ * (last-first+1), or -1 with err filled (worth retrying), or -2 when the
+ * server won't serve the range at all (e.g. 404). */
 long long http_range_get(HttpKeep *k, const char *url, long long first, long long last, HttpSink sink, void *ctx,
                          const HttpHooks *hooks, char *err, size_t errlen);
 

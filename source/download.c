@@ -121,6 +121,11 @@ static double now_s(void) {
  *   interrupted): after 4 more seconds the block is taken away and given to
  *   another connection. Whatever the stuck thread receives later is refused,
  *   because each hand-over bumps the block's generation number.
+ * - A connection that can't connect (busy server, or one that limits how
+ *   many connections you may open) gives its block to the others and waits
+ *   longer each time (1, 2, 4 ... 15 s) before trying again, so the download
+ *   carries on with fewer connections. It only gives up if nothing at all
+ *   arrives for a minute, or the server refuses the file outright.
  * - The number of connections stays as set in Settings: on the console,
  *   freezes happen at any count, and fewer connections was only ever slower
  *   (2: ~65 KB/s, 4: ~139 KB/s).
@@ -196,6 +201,7 @@ static void *conn_main(void *arg) {
     HttpKeep *k = http_keep_new();
     HttpHooks hooks = { .cancel = &p->abort_conn[id] };
     char err[256];
+    int fails = 0;   /* consecutive failed attempts on this connection */
     for (;;) {
         Buf *b = NULL;
         unsigned gen = 0;
@@ -228,8 +234,8 @@ static void *conn_main(void *arg) {
         if (!b) { thr_sleep_ms(20); continue; }
 
         Sink sink = { p, b, id, gen };
-        int failures = 0, rescues = 0;
-        bool done = false, lost = false;
+        int rescues = 0;
+        bool done = false, lost = false, permanent = false, give_back = false;
         for (;;) {
             p->abort_conn[id] = 0;
             thr_lock(&p->m);
@@ -238,28 +244,46 @@ static void *conn_main(void *arg) {
             thr_unlock(&p->m);
             if (lost) break;
             err[0] = 0;
+            long long got_before = b->got;
             long long r = http_range_get(k, p->url, from, last, block_sink, &sink, &hooks, err, sizeof(err));
             thr_lock(&p->m);
             lost = b->gen != gen;      /* taken away while we were stuck */
             if (!lost && r >= 0 && b->got == b->len) { b->state = B_READY; done = true; }
+            if (!lost && b->got > got_before) fails = 0;   /* data arrived: this connection works */
             thr_unlock(&p->m);
             if (done || lost) break;
             if (p->stop || (p->cancel && *p->cancel)) break;
+            if (r == -2) { permanent = true; break; }
             if (p->abort_conn[id]) {             /* stall rescue: retry at once on a fresh connection */
-                if (++rescues > 40) break;
+                if (++rescues > 40) { give_back = true; break; }
                 continue;
             }
-            if (++failures > 5) break;
-            thr_sleep_ms(500 * failures);        /* real error: brief back-off, then retry */
-        }
-        if (done || lost) continue;
-        thr_lock(&p->m);
-        if (b->gen == gen && !p->stop && !p->fatal && !(p->cancel && *p->cancel)) {
-            p->fatal = true;
+            /* couldn't connect, or the connection broke: first time retry the
+             * same block shortly; after that let another connection have it */
+            fails++;
+            thr_lock(&p->m);
             snprintf(p->err, sizeof(p->err), "%s", err[0] ? err : "The connection kept failing.");
+            thr_unlock(&p->m);
+            if (fails >= 2) { give_back = true; break; }
+            thr_sleep_ms(500);
         }
-        thr_unlock(&p->m);
-        break;
+        if (done) { fails = 0; continue; }
+        if (lost) continue;
+        if (p->stop || (p->cancel && *p->cancel)) break;
+        if (permanent) {
+            thr_lock(&p->m);
+            if (!p->fatal) { p->fatal = true; snprintf(p->err, sizeof(p->err), "%s", err); }
+            thr_unlock(&p->m);
+            break;
+        }
+        if (give_back) {
+            thr_lock(&p->m);
+            if (b->gen == gen) { b->state = B_ORPHAN; b->owner = -1; b->gen++; }
+            thr_unlock(&p->m);
+            /* wait 1, 2, 4, 8, 15 s before this connection tries again */
+            int wait_ms = fails <= 1 ? 1000 : (fails >= 5 ? 15000 : 1000 << (fails - 1));
+            for (int w = 0; w < wait_ms && !p->stop && !(p->cancel && *p->cancel); w += 100) thr_sleep_ms(100);
+        }
     }
     http_keep_free(k);
     thr_lock(&p->m);
@@ -330,6 +354,8 @@ static int download_parallel(const char *url, const char *part, long long have, 
     long long commit = have, mark = have;
     double tstart = now_s(), tmark = tstart;
     int rescues = 0, takeovers = 0, secs = 0;
+    long long last_amount = have;
+    double last_progress = tstart;
     bool write_failed = false;
     /* download log: one line per second, kept in memory and saved at the end
      * (download.log in the data folder) so it doesn't compete with the file */
@@ -405,6 +431,15 @@ static int download_parallel(const char *url, const char *part, long long have, 
 
         /* progress and speed */
         pg->done = commit + inflight;
+        if (pg->done != last_amount) { last_amount = pg->done; last_progress = t; }
+        else if (t - last_progress > 60.0) {
+            /* every connection has been failing for a minute: give up (Retry continues) */
+            thr_lock(&p->m);
+            p->fatal = true;
+            if (!p->err[0]) snprintf(p->err, sizeof(p->err), "Nothing was received for a minute.");
+            thr_unlock(&p->m);
+            break;
+        }
         if (t - tmark >= 1.0) {
             int inst = (int)((pg->done - mark) / (t - tmark));
             if (inst < 0) inst = 0;

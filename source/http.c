@@ -603,7 +603,9 @@ long long http_range_get(HttpKeep *k, const char *url, long long first, long lon
         if (status != 206 || chunked || clen != want) {
             keep_close(k);
             snprintf(err, errlen, status == 206 ? "Unexpected response size." : "The server stopped allowing partial downloads (error %d).", status);
-            return -1;
+            /* busy / too many connections: worth trying again later */
+            bool retry = status == 206 || status == 408 || status == 429 || status >= 500;
+            return retry ? -1 : -2;
         }
         long long have = 0;
         unsigned char piece[8192];   /* on this thread's stack */
