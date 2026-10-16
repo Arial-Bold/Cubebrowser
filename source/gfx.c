@@ -329,10 +329,37 @@ static inline void vtx(float x, float y, Color c) {
 
 /* ------------------------------------------------------------- primitives */
 
+/* The GPU mis-draws shapes whose corners lie thousands of units off screen
+ * (one triangle of a rectangle can come out as a big diagonal wedge). Long
+ * web pages produce exactly that: a tall coloured block scrolled mostly out
+ * of view. So rectangles are trimmed to the screen plus a margin first.
+ * The bounds are in drawing units, before the current transform. */
+#define GUARD 64.0f
+static void guard_bounds(float *x0, float *y0, float *x1, float *y1) {
+    float sx = t_sx > 0.01f ? t_sx : 0.01f, sy = t_sy > 0.01f ? t_sy : 0.01f;
+    *x0 = (-GUARD - t_tx) / sx;
+    *x1 = (vw + GUARD - t_tx) / sx;
+    *y0 = (-GUARD - t_ty) / sy;
+    *y1 = (480.0f + GUARD - t_ty) / sy;
+}
+
 void gfx_rect(float x, float y, float w, float h, Color c) { gfx_rect_vgrad(x, y, w, h, c, c); }
 
 void gfx_rect_vgrad(float x, float y, float w, float h, Color top, Color bottom) {
     if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h)) return;
+    float gx0, gy0, gx1, gy1;
+    guard_bounds(&gx0, &gy0, &gx1, &gy1);
+    if (x >= gx1 || y >= gy1 || x + w <= gx0 || y + h <= gy0) return;   /* entirely off screen */
+    if (x < gx0) { w -= gx0 - x; x = gx0; }
+    if (x + w > gx1) w = gx1 - x;
+    if (y < gy0 || y + h > gy1) {   /* trim top/bottom, keeping the gradient where it was */
+        float ny0 = fmaxf(y, gy0), ny1 = fminf(y + h, gy1);
+        Color nt = color_lerp(top, bottom, (ny0 - y) / h), nb = color_lerp(top, bottom, (ny1 - y) / h);
+        top = nt;
+        bottom = nb;
+        y = ny0;
+        h = ny1 - ny0;
+    }
     mode_color();
     BEGIN(GX_QUADS, 4);
     vtx(x, y, top);
@@ -343,7 +370,20 @@ void gfx_rect_vgrad(float x, float y, float w, float h, Color top, Color bottom)
 }
 
 void gfx_rect_hgrad(float x, float y, float w, float h, Color left, Color right) {
-    if (w <= 0 || h <= 0) return;
+    if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h)) return;
+    float gx0, gy0, gx1, gy1;
+    guard_bounds(&gx0, &gy0, &gx1, &gy1);
+    if (x >= gx1 || y >= gy1 || x + w <= gx0 || y + h <= gy0) return;
+    if (y < gy0) { h -= gy0 - y; y = gy0; }
+    if (y + h > gy1) h = gy1 - y;
+    if (x < gx0 || x + w > gx1) {
+        float nx0 = fmaxf(x, gx0), nx1 = fminf(x + w, gx1);
+        Color nl = color_lerp(left, right, (nx0 - x) / w), nr = color_lerp(left, right, (nx1 - x) / w);
+        left = nl;
+        right = nr;
+        x = nx0;
+        w = nx1 - nx0;
+    }
     mode_color();
     BEGIN(GX_QUADS, 4);
     vtx(x, y, left);
@@ -375,8 +415,32 @@ static int rr_points(float x, float y, float w, float h, float r, float *px, flo
     return n;
 }
 
+/* Rounded shapes: an edge far off screen is pulled in to just beyond the
+ * screen margin (plus the corner radius, so the rounding stays invisible). */
+static bool guard_rrect(float *x, float *y, float *w, float *h, float r, Color *top, Color *bottom) {
+    float gx0, gy0, gx1, gy1;
+    guard_bounds(&gx0, &gy0, &gx1, &gy1);
+    float pad = (r > 0 ? r : 0) + 2;
+    gx0 -= pad; gy0 -= pad; gx1 += pad; gy1 += pad;
+    if (*x >= gx1 || *y >= gy1 || *x + *w <= gx0 || *y + *h <= gy0) return false;
+    if (*x < gx0) { *w -= gx0 - *x; *x = gx0; }
+    if (*x + *w > gx1) *w = gx1 - *x;
+    if (*y < gy0 || *y + *h > gy1) {
+        float ny0 = fmaxf(*y, gy0), ny1 = fminf(*y + *h, gy1);
+        if (top && bottom) {
+            Color nt = color_lerp(*top, *bottom, (ny0 - *y) / *h), nb = color_lerp(*top, *bottom, (ny1 - *y) / *h);
+            *top = nt;
+            *bottom = nb;
+        }
+        *y = ny0;
+        *h = ny1 - ny0;
+    }
+    return *w > 0 && *h > 0;
+}
+
 void gfx_rrect_vgrad(float x, float y, float w, float h, float r, Color top, Color bottom) {
     if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || !isfinite(r)) return;
+    if (!guard_rrect(&x, &y, &w, &h, r, &top, &bottom)) return;
     float px[RR_PTS], py[RR_PTS];
     int n = rr_points(x, y, w, h, r, px, py);
     mode_color();
@@ -393,6 +457,7 @@ void gfx_rrect(float x, float y, float w, float h, float r, Color c) { gfx_rrect
 
 void gfx_rrect_outline(float x, float y, float w, float h, float r, float t, Color c) {
     if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || !isfinite(t)) return;
+    if (!guard_rrect(&x, &y, &w, &h, r + t, NULL, NULL)) return;
     float ox[RR_PTS], oy[RR_PTS], ix[RR_PTS], iy[RR_PTS];
     int n = rr_points(x, y, w, h, r, ox, oy);
     rr_points(x + t, y + t, w - 2 * t, h - 2 * t, r - t, ix, iy);

@@ -865,6 +865,11 @@ static __attribute__((noinline)) void emit_widget(L *c, Flow *f, Node *n, const 
             b->type = (unsigned char)type;
             b->x = x; b->y = f->y; b->w = w; b->h = h;
             b->size = type == BOX_SUBMIT ? size * 0.95f : size;
+            /* a button squeezed narrower than its label: shrink the label to fit (down to 60%) */
+            if (type == BOX_SUBMIT && label) {
+                float lw = gfx_text_width(FONT_UI, b->size, label, -1);
+                if (lw + 30 > w && lw > 0) b->size *= fmaxf(0.6f, (w - 30) / lw);
+            }
             b->field = (short)n->index;
             if (fd->type == FIELD_RADIO) b->flags |= BF_RADIO;
             if (label) { b->text = text_add(p, label, (int)strlen(label)); b->len = (int)strlen(label); }
@@ -1817,7 +1822,13 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
             gfx_rrect_vgrad(bx, by, b->w, b->h, 8, rgba(250, 250, 252, 255), rgba(216, 218, 226, 255));
             gfx_rrect_outline(bx, by, b->w, b->h, 8, 1.2f, rgba(140, 142, 156, 255));
             if (b->type == BOX_SUBMIT) {
-                gfx_text(FONT_UI, b->size, bx + 15, by + 5, rgba(30, 30, 40, 255), p->arena + b->text, b->len);
+                /* centred, and never drawn outside the button */
+                float lw = gfx_text_width(FONT_UI, b->size, p->arena + b->text, b->len);
+                float tx = bx + fmaxf(6, (b->w - lw) * 0.5f);
+                float ty = by + (b->h - gfx_line_height(FONT_UI, b->size)) * 0.5f;
+                clip_inter(x, y, w, h, bx + 3, by, b->w - 6, b->h);
+                gfx_text(FONT_UI, b->size, tx, ty, rgba(30, 30, 40, 255), p->arena + b->text, b->len);
+                gfx_set_clip(x, y, w, h);
             } else {
                 gfx_text(FONT_BODY, b->size, bx + 10, by + 5, rgba(30, 30, 40, 255), p->arena + b->text, b->len);
                 float ax = bx + b->w - 18, ay = by + b->h * 0.5f;
