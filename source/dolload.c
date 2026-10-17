@@ -13,6 +13,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -141,6 +142,23 @@ int dol_find(const char *root, char (*out)[256], int max) {
 #include "midi.h"
 #include <fat.h>
 #include <ogc/irq.h>
+#include "storage.h"
+
+/* exit.log in the data folder: each step of starting another program is
+ * written down as it happens, so if it ever stops on a black screen the last
+ * line shows where (the file is replaced on every exit). */
+static void exit_log(bool first, const char *fmt, ...) {
+    char path[400];
+    storage_path(path, sizeof(path), "exit.log");
+    FILE *f = fopen(path, first ? "w" : "a");
+    if (!f) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fclose(f);
+}
 
 /* The copier. It runs after everything else has stopped and while the memory
  * holding the browser's own code is being overwritten, so it must not call any
@@ -191,15 +209,21 @@ bool dol_launch(const char *path, char *err, size_t errlen) {
         return false;
     }
     plan.image = image_at;
+    exit_log(true, "starting %s (%u bytes) file at %08x image at %08x, program ends %08x, entry %08x",
+             path, (unsigned)len, (unsigned)(uintptr_t)file, (unsigned)image_at, (unsigned)prog_end, (unsigned)plan.entry);
 
     /* ---- point of no return: shut everything down ---- */
     for (int c = 0; c < 4; c++) PAD_ControlMotor(c, PAD_MOTOR_STOP);
     VIDEO_SetBlack(TRUE);
     VIDEO_Flush();
     VIDEO_WaitVSync();
+    exit_log(false, "screen off, stopping music");
     midi_shutdown();
+    exit_log(false, "music stopped, stopping sound");
     sound_shutdown();
+    exit_log(false, "sound stopped, stopping graphics");
     GX_AbortFrame();
+    exit_log(false, "graphics stopped, closing SD card and jumping");
     fatUnmount("sd");
     IRQ_Disable();   /* no more interrupts or thread switches from here on */
 
