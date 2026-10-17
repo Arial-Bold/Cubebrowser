@@ -225,6 +225,12 @@ bool dol_launch(const char *path, char *err, size_t errlen) {
     GX_AbortFrame();
     exit_log(false, "graphics stopped, closing SD card and jumping");
     fatUnmount("sd");
+    /* the standard libogc hand-over, as other GameCube loaders do it: stops
+     * the sound processor and every device, switches off the locked cache,
+     * removes the exception handlers, ends the other threads and clears the
+     * low-memory system values, so the next program starts from a clean
+     * console (newer libogc2 builds leave more running than before). */
+    SYS_ResetSystem(SYS_SHUTDOWN, 0, 0);
     IRQ_Disable();   /* no more interrupts or thread switches from here on */
 
     /* move everything up (the file buffer may overlap the destination: memmove) */
