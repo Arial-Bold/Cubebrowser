@@ -21,7 +21,7 @@ typedef struct {
     int  video_mode, widescreen, margin, text_size, theme, animations, sounds, volume, full_width;
     /* Music */
     char music_sf2[256];   /* "" = first .sf2 in the midi folder, "builtin", or a file */
-    int  music_volume, music_shuffle, music_repeat;
+    int  music_volume, music_shuffle, music_repeat, music_glow;
     /* Browsing */
     char home[256];
     int  search_engine;

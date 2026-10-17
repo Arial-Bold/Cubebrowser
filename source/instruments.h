@@ -23,14 +23,23 @@ typedef struct {
     int exclusive;            /* > 0: a new note in this class cuts the others (e.g. hi-hats) */
 } Zone;
 
-/* Loads a SoundFont from path; on failure keeps (or falls back to) the
- * built-in instruments and returns false with a reason. */
+/* Opens a SoundFont (any size: only its list of instruments is read now;
+ * samples are read per song). On failure the built-in instruments are used
+ * and false is returned with a reason. */
 bool instruments_load_sf2(const char *path, char *err, size_t errlen);
 /* Makes the built-in set ready (cheap; call once). */
 void instruments_builtin_init(void);
 void instruments_unload_sf2(void);
 bool instruments_have_sf2(void);
 const char *instruments_name(void);   /* SoundFont's name, or "Built-in" */
+size_t instruments_memory(void);      /* bytes of SoundFont samples loaded now */
+
+/* Before a song: list every note it plays (begin, then need for each), then
+ * load the samples those notes use from the SD card. Returns false (with a
+ * message) if some didn't fit; those notes use the built-in sounds. */
+void instruments_need_begin(void);
+void instruments_need(int bank, int program, bool drums, int key, int vel);
+bool instruments_need_load(char *msg, size_t msglen);
 
 /* Fills up to max zones for a note. drums: the note is on the percussion
  * channel (bank is then the drum kit's program). Returns how many. */

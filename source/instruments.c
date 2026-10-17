@@ -15,17 +15,39 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-/* ===================================================== SoundFont reader */
+/* ===================================================== SoundFont reader
+ *
+ * SoundFonts can be far bigger than the GameCube's memory, so only the
+ * small description part of the file (which presets, instruments and
+ * samples exist) is kept in memory. Before each song starts, the player
+ * lists the notes the song will play (instruments_need) and only the
+ * samples those notes use are read from the SD card (instruments_need_load),
+ * like a game loading the sound bank for a level. High-rate samples are
+ * stored at half rate, and looping samples without the part after their
+ * loop, which the player never reaches. Samples stay cached for the next
+ * song while there's room. */
 
-#define SF2_MAX_BYTES (24u * 1024u * 1024u)
+#define SAMPLE_BUDGET (10u * 1024u * 1024u)   /* memory for loaded samples */
+#define META_MAX (4u * 1024u * 1024u)
 
 typedef struct {
-    unsigned char *file;          /* the whole file */
-    size_t file_len;
-    int16_t *smpl;                /* sample data inside file, in console byte order */
+    int16_t *data;        /* loaded frames, from the sample's start */
+    uint32_t raw_end;     /* how far into the sample (in file frames) is loaded */
+    uint32_t need_end;    /* how far the coming song needs */
+    uint8_t div;          /* 1, or 2 when stored at half rate */
+    bool needed;
+    uint32_t bytes;
+} SampleSlot;
+
+typedef struct {
+    char path[256];
+    long smpl_off;                /* file offset of the sample data */
     uint32_t nsmpl;
+    unsigned char *meta;          /* the pdta chunks, kept in memory */
     const unsigned char *phdr, *pbag, *pgen, *inst, *ibag, *igen, *shdr;
     uint32_t nphdr, npbag, npgen, ninst, nibag, nigen, nshdr;
+    SampleSlot *slots;            /* one per sample header */
+    size_t loaded_bytes;
     char name[64];
 } Sf2;
 
@@ -40,8 +62,14 @@ static bool host_big_endian(void) {
     return *(const unsigned char *)&one == 0;
 }
 
+static void *alloc_samples(size_t n);
+
 void instruments_unload_sf2(void) {
-    if (sf_loaded) free(sf.file);
+    if (sf_loaded) {
+        for (uint32_t i = 0; i < sf.nshdr; i++) free(sf.slots[i].data);
+        free(sf.slots);
+        free(sf.meta);
+    }
     memset(&sf, 0, sizeof(sf));
     sf_loaded = false;
 }
@@ -50,13 +78,80 @@ bool instruments_have_sf2(void) { return sf_loaded; }
 
 const char *instruments_name(void) { return sf_loaded ? sf.name : "Built-in"; }
 
-/* Finds the pdta sub-chunks inside a LIST. */
-static void scan_pdta(Sf2 *s, const unsigned char *p, const unsigned char *end) {
-    while (p + 8 <= end) {
-        uint32_t cl = rd32(p + 4);
-        const unsigned char *d = p + 8;
-        if (cl > (uint32_t)(end - d)) cl = (uint32_t)(end - d);
-#define TAKE(tag, ptr, cnt, sz) if (!memcmp(p, tag, 4)) { s->ptr = d; s->cnt = cl / (sz); }
+size_t instruments_memory(void) { return sf_loaded ? sf.loaded_bytes : 0; }
+
+static bool read_at(FILE *f, long off, void *buf, size_t n) {
+    return fseek(f, off, SEEK_SET) == 0 && fread(buf, 1, n, f) == n;
+}
+
+bool instruments_load_sf2(const char *path, char *err, size_t errlen) {
+    instruments_unload_sf2();
+    FILE *f = fopen(path, "rb");
+    if (!f) { snprintf(err, errlen, "couldn't open the SoundFont"); return false; }
+    unsigned char h[12];
+    if (!read_at(f, 0, h, 12) || memcmp(h, "RIFF", 4) || memcmp(h + 8, "sfbk", 4)) {
+        fclose(f);
+        snprintf(err, errlen, "not a SoundFont 2 file");
+        return false;
+    }
+    fseek(f, 0, SEEK_END);
+    long flen = ftell(f);
+    Sf2 s;
+    memset(&s, 0, sizeof(s));
+    long pdta_off = -1;
+    uint32_t pdta_len = 0;
+    long p = 12;
+    /* walk the top-level LISTs without reading the big sample chunk */
+    while (p + 12 <= flen) {
+        unsigned char ch[12];
+        if (!read_at(f, p, ch, 12)) break;
+        uint32_t cl = rd32(ch + 4);
+        if (cl > (uint32_t)(flen - p - 8)) cl = (uint32_t)(flen - p - 8);
+        if (!memcmp(ch, "LIST", 4)) {
+            long q = p + 12, qe = p + 8 + cl;
+            if (!memcmp(ch + 8, "pdta", 4)) { pdta_off = q; pdta_len = (uint32_t)(qe - q); }
+            else if (!memcmp(ch + 8, "sdta", 4) || !memcmp(ch + 8, "INFO", 4)) {
+                while (q + 8 <= qe) {
+                    unsigned char sc[8];
+                    if (!read_at(f, q, sc, 8)) break;
+                    uint32_t l2 = rd32(sc + 4);
+                    if (l2 > (uint32_t)(qe - q - 8)) l2 = (uint32_t)(qe - q - 8);
+                    if (!memcmp(sc, "smpl", 4)) { s.smpl_off = q + 8; s.nsmpl = l2 / 2; }
+                    else if (!memcmp(sc, "INAM", 4)) {
+                        char nm[64] = "";
+                        size_t rl = l2 < sizeof(nm) - 1 ? l2 : sizeof(nm) - 1;
+                        if (read_at(f, q + 8, nm, rl)) {
+                            size_t k = 0;
+                            for (size_t i = 0; i < rl && nm[i]; i++)
+                                if (nm[i] >= 32 && nm[i] < 127) s.name[k++] = nm[i];
+                            s.name[k] = 0;
+                        }
+                    }
+                    q += 8 + l2 + (l2 & 1);
+                }
+            }
+        }
+        p += 8 + cl + (cl & 1);
+    }
+    if (pdta_off < 0 || pdta_len < 8 || pdta_len > META_MAX || !s.nsmpl) {
+        fclose(f);
+        snprintf(err, errlen, "this SoundFont is damaged or uses a format this player can't read");
+        return false;
+    }
+    s.meta = malloc(pdta_len);
+    if (!s.meta || !read_at(f, pdta_off, s.meta, pdta_len)) {
+        fclose(f);
+        free(s.meta);
+        snprintf(err, errlen, "couldn't read the SoundFont");
+        return false;
+    }
+    fclose(f);
+    const unsigned char *m = s.meta, *me = s.meta + pdta_len;
+    while (m + 8 <= me) {
+        uint32_t cl = rd32(m + 4);
+        const unsigned char *d = m + 8;
+        if (cl > (uint32_t)(me - d)) cl = (uint32_t)(me - d);
+#define TAKE(tag, ptr, cnt, sz) if (!memcmp(m, tag, 4)) { s.ptr = d; s.cnt = cl / (sz); }
         TAKE("phdr", phdr, nphdr, 38)
         TAKE("pbag", pbag, npbag, 4)
         TAKE("pgen", pgen, npgen, 4)
@@ -65,93 +160,16 @@ static void scan_pdta(Sf2 *s, const unsigned char *p, const unsigned char *end) 
         TAKE("igen", igen, nigen, 4)
         TAKE("shdr", shdr, nshdr, 46)
 #undef TAKE
-        p = d + cl + (cl & 1);
+        m = d + cl + (cl & 1);
     }
-}
-
-bool instruments_load_sf2(const char *path, char *err, size_t errlen) {
-    instruments_unload_sf2();
-    FILE *f = fopen(path, "rb");
-    if (!f) { snprintf(err, errlen, "couldn't open the SoundFont"); return false; }
-    fseek(f, 0, SEEK_END);
-    long fl = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (fl < 64) { fclose(f); snprintf(err, errlen, "the SoundFont file is empty or damaged"); return false; }
-    if ((unsigned long)fl > SF2_MAX_BYTES) {
-        fclose(f);
-        snprintf(err, errlen, "the SoundFont is too big (%ld MB, most this can hold is %u MB)", fl >> 20, SF2_MAX_BYTES >> 20);
-        return false;
-    }
-#ifdef GEKKO
-    unsigned char *buf = memalign(32, (size_t)fl);
-#else
-    unsigned char *buf = malloc((size_t)fl);
-#endif
-    if (!buf) { fclose(f); snprintf(err, errlen, "not enough memory for this SoundFont (%ld MB)", fl >> 20); return false; }
-    size_t got = 0;
-    while (got < (size_t)fl) {
-        size_t r = fread(buf + got, 1, (size_t)fl - got > 65536 ? 65536 : (size_t)fl - got, f);
-        if (r == 0) break;
-        got += r;
-    }
-    fclose(f);
-    if (got != (size_t)fl || memcmp(buf, "RIFF", 4) || memcmp(buf + 8, "sfbk", 4)) {
-        free(buf);
-        snprintf(err, errlen, "not a SoundFont 2 file");
-        return false;
-    }
-    Sf2 s;
-    memset(&s, 0, sizeof(s));
-    s.file = buf;
-    s.file_len = got;
-    const unsigned char *p = buf + 12, *end = buf + got;
-    while (p + 8 <= end) {
-        uint32_t cl = rd32(p + 4);
-        const unsigned char *d = p + 8;
-        if (cl > (uint32_t)(end - d)) cl = (uint32_t)(end - d);
-        if (!memcmp(p, "LIST", 4) && cl >= 4) {
-            const unsigned char *q = d + 4, *qe = d + cl;
-            if (!memcmp(d, "INFO", 4)) {
-                while (q + 8 <= qe) {
-                    uint32_t l2 = rd32(q + 4);
-                    if (l2 > (uint32_t)(qe - q - 8)) l2 = (uint32_t)(qe - q - 8);
-                    if (!memcmp(q, "INAM", 4)) {
-                        size_t k = 0;
-                        for (uint32_t i = 0; i < l2 && q[8 + i] && k + 1 < sizeof(s.name); i++)
-                            if (q[8 + i] >= 32 && q[8 + i] < 127) s.name[k++] = (char)q[8 + i];
-                        s.name[k] = 0;
-                    }
-                    q += 8 + l2 + (l2 & 1);
-                }
-            } else if (!memcmp(d, "sdta", 4)) {
-                while (q + 8 <= qe) {
-                    uint32_t l2 = rd32(q + 4);
-                    if (l2 > (uint32_t)(qe - q - 8)) l2 = (uint32_t)(qe - q - 8);
-                    if (!memcmp(q, "smpl", 4)) {
-                        /* samples must be 2-byte aligned to use in place */
-                        unsigned char *sp = (unsigned char *)q + 8;
-                        if (((uintptr_t)sp & 1)) { memmove(sp - 1, sp, l2); sp--; }
-                        s.smpl = (int16_t *)sp;
-                        s.nsmpl = l2 / 2;
-                    }
-                    q += 8 + l2 + (l2 & 1);
-                }
-            } else if (!memcmp(d, "pdta", 4)) {
-                scan_pdta(&s, q, qe);
-            }
-        }
-        p = d + cl + (cl & 1);
-    }
-    if (!s.smpl || !s.nsmpl || s.nphdr < 2 || s.npbag < 1 || s.ninst < 2 || s.nibag < 1 || s.nshdr < 2) {
-        free(buf);
+    if (s.nphdr < 2 || s.npbag < 1 || s.ninst < 2 || s.nibag < 1 || s.nshdr < 2) {
+        free(s.meta);
         snprintf(err, errlen, "this SoundFont is damaged or uses a format this player can't read");
         return false;
     }
-    if (host_big_endian())
-        for (uint32_t i = 0; i < s.nsmpl; i++) {
-            uint16_t v = (uint16_t)s.smpl[i];
-            s.smpl[i] = (int16_t)(uint16_t)((v >> 8) | (v << 8));
-        }
+    s.slots = calloc(s.nshdr, sizeof(SampleSlot));
+    if (!s.slots) { free(s.meta); snprintf(err, errlen, "out of memory"); return false; }
+    snprintf(s.path, sizeof(s.path), "%s", path);
     if (!s.name[0]) {
         const char *base = strrchr(path, '/');
         snprintf(s.name, sizeof(s.name), "%s", base ? base + 1 : path);
@@ -188,9 +206,9 @@ static void gens_preset_defaults(Gens *g) {
     g->v[G_VELRANGE] = (int16_t)(127 << 8);
 }
 
-/* Applies the generators of bag [b] (gens list gen with count ngen, bag table bag). */
+/* Applies the generators of bag b. */
 static void apply_bag(Gens *g, const unsigned char *bag, uint32_t nbag, const unsigned char *gen, uint32_t ngen, uint32_t b) {
-    if (b + 1 >= nbag + 1) return;
+    if (b >= nbag) return;
     uint32_t g0 = rd16(bag + b * 4), g1 = (b + 1 < nbag) ? rd16(bag + (b + 1) * 4) : ngen;
     if (g1 > ngen) g1 = ngen;
     for (uint32_t i = g0; i < g1; i++) {
@@ -201,8 +219,9 @@ static void apply_bag(Gens *g, const unsigned char *bag, uint32_t nbag, const un
     }
 }
 
-/* Does bag b end with the given terminal generator (instrument / sampleID)? */
+/* Does bag b contain the given terminal generator (instrument / sampleID)? */
 static bool bag_has(const unsigned char *bag, uint32_t nbag, const unsigned char *gen, uint32_t ngen, uint32_t b, int op) {
+    if (b >= nbag) return false;
     uint32_t g0 = rd16(bag + b * 4), g1 = (b + 1 < nbag) ? rd16(bag + (b + 1) * 4) : ngen;
     if (g1 > ngen) g1 = ngen;
     for (uint32_t i = g0; i < g1; i++)
@@ -225,31 +244,44 @@ static int find_preset(int bank, int prog) {
     return -1;
 }
 
-static bool make_zone(const Gens *pz, const Gens *iz, int key, Zone *z) {
+/* A zone before its samples are attached: positions are file frames. */
+typedef struct {
+    int sid;
+    int64_t base, start, end, ls, le;   /* base = the sample header's start */
+    Zone z;                             /* everything except data/len/loops/rate */
+    uint32_t rate;
+} ZoneSpec;
+
+static bool make_spec(const Gens *pz, const Gens *iz, ZoneSpec *sp) {
     int sid = iz->v[G_SAMPLE];
     if (sid < 0 || (uint32_t)sid + 1 >= sf.nshdr) return false;
     const unsigned char *sh = sf.shdr + (uint32_t)sid * 46;
     if (rd16(sh + 44) & 0x8000) return false;   /* ROM sample */
     int32_t v[G_COUNT];
     for (int i = 0; i < G_COUNT; i++) v[i] = iz->v[i] + (pz ? pz->v[i] : 0);
-    int64_t start = (int64_t)rd32(sh + 20) + iz->v[G_START] + (int64_t)iz->v[G_START_C] * 32768;
-    int64_t end = (int64_t)rd32(sh + 24) + iz->v[G_END] + (int64_t)iz->v[G_END_C] * 32768;
+    int64_t base = rd32(sh + 20), send = rd32(sh + 24);
+    if (send > (int64_t)sf.nsmpl) send = sf.nsmpl;
+    int64_t start = base + iz->v[G_START] + (int64_t)iz->v[G_START_C] * 32768;
+    int64_t end = send + iz->v[G_END] + (int64_t)iz->v[G_END_C] * 32768;
     int64_t ls = (int64_t)rd32(sh + 28) + iz->v[G_LSTART] + (int64_t)iz->v[G_LSTART_C] * 32768;
     int64_t le = (int64_t)rd32(sh + 32) + iz->v[G_LEND] + (int64_t)iz->v[G_LEND_C] * 32768;
-    if (start < 0) start = 0;
-    if (end > (int64_t)sf.nsmpl) end = sf.nsmpl;
+    if (start < base) start = base;
+    if (end > send) end = send;
     if (end - start < 8) return false;
-    memset(z, 0, sizeof(*z));
-    z->data = sf.smpl + start;
-    z->len = (uint32_t)(end - start);
+    memset(sp, 0, sizeof(*sp));
+    sp->sid = sid;
+    sp->base = base;
+    sp->start = start;
+    sp->end = end;
+    Zone *z = &sp->z;
     int modes = iz->v[G_MODES] & 3;
     if ((modes == 1 || modes == 3) && ls >= start && le <= end && le - ls >= 4) {
         z->loop = true;
-        z->loop_start = (uint32_t)(ls - start);
-        z->loop_end = (uint32_t)(le - start);
+        sp->ls = ls;
+        sp->le = le;
     }
-    z->rate = rd32(sh + 36);
-    if (z->rate < 400 || z->rate > 200000) z->rate = 22050;
+    sp->rate = rd32(sh + 36);
+    if (sp->rate < 400 || sp->rate > 200000) sp->rate = 22050;
     int root = iz->v[G_ROOT] >= 0 ? iz->v[G_ROOT] : sh[40];
     if (root > 127) root = 60;
     z->root = (float)root;
@@ -271,11 +303,11 @@ static bool make_zone(const Gens *pz, const Gens *iz, int key, Zone *z) {
     if (z->release > 8) z->release = 8;
     if (z->attack > 8) z->attack = 8;
     z->exclusive = iz->v[G_EXCL];
-    (void)key;
     return true;
 }
 
-static int sf2_find(int bank, int prog, bool drums, int key, int vel, Zone *out, int max) {
+/* Finds the zones a note uses (as specs). */
+static int sf2_specs(int bank, int prog, bool drums, int key, int vel, ZoneSpec *out, int max) {
     int pi = drums ? find_preset(128, prog) : find_preset(bank, prog);
     if (pi < 0 && drums) pi = find_preset(128, 0);
     if (pi < 0 && !drums) pi = find_preset(0, prog);
@@ -303,9 +335,12 @@ static int sf2_find(int bank, int prog, bool drums, int key, int vel, Zone *out,
         if (ib1 > sf.nibag) ib1 = sf.nibag;
         Gens iglobal;
         gens_inst_defaults(&iglobal);
-        /* preset-level ranges and the instrument choice aren't added on */
-        pz.v[G_KEYRANGE] = pz.v[G_VELRANGE] = 0;
-        pz.v[G_INSTRUMENT] = 0;
+        /* only these preset values are added on to the instrument's */
+        Gens add = pz;
+        add.v[G_KEYRANGE] = add.v[G_VELRANGE] = add.v[G_INSTRUMENT] = 0;
+        add.v[G_START] = add.v[G_END] = add.v[G_LSTART] = add.v[G_LEND] = 0;
+        add.v[G_START_C] = add.v[G_END_C] = add.v[G_LSTART_C] = add.v[G_LEND_C] = 0;
+        add.v[G_SAMPLE] = add.v[G_MODES] = add.v[G_EXCL] = add.v[G_ROOT] = add.v[G_KEYNUM] = 0;
         for (uint32_t c = ib0; c < ib1 && n < max; c++) {
             if (!bag_has(sf.ibag, sf.nibag, sf.igen, sf.nigen, c, G_SAMPLE)) {
                 if (c == ib0) apply_bag(&iglobal, sf.ibag, sf.nibag, sf.igen, sf.nigen, c);
@@ -314,15 +349,168 @@ static int sf2_find(int bank, int prog, bool drums, int key, int vel, Zone *out,
             Gens iz = iglobal;
             apply_bag(&iz, sf.ibag, sf.nibag, sf.igen, sf.nigen, c);
             if (!in_range(iz.v[G_KEYRANGE], key) || !in_range(iz.v[G_VELRANGE], vel)) continue;
-            /* additive preset values; sample-address offsets are instrument-only */
-            Gens add = pz;
-            add.v[G_START] = add.v[G_END] = add.v[G_LSTART] = add.v[G_LEND] = 0;
-            add.v[G_START_C] = add.v[G_END_C] = add.v[G_LSTART_C] = add.v[G_LEND_C] = 0;
-            add.v[G_SAMPLE] = add.v[G_MODES] = add.v[G_EXCL] = add.v[G_ROOT] = add.v[G_KEYNUM] = 0;
-            if (make_zone(&add, &iz, key, &out[n])) n++;
+            if (make_spec(&add, &iz, &out[n])) n++;
         }
     }
     return n;
+}
+
+/* Is this sample stored at half rate? High-rate samples are, unless their
+ * loop is so short that halving it would put it out of tune. */
+static uint8_t sample_div(int sid) {
+    const unsigned char *sh = sf.shdr + (uint32_t)sid * 46;
+    uint32_t rate = rd32(sh + 36), ls = rd32(sh + 28), le = rd32(sh + 32);
+    if (rate <= 32000) return 1;
+    if (le > ls && le - ls < 400) return 1;
+    return 2;
+}
+
+/* How far into the sample a zone plays: to its loop's end if it loops. */
+static uint32_t spec_need(const ZoneSpec *sp) {
+    return (uint32_t)((sp->z.loop ? sp->le : sp->end) - sp->base);
+}
+
+/* Attaches the loaded samples to a spec; false if they aren't loaded. */
+static bool spec_zone(const ZoneSpec *sp, Zone *z) {
+    const SampleSlot *sl = &sf.slots[sp->sid];
+    uint32_t need = spec_need(sp);
+    if (!sl->data || sl->raw_end < need) return false;
+    *z = sp->z;
+    uint32_t d = sl->div;
+    uint32_t off = (uint32_t)(sp->start - sp->base) / d;
+    uint32_t avail = sl->raw_end / d;
+    z->data = sl->data + off;
+    uint32_t end = (uint32_t)(sp->end - sp->base) / d;
+    if (end > avail) end = avail;
+    if (z->loop) {
+        z->loop_start = (uint32_t)(sp->ls - sp->base) / d - off;
+        z->loop_end = (uint32_t)(sp->le - sp->base) / d - off;
+        if (z->loop_end > avail - off) z->loop_end = avail - off;
+        if (z->loop_end <= z->loop_start + 1) z->loop = false;
+        end = off + z->loop_end;   /* nothing after the loop is kept */
+    }
+    if (end <= off + 4) return false;
+    z->len = end - off;
+    z->rate = sp->rate / d;
+    return true;
+}
+
+static int sf2_find(int bank, int prog, bool drums, int key, int vel, Zone *out, int max) {
+    ZoneSpec specs[4];
+    int n = sf2_specs(bank, prog, drums, key, vel, specs, max < 4 ? max : 4), k = 0;
+    for (int i = 0; i < n; i++)
+        if (spec_zone(&specs[i], &out[k])) k++;
+    return k;
+}
+
+/* ---- per-song loading */
+
+void instruments_need_begin(void) {
+    if (!sf_loaded) return;
+    for (uint32_t i = 0; i < sf.nshdr; i++) {
+        sf.slots[i].needed = false;
+        sf.slots[i].need_end = 0;
+    }
+}
+
+void instruments_need(int bank, int program, bool drums, int key, int vel) {
+    if (!sf_loaded) return;
+    ZoneSpec specs[2];
+    int n = sf2_specs(bank, program, drums, key, vel, specs, 2);
+    for (int i = 0; i < n; i++) {
+        SampleSlot *sl = &sf.slots[specs[i].sid];
+        uint32_t need = spec_need(&specs[i]);
+        sl->needed = true;
+        if (need > sl->need_end) sl->need_end = need;
+    }
+}
+
+static void slot_free(SampleSlot *sl) {
+    if (!sl->data) return;
+    free(sl->data);
+    sf.loaded_bytes -= sl->bytes;
+    sl->data = NULL;
+    sl->bytes = 0;
+    sl->raw_end = 0;
+}
+
+/* Reads frames [0, need) of sample sid into memory, halving the rate if wanted. */
+static bool load_slot(FILE *f, int sid, uint32_t need) {
+    SampleSlot *sl = &sf.slots[sid];
+    const unsigned char *sh = sf.shdr + (uint32_t)sid * 46;
+    uint32_t base = rd32(sh + 20);
+    if (base >= sf.nsmpl) return false;
+    if (need > sf.nsmpl - base) need = sf.nsmpl - base;
+    uint8_t div = sample_div(sid);
+    uint32_t frames = need / div;
+    if (frames < 4) return false;
+    int16_t *dst = alloc_samples(frames);
+    if (!dst) return false;
+    static int16_t chunk[16384];
+    bool swap = host_big_endian();
+    uint32_t got = 0, out = 0;
+    int16_t prev = 0;
+    if (fseek(f, sf.smpl_off + (long)base * 2, SEEK_SET) != 0) { free(dst); return false; }
+    while (got < need) {
+        uint32_t n = need - got;
+        if (n > 16384) n = 16384;
+        if (fread(chunk, 2, n, f) != n) { free(dst); return false; }
+        for (uint32_t i = 0; i < n; i++) {
+            int16_t v = chunk[i];
+            if (swap) v = (int16_t)(uint16_t)(((uint16_t)v >> 8) | ((uint16_t)v << 8));
+            chunk[i] = v;
+        }
+        if (div == 1) {
+            memcpy(dst + out, chunk, n * 2);
+            out += n;
+        } else {
+            /* gentle low-pass, then every second frame */
+            for (uint32_t i = 0; i < n; i++) {
+                uint32_t abs_i = got + i;
+                if ((abs_i & 1) == 0 && out < frames) {
+                    int32_t nx = (i + 1 < n) ? chunk[i + 1] : chunk[i];
+                    dst[out++] = (int16_t)((prev + 2 * (int32_t)chunk[i] + nx) / 4);
+                }
+                prev = chunk[i];
+            }
+        }
+        got += n;
+    }
+    slot_free(sl);
+    sl->data = dst;
+    sl->div = div;
+    sl->raw_end = (uint32_t)out * div;
+    sl->bytes = (uint32_t)frames * 2;
+    sf.loaded_bytes += sl->bytes;
+    return true;
+}
+
+bool instruments_need_load(char *msg, size_t msglen) {
+    msg[0] = 0;
+    if (!sf_loaded) return true;
+    /* drop what the coming song doesn't use only if room is needed */
+    size_t want = 0;
+    for (uint32_t i = 0; i < sf.nshdr; i++) {
+        SampleSlot *sl = &sf.slots[i];
+        if (sl->needed && (!sl->data || sl->raw_end < sl->need_end)) want += (size_t)sl->need_end / sample_div((int)i) * 2;
+    }
+    if (sf.loaded_bytes + want > SAMPLE_BUDGET)
+        for (uint32_t i = 0; i < sf.nshdr; i++)
+            if (!sf.slots[i].needed) slot_free(&sf.slots[i]);
+    FILE *f = fopen(sf.path, "rb");
+    if (!f) { snprintf(msg, msglen, "Couldn't open the SoundFont"); return false; }
+    int skipped = 0;
+    /* in file order, so the card reads mostly forwards */
+    for (uint32_t i = 0; i < sf.nshdr; i++) {
+        SampleSlot *sl = &sf.slots[i];
+        if (!sl->needed || (sl->data && sl->raw_end >= sl->need_end)) continue;
+        size_t bytes = (size_t)sl->need_end / sample_div((int)i) * 2;
+        if (sf.loaded_bytes - sl->bytes + bytes > SAMPLE_BUDGET || !load_slot(f, (int)i, sl->need_end)) skipped++;
+    }
+    fclose(f);
+    if (skipped)
+        snprintf(msg, msglen, "This song needs more instrument sounds than fit in memory; %d use the built-in sounds.", skipped);
+    return skipped == 0;
 }
 
 /* ================================================== built-in instruments */

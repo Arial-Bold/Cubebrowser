@@ -609,6 +609,31 @@ static int neighbour(int dir) {
     return n;
 }
 
+/* Lists every note the song plays so the SoundFont can load just the
+ * samples it needs, then loads them (with the lock released: reading the
+ * SD card can take a few seconds). */
+static void load_song_instruments(void) {
+    if (!instruments_have_sf2()) return;
+    int prog[16] = { 0 }, bank[16] = { 0 };
+    instruments_need_begin();
+    for (int i = 0; i < song.count; i++) {
+        const MidiEvent *e = &song.ev[i];
+        int ch = e->status & 15;
+        switch (e->status & 0xF0) {
+        case 0xC0: prog[ch] = e->a; break;
+        case 0xB0: if (e->a == 0) bank[ch] = e->b; break;
+        case 0x90: instruments_need(bank[ch], prog[ch], ch == 9, e->a, e->b); break;
+        }
+    }
+    state = MIDI_LOADING;
+    thr_unlock(&lock);
+    hw_end();   /* no voice may read a sample while samples are swapped */
+    char msg[160];
+    bool ok = instruments_need_load(msg, sizeof(msg));
+    thr_lock(&lock);
+    if (!ok) snprintf(message, sizeof(message), "%s", msg);
+}
+
 /* Starts song i (sequencer thread, lock held). Skips unreadable files. */
 static void start_song(int i) {
     all_voices_off();
@@ -616,6 +641,7 @@ static void start_song(int i) {
         current = i;
         message[0] = 0;
         if (load_song(i)) {
+            load_song_instruments();
             hw_begin();
             state = MIDI_PLAYING;
             return;
@@ -643,8 +669,12 @@ static void advance(double dt) {
         if (tail_until == 0) tail_until = song_pos + 4;
         if (voices_active() == 0 || song_pos > tail_until) {
             int n = neighbour(+1);
-            if (n >= 0) start_song(n);
-            else stop_song();
+            if (n < 0) stop_song();
+            else if (req == REQ_NONE) {   /* the next song starts on the next pass */
+                all_voices_off();
+                req = REQ_PLAY;
+                req_song = n;
+            }
         }
     }
 }
@@ -779,7 +809,9 @@ const char *midi_message(void) { return message; }
 bool midi_pc_start(int i) {
     if (i < 0 || i >= nsongs) return false;
     ensure_instruments();
+    thr_lock(&lock);
     start_song(i);
+    thr_unlock(&lock);
     return state == MIDI_PLAYING;
 }
 
@@ -788,7 +820,10 @@ bool midi_pc_render(int16_t *out, int frames) {
     const int rate = 32000, step = 128;   /* the sequencer runs every 4 ms here */
     for (int f = 0; f < frames; f += step) {
         int n = frames - f < step ? frames - f : step;
+        thr_lock(&lock);
+        if (req != REQ_NONE) process_request();
         if (state == MIDI_PLAYING) advance((double)n / rate);
+        thr_unlock(&lock);
         for (int k = 0; k < n; k++) {
             float l = 0, r = 0;
             for (int i = 0; i < NVOICES; i++) {
