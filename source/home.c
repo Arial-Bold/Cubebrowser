@@ -295,7 +295,7 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
     char bubble[48];
     UpdateState us = update_state();
     bool upd = us == UPD_AVAILABLE || us == UPD_INSTALLING || us == UPD_INSTALLED;
-    if (us == UPD_INSTALLED) snprintf(bubble, sizeof(bubble), "RESTART FOR v%s", update_latest_version());
+    if (us == UPD_INSTALLED) snprintf(bubble, sizeof(bubble), "EXIT TO SWISS FOR v%s", update_latest_version());
     else if (upd) snprintf(bubble, sizeof(bubble), "UPDATE AVAILABLE: v%s", update_latest_version());
     else snprintf(bubble, sizeof(bubble), "WELCOME TO v%s", CB_VERSION);
     float bub_w = caps_width(9.5f, 1.1f, bubble) + 20, bub_h = 22;
@@ -767,7 +767,7 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
     }
     case UPD_INSTALLED:
         snprintf(line1, sizeof(line1), "Version %s is installed.", update_latest_version());
-        snprintf(line2, sizeof(line2), "Restart CubeBrowser to start using it. The old version was kept as a backup (.old).");
+        snprintf(line2, sizeof(line2), "Exit to Swiss and start CubeBrowser again to use it. The old version was kept as a backup (.old).");
         progress = 1;
         break;
     case UPD_FAILED:
@@ -804,7 +804,7 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
         bx += bw + 10;
     }
     if (us == UPD_INSTALLED) {
-        if (flat_button("upd-restart", bx, by, row_h, "RESTART NOW", false, input_ok, a3, &bw)) act = HOME_UPDATE_RESTART;
+        if (flat_button("upd-restart", bx, by, row_h, "EXIT TO SWISS", false, input_ok, a3, &bw)) act = HOME_UPDATE_RESTART;
         bx += bw + 10;
     }
     if (us == UPD_LATEST || us == UPD_CHECK_FAILED) {

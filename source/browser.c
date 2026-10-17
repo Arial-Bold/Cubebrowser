@@ -1116,6 +1116,8 @@ static void draw_clock(float right_x, float y) {
 /* Exit button: press twice (within 3 seconds) to leave the browser. */
 static int exit_armed_until;
 
+static bool exit_to_swiss(void);
+
 static void exit_pressed(void) {
     if (ui_frame() > exit_armed_until) {
         exit_armed_until = ui_frame() + 180;
@@ -1126,6 +1128,11 @@ static void exit_pressed(void) {
     settings_save();
     cookies_save_if_needed();
     if (g_set.exit_action == 1) { system_restart(); return; }
+    exit_to_swiss();
+}
+
+/* Starts Swiss (finding it on the card if it moved). False if it couldn't. */
+static bool exit_to_swiss(void) {
     char err[256];
     if (!dol_check(g_set.swiss_dol, err, sizeof(err))) {
         /* not where it was set: look for a Swiss .dol and remember it */
@@ -1140,7 +1147,7 @@ static void exit_pressed(void) {
         if (pick < 0) {
             ui_toast("Swiss .dol not found - choose it in Settings > Data");
             sound_play(SFX_ERROR);
-            return;
+            return false;
         }
         snprintf(g_set.swiss_dol, sizeof(g_set.swiss_dol), "%s", found[pick]);
         settings_save();
@@ -1148,7 +1155,9 @@ static void exit_pressed(void) {
     if (!dol_launch(g_set.swiss_dol, err, sizeof(err))) {
         ui_toast(err);
         sound_play(SFX_ERROR);
+        return false;
     }
+    return true;
 }
 
 void browser_init(void) {
@@ -1269,8 +1278,14 @@ void browser_frame(bool interactive) {
         else if (ua == HOME_UPDATE_CHECK) update_request_check(false);
         else if (ua == HOME_UPDATE_STOP) fetch_cancel_update();
         else if (ua == HOME_UPDATE_RESTART) {
-            char err[256];
-            if (!update_restart(err, sizeof(err))) { ui_toast(err); sound_play(SFX_ERROR); }
+            /* back to Swiss, where the new version can be started; if Swiss
+             * can't be found, start the new version directly */
+            settings_save();
+            cookies_save_if_needed();
+            if (!exit_to_swiss()) {
+                char err[256];
+                if (!update_restart(err, sizeof(err))) { ui_toast(err); sound_play(SFX_ERROR); }
+            }
         }
     } else if (on_help) {
         /* Controls & Tips draws itself too (home.c) */
