@@ -1057,6 +1057,17 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
     Node *caps[4];
     int nrows = 0, ncaps = 0;
     collect_rows(t, rows, &nrows, caps, &ncaps, 0);
+    if (nrows == 0) {
+        /* A "table" with no rows, e.g. Wikipedia's picture boxes
+         * (<figure> shown as a table, its caption as the table caption):
+         * lay it out as an ordinary block, so the picture shows and the
+         * caption gets the full width instead of a sliver. */
+        float esc = 0;
+        if (c->measure) { Flow f; flow_init(&f, tx, tx + avail, y, ts->align); flow_children(c, &f, t, ts); *out_w = avail; return 0; }
+        float h = block_box(c, t, ts, tx, avail, y, NULL, &esc);
+        *out_w = avail;
+        return h;
+    }
 
     Edges tp = pad_of(ts, avail), tb = border_of(ts);
     float spacing = ts->collapse ? 0 : ts->spacing;
