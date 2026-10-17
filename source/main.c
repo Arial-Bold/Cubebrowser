@@ -11,6 +11,7 @@
 #include "storage.h"
 #include "gc_entropy.h"
 #include "sound.h"
+#include "midi.h"
 #include "fetch.h"
 #include "ui.h"
 #include "osk.h"
@@ -78,6 +79,7 @@ int main(int argc, char **argv) {
     theme_set(g_set.theme);
     entropy_init();
     sound_init();
+    midi_init();
     fetch_init();
     browser_init();
 

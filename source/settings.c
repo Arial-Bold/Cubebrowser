@@ -12,7 +12,7 @@
 Settings g_set;
 
 const char *const category_names[CAT_COUNT] = {
-    "Network", "Controls", "Display", "Browsing", "Security", "Data"
+    "Network", "Controls", "Display", "Music", "Browsing", "Security", "Data"
 };
 
 static const char *const video_mode_names[] = { "Auto", "480i", "480p", NULL };
@@ -102,6 +102,16 @@ const SetDef g_setdefs[] = {
       "Menu motion and screen transitions." },
     { CAT_DISPLAY, "disp.sounds", "Sound effects", ST_BOOL, O(sounds), 0, 1, 1, NULL, NULL, NULL },
     { CAT_DISPLAY, "disp.volume", "Volume", ST_INT, O(volume), 0, 10, 1, NULL, NULL, NULL },
+    /* Music player */
+    { CAT_MUSIC, NULL, "Open the music player", ST_ACTION, 0, SA_OPEN_MUSIC, 0, 0, NULL, NULL,
+      "Plays .mid files from the midi folder on your SD card while you browse." },
+    { CAT_MUSIC, "music.sf2", "Instruments", ST_STR, O(music_sf2), OSK_TEXTMODE_URL, 256, 0, NULL, NULL,
+      "Choose a SoundFont (.sf2) from the midi folder, or the built-in instruments." },
+    { CAT_MUSIC, "music.volume", "Music volume", ST_INT, O(music_volume), 0, 10, 1, NULL, NULL, NULL },
+    { CAT_MUSIC, "music.shuffle", "Shuffle", ST_BOOL, O(music_shuffle), 0, 1, 1, NULL, NULL,
+      "Plays the songs in a random order." },
+    { CAT_MUSIC, "music.repeat", "Repeat", ST_BOOL, O(music_repeat), 0, 1, 1, NULL, NULL,
+      "Starts the list again after the last song." },
     /* Browsing */
     { CAT_BROWSING, "web.home", "Home page", ST_STR, O(home), OSK_TEXTMODE_URL, 256, 0, NULL, NULL,
       "Use about:home for the built-in start page." },
@@ -196,6 +206,10 @@ void settings_defaults(Settings *s) {
     s->animations = 1;
     s->sounds = 1;
     s->volume = 7;
+    s->music_sf2[0] = 0;
+    s->music_volume = 7;
+    s->music_shuffle = 0;
+    s->music_repeat = 1;
     strcpy(s->home, "about:home");
     s->search_engine = 0;
     strcpy(s->search_custom, "https://html.duckduckgo.com/html/?q=");

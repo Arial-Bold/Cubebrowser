@@ -137,7 +137,8 @@ int dol_find(const char *root, char (*out)[256], int max) {
 
 #ifdef GEKKO
 #include <gccore.h>
-#include <asndlib.h>
+#include "sound.h"
+#include "midi.h"
 #include <fat.h>
 #include <ogc/irq.h>
 
@@ -196,7 +197,8 @@ bool dol_launch(const char *path, char *err, size_t errlen) {
     VIDEO_SetBlack(TRUE);
     VIDEO_Flush();
     VIDEO_WaitVSync();
-    ASND_End();
+    midi_shutdown();
+    sound_shutdown();
     GX_AbortFrame();
     fatUnmount("sd");
     IRQ_Disable();   /* no more interrupts or thread switches from here on */

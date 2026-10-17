@@ -18,6 +18,8 @@
 #include "unzip.h"
 #include "dolload.h"
 #include "cookies.h"
+#include "midi.h"
+#include "music_ui.h"
 #include <sys/stat.h>
 #include <ctype.h>
 #include <math.h>
@@ -58,6 +60,7 @@ static bool settings_request;
 static Bookmark bookmarks[BOOKMARK_MAX];
 static int nbookmarks;
 static bool bm_open;
+static bool music_open;
 static int bm_scroll;
 static int confirm_delete = -1;
 static float last_layout_w, last_layout_scale;
@@ -1137,7 +1140,7 @@ bool browser_take_settings_request(void) {
 void browser_frame(bool interactive) {
     const Theme *t = theme();
     if (sel_field >= 0 && sel_gen != page_gen) sel_field = -1;   /* the page changed under it */
-    bool modal = osk_active() || bm_open || dl_state != DL_IDLE || sel_field >= 0;
+    bool modal = osk_active() || bm_open || dl_state != DL_IDLE || sel_field >= 0 || music_open;
     /* software update: one quiet check once the network is up (if enabled) */
     static bool auto_checked;
     if (!auto_checked && fetch_net_ready()) {
@@ -1159,19 +1162,21 @@ void browser_frame(bool interactive) {
     float bx = sx + 30;
     if (ui_icon_button(ui_id("tb", 0), bx, by, r, ICON_BACK, nback > 0)) go_back();
     if (ui_icon_button(ui_id("tb", 1), bx + 44, by, r, ICON_FORWARD, nfwd > 0)) go_forward();
-    if (ui_icon_button(ui_id("tb", 2), bx + 88, by, r, loading ? ICON_STOP : ICON_RELOAD, true)) {
-        if (loading) { queued = false; fetch_cancel(); }
-        else if (has_page) { restore_scroll = page.scroll_target; start_load(page.url, NULL); }
-    }
-    if (ui_icon_button(ui_id("tb", 3), bx + 132, by, r, ICON_HOME, true)) browser_navigate(g_set.home);
+    if (ui_icon_button(ui_id("tb", 3), bx + 88, by, r, ICON_HOME, true)) browser_navigate(g_set.home);
+    if (ui_icon_button(ui_id("tb", 6), bx + 132, by, r, ICON_EXIT, true)) exit_pressed();
     float right = sx + sw - 30;
     if (ui_icon_button(ui_id("tb", 5), right, by, r, ICON_GEAR, true)) settings_request = true;
-    if (ui_icon_button(ui_id("tb", 6), right - 88, by, r, ICON_POWER, true)) exit_pressed();
     if (ui_icon_button(ui_id("tb", 4), right - 44, by, r, ICON_STAR, true)) { bm_open = true; bm_scroll = 0; confirm_delete = -1; sound_play(SFX_OPEN); }
+    if (ui_icon_button(ui_id("tb", 7), right - 88, by, r, ICON_MUSIC, true)) { music_open = true; music_ui_reset(); sound_play(SFX_OPEN); }
+    if (midi_state() == MIDI_PLAYING) {   /* a small pulse on the note while music plays */
+        float k = 0.5f + 0.5f * sinf(ui_time() * 6.0f);
+        gfx_ring(right - 88, by, r + 4 + k * 2, 2, 0, 2 * (float)M_PI, color_alpha(t->accent, 0.35f + 0.4f * k));
+    }
 
-    /* address field */
+    /* address field (with a stop button inside it while a page loads) */
     float ax = bx + 160, aw = (right - 114) - ax, ah = 34, ay = by - ah * 0.5f;
-    bool addr_hover = ui_hover(ui_id("addr", 0), ax, ay, aw, ah);
+    float stop_w = loading ? 34 : 0;
+    bool addr_hover = ui_hover(ui_id("addr", 0), ax, ay, aw - stop_w, ah);
     float ahv = ui_anim(ui_id("addr", 1), addr_hover ? 1.0f : 0.0f, 0.25f);
     if (ahv > 0.01f) gfx_rrect(ax - 4, ay - 4, aw + 8, ah + 8, 21, color_alpha(t->accent, 0.45f * ahv));
     gfx_rrect(ax, ay, aw, ah, 17, t->field_bg);
@@ -1182,10 +1187,11 @@ void browser_frame(bool interactive) {
         ui_draw_icon(page.verified ? ICON_LOCK : ICON_UNLOCK, ax + 18, by, 18, page.verified ? t->good : t->bad);
         tx += 18;
     }
-    gfx_set_clip(tx, ay, aw - (tx - ax) - 12, ah);
-    int n = gfx_text_fit(FONT_BODY, 17, shown, -1, aw - (tx - ax) - 16);
+    gfx_set_clip(tx, ay, aw - (tx - ax) - 12 - stop_w, ah);
+    int n = gfx_text_fit(FONT_BODY, 17, shown, -1, aw - (tx - ax) - 16 - stop_w);
     gfx_text(FONT_BODY, 17, tx, ay + 7, t->field_text, shown, n);
     gfx_clear_clip();
+    if (loading && ui_icon_button(ui_id("tb", 2), ax + aw - 19, by, 12, ICON_STOP, true)) { queued = false; fetch_cancel(); }
     if (addr_hover && input_ok && input_pressed(ACT_CLICK)) {
         input_consume(ACT_CLICK);
         sound_play(SFX_SELECT);
@@ -1364,6 +1370,10 @@ void browser_frame(bool interactive) {
 
     /* ---- modal layers */
     if (dl_state != DL_IDLE) draw_download(interactive && !osk_active());
+    if (music_open) {
+        bool mu_input = interactive && !osk_active() && !bm_open && dl_state == DL_IDLE && sel_field < 0;
+        if (!music_ui_draw(mu_input)) music_open = false;
+    }
     if (sel_field >= 0) {
         bool sel_input = interactive && !osk_active() && !bm_open && dl_state == DL_IDLE;
         draw_select(sel_input);
@@ -1391,4 +1401,9 @@ void browser_frame(bool interactive) {
             ui_toast("Bookmark deleted");
         }
     }
+}
+
+void browser_open_music(void) {
+    music_open = true;
+    music_ui_reset();
 }

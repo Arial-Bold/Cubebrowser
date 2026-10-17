@@ -293,6 +293,59 @@ void ui_draw_icon(int icon, float cx, float cy, float s, Color c) {
         gfx_ring(cx, cy + h * 0.05f, h * 0.6f, h * 0.18f, -0.33f * (float)M_PI, 1.33f * (float)M_PI, c);
         gfx_rect(cx - h * 0.09f, cy - h * 0.75f, h * 0.18f, h * 0.7f, c);
         break;
+    case ICON_EXIT: {   /* an open door frame with an arrow leaving it */
+        float t = h * 0.16f, fx = cx - h * 0.72f, fy = cy - h * 0.7f, fh = h * 1.4f, fw = h * 0.8f;
+        gfx_rect(fx, fy, t, fh, c);                    /* frame: left side */
+        gfx_rect(fx, fy, fw, t, c);                    /* top */
+        gfx_rect(fx, fy + fh - t, fw, t, c);           /* bottom */
+        gfx_rect(fx + fw - t, fy, t, h * 0.38f, c);    /* right side, open in the middle */
+        gfx_rect(fx + fw - t, fy + fh - h * 0.38f, t, h * 0.38f, c);
+        gfx_rect(cx - h * 0.3f, cy - h * 0.1f, h * 0.65f, h * 0.2f, c);   /* arrow */
+        gfx_tri(cx + h * 0.3f, cy - h * 0.38f, cx + h * 0.3f, cy + h * 0.38f, cx + h * 0.8f, cy, c);
+        break;
+    }
+    case ICON_MUSIC: {  /* two beamed eighth notes */
+        float r = h * 0.24f;
+        float lx = cx - h * 0.38f, rx = cx + h * 0.42f, ly = cy + h * 0.5f, ry = cy + h * 0.38f;
+        gfx_circle(lx, ly, r, c);
+        gfx_circle(rx, ry, r, c);
+        float st = h * 0.13f;
+        gfx_rect(lx + r - st, cy - h * 0.55f, st, ly - (cy - h * 0.55f), c);
+        gfx_rect(rx + r - st, cy - h * 0.67f, st, ry - (cy - h * 0.67f), c);
+        float beam[8] = { lx + r - st, cy - h * 0.55f, rx + r, cy - h * 0.75f, rx + r, cy - h * 0.5f, lx + r - st, cy - h * 0.3f };
+        gfx_quad(beam, c);
+        break;
+    }
+    case ICON_HALT:     /* media stop: a square */
+        gfx_rect(cx - h * 0.45f, cy - h * 0.45f, h * 0.9f, h * 0.9f, c);
+        break;
+    case ICON_PLAY:
+        gfx_tri(cx - h * 0.4f, cy - h * 0.6f, cx + h * 0.6f, cy, cx - h * 0.4f, cy + h * 0.6f, c);
+        break;
+    case ICON_PAUSE:
+        gfx_rect(cx - h * 0.45f, cy - h * 0.55f, h * 0.3f, h * 1.1f, c);
+        gfx_rect(cx + h * 0.15f, cy - h * 0.55f, h * 0.3f, h * 1.1f, c);
+        break;
+    case ICON_PREV:
+        gfx_rect(cx - h * 0.6f, cy - h * 0.5f, h * 0.18f, h * 1.0f, c);
+        gfx_tri(cx + h * 0.55f, cy - h * 0.5f, cx + h * 0.55f, cy + h * 0.5f, cx - h * 0.4f, cy, c);
+        break;
+    case ICON_NEXT:
+        gfx_rect(cx + h * 0.42f, cy - h * 0.5f, h * 0.18f, h * 1.0f, c);
+        gfx_tri(cx - h * 0.55f, cy - h * 0.5f, cx - h * 0.55f, cy + h * 0.5f, cx + h * 0.4f, cy, c);
+        break;
+    case ICON_SHUFFLE:  /* two crossing arrows */
+        gfx_line(cx - h * 0.65f, cy - h * 0.35f, cx + h * 0.35f, cy + h * 0.35f, h * 0.16f, c);
+        gfx_line(cx - h * 0.65f, cy + h * 0.35f, cx + h * 0.35f, cy - h * 0.35f, h * 0.16f, c);
+        gfx_tri(cx + h * 0.3f, cy - h * 0.6f, cx + h * 0.75f, cy - h * 0.35f, cx + h * 0.3f, cy - h * 0.1f, c);
+        gfx_tri(cx + h * 0.3f, cy + h * 0.1f, cx + h * 0.75f, cy + h * 0.35f, cx + h * 0.3f, cy + h * 0.6f, c);
+        break;
+    case ICON_REPEAT: { /* a loop with an arrowhead */
+        gfx_ring(cx, cy, h * 0.55f, h * 0.16f, 0.15f * (float)M_PI, 1.85f * (float)M_PI, c);
+        float ex = cx + h * 0.55f * cosf(0.15f * (float)M_PI), ey = cy + h * 0.55f * sinf(0.15f * (float)M_PI);
+        gfx_tri(ex - h * 0.3f, ey, ex + h * 0.3f, ey, ex, ey - h * 0.35f, c);
+        break;
+    }
     case ICON_PLUS:
         gfx_rect(cx - h * 0.6f, cy - h * 0.12f, h * 1.2f, h * 0.24f, c);
         gfx_rect(cx - h * 0.12f, cy - h * 0.6f, h * 0.24f, h * 1.2f, c);

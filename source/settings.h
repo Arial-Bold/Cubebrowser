@@ -19,6 +19,9 @@ typedef struct {
     int  key_repeat, osk_layout;
     /* Display */
     int  video_mode, widescreen, margin, text_size, theme, animations, sounds, volume, full_width;
+    /* Music */
+    char music_sf2[256];   /* "" = first .sf2 in the midi folder, "builtin", or a file */
+    int  music_volume, music_shuffle, music_repeat;
     /* Browsing */
     char home[256];
     int  search_engine;
@@ -39,12 +42,12 @@ typedef struct {
 
 extern Settings g_set;
 
-typedef enum { CAT_NETWORK, CAT_CONTROLS, CAT_DISPLAY, CAT_BROWSING, CAT_SECURITY, CAT_DATA, CAT_COUNT } SetCategory;
+typedef enum { CAT_NETWORK, CAT_CONTROLS, CAT_DISPLAY, CAT_MUSIC, CAT_BROWSING, CAT_SECURITY, CAT_DATA, CAT_COUNT } SetCategory;
 extern const char *const category_names[CAT_COUNT];
 
 typedef enum { ST_BOOL, ST_INT, ST_CHOICE, ST_STR, ST_BIND, ST_ACTION } SetType;
 
-enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE };
+enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE, SA_OPEN_MUSIC };
 enum { OSK_TEXTMODE_TEXT = 0, OSK_TEXTMODE_URL = 1, OSK_TEXTMODE_IP = 2 };
 
 typedef struct {

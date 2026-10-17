@@ -9,3 +9,4 @@ bool browser_take_settings_request(void);
 void browser_navigate(const char *url);
 void browser_clear_history(void);
 void browser_clear_bookmarks(void);
+void browser_open_music(void);   /* shows the music player panel */

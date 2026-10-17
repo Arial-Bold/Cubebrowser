@@ -47,6 +47,7 @@ static const char *const tips[] = {
     "The D-Pad jumps between links.",
     "Y opens bookmarks. The star saves a page.",
     "START opens settings: themes, text size...",
+    "The note button plays MIDI songs from your SD card.",
 };
 #define NTIPS ((int)(sizeof(tips) / sizeof(tips[0])))
 
@@ -512,7 +513,9 @@ static float help_body(float x, float y, float w, bool draw) {
         "can be unzipped right away, and an interrupted download continues where it stopped.",
         "What works: text, links, pictures, tables, lists and forms such as search boxes. JavaScript isn't "
         "supported, so sites are shown in a simpler layout. Light, text-based sites work best.",
-        "Every button except the D-Pad can be changed in Settings > Controller.",
+        "Music: put .mid files in a folder called midi on your SD card and press the note button in the "
+        "toolbar. The music keeps playing while you browse. Add a SoundFont (.sf2) there for real instruments.",
+        "Every button except the D-Pad can be changed in Settings > Controls.",
     };
     float gap = 8, rh = 26, cw = (w - gap) / 2, yy = y;
     int n = (int)(sizeof(pad) / sizeof(pad[0]));
@@ -636,7 +639,28 @@ HomeAction home_help_draw(float x, float y, float w, float h, bool input_ok) {
 /* ========================================================= Software Update
  * about:update: checks GitHub, shows the release notes, installs, restarts. */
 
-void home_update_reset(void) { intro_start = ui_time(); }
+static float notes_scroll, notes_scroll_target;
+
+void home_update_reset(void) { intro_start = ui_time(); notes_scroll = notes_scroll_target = 0; }
+
+/* Lays out (and with draw set, draws) the release notes line by line, so
+ * their own line breaks are kept. Returns their height. */
+static float notes_body(const char *notes, float x, float y, float tw, float ts, Color c, bool draw) {
+    float ny = y;
+    const char *p = notes;
+    char ln[400];
+    while (*p) {
+        const char *e = strchr(p, '\n');
+        size_t n = e ? (size_t)(e - p) : strlen(p);
+        size_t k = n < sizeof(ln) ? n : sizeof(ln) - 1;
+        memcpy(ln, p, k);
+        ln[k] = 0;
+        if (ln[0]) ny += wrap(FONT_BODY, ts, x, ny, tw, c, ln, draw);
+        else ny += gfx_line_height(FONT_BODY, ts) * 0.5f;
+        p = e ? e + 1 : p + n;
+    }
+    return ny - y;
+}
 
 /* Flat button as on the old console sites; returns true when chosen. */
 static bool flat_button(const char *id, float x, float y, float h, const char *label, bool back, bool input_ok, float a,
@@ -805,20 +829,26 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
         if (nh > 30) {
             cut_rect(hx, cy, hw, nh, 8, color_alpha(pale, a2));
             cut_outline(hx, cy, hw, nh, 8, 1.5f, color_alpha(navy, a2));
+            /* scrolls with the C-Stick, L/R and the D-Pad when it doesn't fit */
+            float view_y = cy + 7, view_h = nh - 14;
+            float content_h = notes_body(notes, 0, 0, tw - 10, ts, navy, false);
+            float max_s = content_h - view_h;
+            if (max_s < 0) max_s = 0;
+            if (input_ok && max_s > 0) {
+                notes_scroll_target += input_scroll_delta();
+                int d = ui_dpad_unhandled();
+                if (d == DIR_DOWN) notes_scroll_target += 40;
+                if (d == DIR_UP) notes_scroll_target -= 40;
+            }
+            if (notes_scroll_target > max_s) notes_scroll_target = max_s;
+            if (notes_scroll_target < 0) notes_scroll_target = 0;
+            notes_scroll += (notes_scroll_target - notes_scroll) * (g_set.animations ? 0.3f : 1.0f);
             gfx_set_clip(hx + 4, cy + 4, hw - 8, nh - 8);
-            /* line by line, so the notes' own line breaks are kept */
-            float ny = cy + 7;
-            const char *p = notes;
-            char ln[400];
-            while (*p && ny < cy + nh) {
-                const char *e = strchr(p, '\n');
-                size_t n = e ? (size_t)(e - p) : strlen(p);
-                if (n >= sizeof(ln)) n = sizeof(ln) - 1;
-                memcpy(ln, p, n);
-                ln[n] = 0;
-                if (ln[0]) ny += wrap(FONT_BODY, ts, hx + 15, ny, tw, color_alpha(navy, a2), ln, true);
-                else ny += gfx_line_height(FONT_BODY, ts) * 0.5f;
-                p = e ? e + 1 : p + n;
+            notes_body(notes, hx + 15, view_y - notes_scroll, max_s > 0 ? tw - 10 : tw, ts, color_alpha(navy, a2), true);
+            if (max_s > 0) {   /* scroll bar */
+                float sh = fmaxf(20, view_h * view_h / content_h), sy = view_y + (view_h - sh) * (notes_scroll / max_s);
+                gfx_rect(hx + hw - 12, view_y, 4, view_h, color_alpha(navy, 0.35f * a2));
+                gfx_rect(hx + hw - 12, sy, 4, sh, color_alpha(gold, a2));
             }
             gfx_set_clip(x, y, w, h);
         }

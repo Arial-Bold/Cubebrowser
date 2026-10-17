@@ -5,3 +5,4 @@ typedef enum { SFX_HOVER, SFX_SELECT, SFX_BACK, SFX_ERROR, SFX_KEY, SFX_OPEN, SF
 
 void sound_init(void);
 void sound_play(Sfx s);
+void sound_shutdown(void);   /* before launching another program */

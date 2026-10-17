@@ -16,6 +16,10 @@
 #include "cookies.h"
 #include "update.h"
 #include "version.h"
+#include "midi.h"
+#include <dirent.h>
+#include <stddef.h>
+#include <strings.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -30,11 +34,47 @@ static bool capture_armed;
 static int confirm_action = -1;   /* def index pressed once */
 static bool leave_now;            /* an action wants the browser shown */
 
-/* .dol picker */
+/* list picker: the Swiss .dol, or the music player's SoundFont */
 #define PICK_MAX 48
 static char (*pick_list)[256];
 static int pick_count = -1;       /* -1 = closed */
 static int pick_scroll;
+static bool pick_sf2;             /* choosing instruments rather than a .dol */
+
+/* Lists the choices for the Instruments setting: automatic, built-in, then
+ * every .sf2 file in the midi folder. */
+static int cmp_name(const void *a, const void *b) { return strcasecmp((const char *)a, (const char *)b); }
+
+static void open_sf2_picker(void) {
+    if (!pick_list) pick_list = malloc(sizeof(*pick_list) * PICK_MAX);
+    if (!pick_list) return;
+    int n = 0;
+    snprintf(pick_list[n++], 256, "%s", "");
+    snprintf(pick_list[n++], 256, "%s", "builtin");
+    DIR *d = storage_ok() ? opendir(MIDI_DIR) : NULL;
+    if (d) {
+        struct dirent *e;
+        int first = n;
+        while ((e = readdir(d)) && n < PICK_MAX) {
+            size_t l = strlen(e->d_name);
+            if (e->d_name[0] != '.' && l > 4 && !strcasecmp(e->d_name + l - 4, ".sf2") && l + sizeof(MIDI_DIR) + 1 < 256)
+                snprintf(pick_list[n++], 256, "%s/%s", MIDI_DIR, e->d_name);
+        }
+        closedir(d);
+        qsort(pick_list + first, (size_t)(n - first), sizeof(*pick_list), cmp_name);
+    }
+    pick_count = n;
+    pick_scroll = 0;
+    pick_sf2 = true;
+}
+
+/* How an Instruments value is shown. */
+static const char *sf2_label(const char *v) {
+    if (!v[0]) return "Automatic (first .sf2 in the midi folder)";
+    if (!strcmp(v, "builtin")) return "Built-in instruments";
+    const char *b = strrchr(v, '/');
+    return b ? b + 1 : v;
+}
 
 void settings_apply_all(void) {
     theme_set(g_set.theme);
@@ -104,6 +144,7 @@ static void run_action(int idx) {
         if (!pick_list) break;
         pick_count = dol_find("sd:/", pick_list, PICK_MAX);
         pick_scroll = 0;
+        pick_sf2 = false;
         if (!pick_count) { ui_toast("No .dol files found on the SD card"); pick_count = -1; }
         break;
     case SA_MOVE_DATA: {
@@ -130,6 +171,10 @@ static void run_action(int idx) {
         ui_toast(msg);
         break;
     }
+    case SA_OPEN_MUSIC:
+        browser_open_music();
+        leave_now = true;
+        break;
     case SA_CHECK_UPDATE:
         update_request_check(false);
         browser_navigate("about:update");
@@ -218,7 +263,7 @@ static void draw_picker(bool interactive) {
     float px = sx + (sw - pw) * 0.5f, py = sy + (sh - ph) * 0.5f;
     ui_set_input(interactive);
     ui_panel(px, py, pw, ph, 20);
-    gfx_text(FONT_UI, 22, px + 24, py + 14, t->text, "Choose the Swiss program", -1);
+    gfx_text(FONT_UI, 22, px + 24, py + 14, t->text, pick_sf2 ? "Choose the instruments" : "Choose the Swiss program", -1);
     const int visible = 6;
     float row_h = 40, ly = py + 56;
     int dir = ui_dpad_unhandled();
@@ -226,10 +271,21 @@ static void draw_picker(bool interactive) {
     if ((dir == DIR_DOWN || sd > 20) && pick_scroll + visible < pick_count) pick_scroll++;
     if ((dir == DIR_UP || sd < -20) && pick_scroll > 0) pick_scroll--;
     for (int i = pick_scroll; i < pick_count && i < pick_scroll + visible; i++) {
-        const char *shown = pick_list[i] + (strncmp(pick_list[i], "sd:", 3) ? 0 : 3);
-        bool current = !strcmp(pick_list[i], g_set.swiss_dol);
+        const char *shown = pick_sf2 ? sf2_label(pick_list[i]) : pick_list[i] + (strncmp(pick_list[i], "sd:", 3) ? 0 : 3);
+        bool current = !strcmp(pick_list[i], pick_sf2 ? g_set.music_sf2 : g_set.swiss_dol);
         if (ui_button(ui_id("pick", i), px + 20, ly + (i - pick_scroll) * (row_h + 6), pw - 40, row_h, shown, 16,
                       current ? UIB_ACCENT : UIB_FLAT)) {
+            if (pick_sf2) {
+                if (strcmp(g_set.music_sf2, pick_list[i])) {
+                    snprintf(g_set.music_sf2, sizeof(g_set.music_sf2), "%s", pick_list[i]);
+                    dirty = true;
+                    midi_instruments_changed();
+                    ui_toast(midi_state() == MIDI_STOPPED ? "These instruments will be used for the next song"
+                                                          : "Loading the new instruments...");
+                }
+                pick_count = -1;
+                return;
+            }
             char err[200];
             if (dol_check(pick_list[i], err, sizeof(err))) {
                 snprintf(g_set.swiss_dol, sizeof(g_set.swiss_dol), "%s", pick_list[i]);
@@ -360,9 +416,15 @@ bool settings_ui_frame(bool interactive) {
             bool hov = ui_hover(rid, ox + 8, y + 2, ow - 16, row_h - 4);
             gfx_rrect(ctrl_x, y + 8, ctrl_w, row_h - 16, 9, t->field_bg);
             gfx_rrect_outline(ctrl_x, y + 8, ctrl_w, row_h - 16, 9, hov ? 2.0f : 1.0f, hov ? t->accent : t->panel_edge);
-            int vn = gfx_text_fit(FONT_BODY, 16, value, -1, ctrl_w - 20);
-            gfx_text(FONT_BODY, 16, ctrl_x + 10, y + 13, t->field_text, value, vn);
-            if (hov && input_ok && visible && input_pressed(ACT_CLICK)) {
+            bool is_sf2 = d->off == offsetof(Settings, music_sf2);
+            const char *vshow = is_sf2 ? sf2_label(g_set.music_sf2) : value;
+            int vn = gfx_text_fit(FONT_BODY, 16, vshow, -1, ctrl_w - 20);
+            gfx_text(FONT_BODY, 16, ctrl_x + 10, y + 13, t->field_text, vshow, vn);
+            if (hov && input_ok && visible && input_pressed(ACT_CLICK) && is_sf2) {
+                input_consume(ACT_CLICK);
+                sound_play(SFX_SELECT);
+                open_sf2_picker();
+            } else if (hov && input_ok && visible && input_pressed(ACT_CLICK)) {
                 input_consume(ACT_CLICK);
                 sound_play(SFX_SELECT);
                 int mode = d->min == OSK_TEXTMODE_IP ? OSK_IP : (d->min == OSK_TEXTMODE_URL ? OSK_URL : OSK_TEXT);
