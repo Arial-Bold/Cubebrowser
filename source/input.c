@@ -66,6 +66,15 @@ void input_update(void) {
     if (down || sx != last_sx || sy != last_sy) entropy_add_event(((u32)down << 16) ^ ((u8)sx << 8) ^ (u8)sy);
     last_sx = sx; last_sy = sy;
 
+    /* how many TV frames since last time: when a frame takes longer (a busy
+     * page, music playing), the pointer still moves at the same speed */
+    static u32 last_retrace;
+    u32 retrace = VIDEO_GetRetraceCount();
+    float steps = last_retrace ? (float)(retrace - last_retrace) : 1.0f;
+    last_retrace = retrace;
+    if (steps < 1) steps = 1;
+    if (steps > 4) steps = 4;   /* after a long stall, don't jump across the screen */
+
     float ax = stick_axis(sx), ay = stick_axis(sy);
     moved = (ax != 0 || ay != 0);
     if (moved) {
@@ -73,14 +82,15 @@ void input_update(void) {
         idle_frames = 0;
         float speed = 2.0f + g_set.cursor_speed * 1.1f;
         if (held & action_mask(ACT_SLOW)) speed *= 0.35f;
-        cx += ax * speed;
-        cy -= ay * speed;   /* stick up = positive Y */
+        cx += ax * speed * steps;
+        cy -= ay * speed * steps;   /* stick up = positive Y */
     } else {
         idle_frames++;
     }
     if (gliding) {
-        cx += (glide_x - cx) * 0.35f;
-        cy += (glide_y - cy) * 0.35f;
+        float k = 1.0f - powf(0.65f, steps);
+        cx += (glide_x - cx) * k;
+        cy += (glide_y - cy) * k;
         if (fabsf(glide_x - cx) < 0.5f && fabsf(glide_y - cy) < 0.5f) { cx = glide_x; cy = glide_y; gliding = false; }
     }
     input_clamp_cursor();

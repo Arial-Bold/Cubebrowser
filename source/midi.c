@@ -65,6 +65,10 @@ typedef struct {
     bool released, held;      /* held: note-off came while the sustain pedal was down */
     double started, ends;     /* seconds of song time; ends: one-shot sample runs out */
     uint32_t order;
+    /* worked out once and reused while unchanged (sin/cos/pow are slow) */
+    float pan_for, gl, gr;
+    float bend_for;
+    uint32_t freq;
 } Voice;
 
 static thr_mutex lock;
@@ -374,17 +378,22 @@ static uint32_t voice_freq(const Voice *v) {
     return (uint32_t)f;
 }
 
-static void voice_volume(const Voice *v, bool paused, uint16_t *vl, uint16_t *vr) {
+static void voice_volume(Voice *v, bool paused, uint16_t *vl, uint16_t *vr) {
     if (paused) { *vl = *vr = 0; return; }
     const Channel *c = &chans[v->ch];
     float master = g_set.music_volume / 10.0f;
     master *= master;
     float amp = v->level * v->vel_gain * v->z.gain * c->volume * c->expression * master * OUT_GAIN;
-    float p = v->z.pan + c->pan;
-    if (p < -1) p = -1;
-    if (p > 1) p = 1;
-    float a = (p + 1) * 0.25f * (float)M_PI;
-    float l = amp * cosf(a) * 1.4142f, r = amp * sinf(a) * 1.4142f;
+    if (v->pan_for != c->pan) {
+        v->pan_for = c->pan;
+        float p = v->z.pan + c->pan;
+        if (p < -1) p = -1;
+        if (p > 1) p = 1;
+        float a = (p + 1) * 0.25f * (float)M_PI;
+        v->gl = cosf(a) * 1.4142f;
+        v->gr = sinf(a) * 1.4142f;
+    }
+    float l = amp * v->gl, r = amp * v->gr;
     if (l > 2) l = 2;
     if (r > 2) r = 2;
     *vl = (uint16_t)(l * 256);
@@ -437,6 +446,9 @@ static void note_on(int ch, int key, int vel) {
         v->started = song_pos;
         v->order = ++voice_order;
         uint32_t f = voice_freq(v);
+        v->freq = f;
+        v->bend_for = chans[ch].bend;
+        v->pan_for = 1e9f;   /* work out the panning on first use */
         v->ends = v->z.loop ? 1e30 : song_pos + (double)v->z.len / f + 0.02;
         uint16_t vl, vr;
         voice_volume(v, false, &vl, &vr);
@@ -537,7 +549,8 @@ static void voices_update(float dt, bool paused) {
         }
         uint16_t vl, vr;
         voice_volume(v, paused, &vl, &vr);
-        hw_set(i, voice_freq(v), vl, vr);
+        if (v->bend_for != chans[v->ch].bend) { v->bend_for = chans[v->ch].bend; v->freq = voice_freq(v); }
+        hw_set(i, v->freq, vl, vr);
     }
 }
 
@@ -849,7 +862,7 @@ static void *seq_main(void *arg) {
         if (state == MIDI_PLAYING && song_loaded) advance(dt);
         bool busy = (state == MIDI_PLAYING);
         thr_unlock(&lock);
-        thr_sleep_ms(busy ? 3 : 20);
+        thr_sleep_ms(busy ? 4 : 20);
     }
     return NULL;
 }
