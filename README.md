@@ -8,10 +8,6 @@ files straight to your SD card, and control everything with a GameCube
 controller. It runs as a `.dol` program launched from Swiss,
 with menus designed to feel like they belong on the console.
 
-
-<img width="1920" height="1080" alt="Homepage" src="https://github.com/user-attachments/assets/1a1d6c33-9416-4e0c-878a-abe089ef2a04" />
-
-
 ---
 
 ## What you need
@@ -57,7 +53,7 @@ On first start, the status bar shows the browser connecting to your router,
 setting its clock and loading security certificates. When the dot in the
 bottom-right corner turns green, you're online.
 
-To upgrade later, use **Settings > Network > Check for updates** (or the
+To upgrade later, use **Settings > Updates > Check for CubeBrowser updates** (or the
 "Update available" bubble on the start page), which downloads the newest
 release from GitHub and installs it. You can also just replace
 `cubebrowser.dol` yourself. Your settings, bookmarks and downloads stay put.
@@ -103,10 +99,6 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 
 ## Browsing
 
-
-<img width="1920" height="1080" alt="Nintendo Page" src="https://github.com/user-attachments/assets/f3c03ec9-fe17-4120-8c3a-32bb3581cf26" />
-
-
 - **Go anywhere:** press X, type an address like `text.npr.org`, or type any
   words to search. Addresses open securely (HTTPS) automatically.
 - **Toolbar:** Back, Forward, Home, Exit (door), the address bar (with a stop
@@ -118,6 +110,12 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
   files on SD card** lists them), or set the Exit button to **Restart console**
   if Swiss starts automatically when your GameCube powers on. If the chosen
   file has moved, the browser looks for a Swiss `.dol` on the card by itself.
+- **Update Swiss:** Settings > Updates > **Check for Swiss updates** compares
+  your Swiss with the newest release on github.com/emukidid/swiss-gc and can
+  install it: it downloads the release, takes out the main Swiss `.dol` and
+  replaces the one the Exit button starts (the old one is kept as `.old`).
+  If your console starts Swiss from `boot.dol` or `ipl.dol`, set **Save new
+  Swiss as** to that name; those are saved at the root of the card.
 - **Back and Forward** return instantly to your last few pages, scrolled to
   where you left them, and Back after a search takes you to your results.
 - **Bookmarks:** press Y, then **Bookmark this page**. Click a bookmark to open
@@ -138,10 +136,6 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 ## Music player
 
 CubeBrowser can play MIDI music in the background while you browse.
-
-
-<img width="1920" height="1080" alt="musicplayer" src="https://github.com/user-attachments/assets/646bf569-c9c7-4e7d-9f09-127857925b52" />
-
 
 - Put `.mid` files (also `.midi`, `.kar` and `.rmi`) in a folder called `midi`
   at the root of your SD card. The folder is created for you the first time
@@ -227,12 +221,13 @@ defaults.
 
 | Section | What you can change |
 |---|---|
-| **Network** | Check for updates (now, and automatically at start), automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server, time zone and daylight saving. |
+| **Network** | Automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server, time zone and daylight saving. |
 | **Controls** | Stick dead zone, pointer speed and acceleration, scroll speed, pointer snapping, rumble, the button for each action, on-screen key layout (QWERTY or ABC) and key repeat speed. |
 | **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), picture width (Full 704 or Standard 640), screen margin, page text size, theme, animations, sound effects and volume. |
 | **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle and repeat. |
 | **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture labels, maximum page size. |
 | **Security** | Cookies on/off, keep logins after restart, certificate checking and the certificate file. |
+| **Updates** | Check for CubeBrowser updates (now, and automatically at start), check for Swiss updates, and the name to save a new Swiss as (keep its name, numbered, swiss.dol, boot.dol or ipl.dol). |
 | **Data** | Exit button action and Swiss `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear history, delete bookmarks, reset all settings. |
 
 A few worth knowing about:
