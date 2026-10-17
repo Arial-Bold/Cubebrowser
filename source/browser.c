@@ -971,10 +971,36 @@ static void field_done(bool ok, const char *text, void *user) {
     if (texts == 1 && page.fields[f].form >= 0) submit_form(f, -1);
 }
 
+/* A readable title for the keyboard: the box's own caption, else a guess
+ * from its name ("q" is how most sites name a search box). */
+static void field_title(const Field *fd, char *out, size_t cap) {
+    if (fd->type == FIELD_PASSWORD) { snprintf(out, cap, "Password"); return; }
+    if (fd->label[0]) { snprintf(out, cap, "%s", fd->label); return; }
+    static const char *const search[] = { "q", "query", "search", "s", "search_query", "k", "keywords", "keyword",
+                                          "p", "term", "terms", "find", "searchword", "qt", "text", NULL };
+    for (int i = 0; search[i]; i++)
+        if (!strcasecmp(fd->name, search[i])) { snprintf(out, cap, "Search"); return; }
+    if (!strcasecmp(fd->name, "user") || !strcasecmp(fd->name, "username") || !strcasecmp(fd->name, "login") ||
+        !strcasecmp(fd->name, "uname") || !strcasecmp(fd->name, "nick"))
+    { snprintf(out, cap, "Username"); return; }
+    if (strlen(fd->name) < 3) { snprintf(out, cap, "Text"); return; }
+    /* "first_name" -> "First name" */
+    size_t n = 0;
+    for (const char *c = fd->name; *c && n + 1 < cap; c++) {
+        char ch = (*c == '_' || *c == '-' || *c == '.' || *c == '[' || *c == ']') ? ' ' : *c;
+        if (ch == ' ' && (n == 0 || out[n - 1] == ' ')) continue;
+        out[n++] = ch;
+    }
+    while (n && out[n - 1] == ' ') n--;
+    out[n] = 0;
+    if (!n) { snprintf(out, cap, "Text"); return; }
+    out[0] = (char)toupper((unsigned char)out[0]);
+}
+
 static void edit_field(int f) {
     Field *fd = &page.fields[f];
     char title[80];
-    snprintf(title, sizeof(title), "%s", fd->type == FIELD_PASSWORD ? "Password" : (fd->name[0] ? fd->name : "Text"));
+    field_title(fd, title, sizeof(title));
     int packed = ((page_gen & 0xFFFFFF) << 8) | (f & 0xFF);
     osk_open(title, fd->value, (int)sizeof(fd->value) - 1, fd->type == FIELD_PASSWORD ? OSK_PASSWORD : OSK_TEXT,
              field_done, (void *)(intptr_t)packed);

@@ -234,7 +234,20 @@ static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) 
                 f->checked = dom_attr(c, "checked") != NULL;
                 if (t == FIELD_SUBMIT)
                     snprintf(f->label, sizeof(f->label), "%s", val && *val ? val : (type && !strcasecmp(type, "image") ? "Go" : "Submit"));
-                if (t == FIELD_TEXT && (v = dom_attr(c, "placeholder"))) snprintf(f->label, sizeof(f->label), "%s", v);
+                if (t == FIELD_TEXT || t == FIELD_PASSWORD) {
+                    /* a caption for the keyboard: the box's hint, else what kind of box it is */
+                    const char *cap = dom_attr(c, "placeholder");
+                    if (!cap || !*cap) cap = dom_attr(c, "aria-label");
+                    if (!cap || !*cap) cap = dom_attr(c, "title");
+                    if ((!cap || !*cap) && type) {
+                        if (!strcasecmp(type, "search")) cap = "Search";
+                        else if (!strcasecmp(type, "email")) cap = "Email address";
+                        else if (!strcasecmp(type, "url")) cap = "Web address";
+                        else if (!strcasecmp(type, "tel")) cap = "Phone number";
+                        else if (!strcasecmp(type, "number")) cap = "Number";
+                    }
+                    if (cap && *cap && t == FIELD_TEXT) snprintf(f->label, sizeof(f->label), "%s", cap);
+                }
             }
             break;
         }
