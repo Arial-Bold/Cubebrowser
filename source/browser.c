@@ -1263,8 +1263,15 @@ void browser_frame(bool interactive) {
         page.relayout = true;
     }
     if (page.styled_author != (g_set.page_styles != 0)) page.restyle = true;
-    bool image_relayout = page.relayout && ui_frame() - last_layout_frame >= 90;
-    if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout || page.restyle)) {
+    /* Laying out a big page takes a while, and nothing moves meanwhile, so
+     * the extra layouts while a page fills in are spaced out: the page's
+     * stylesheets are applied together once all have arrived, and pictures
+     * that change the layout wait until the pointer is resting. */
+    int since = ui_frame() - last_layout_frame;
+    bool waiting_sheets = page.restyle && last_layout_w != 0 && page.styled_author == (g_set.page_styles != 0) &&
+                          sheets_pending() && since < 600;
+    bool image_relayout = page.relayout && since >= 90 && (input_stick_idle(20) || since >= 300);
+    if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout || (page.restyle && !waiting_sheets))) {
         last_layout_frame = ui_frame();
         diag_note(DIAG_MAIN, "laying out page (%d pictures ready)", page.nimages);
         page_layout(&page, cw, scale);

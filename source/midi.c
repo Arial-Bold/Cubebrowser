@@ -31,6 +31,7 @@
 #include <gccore.h>
 #include <aesndlib.h>
 #include <ogc/machine/processor.h>
+#include <ogc/aram.h>
 #include <ogc/lwp_watchdog.h>
 #else
 #include <time.h>
@@ -89,7 +90,10 @@ static char loaded_sf2[256];      /* what's loaded: "" = built-in */
 static bool instruments_checked;
 
 /* requests from the UI thread, carried out by the sequencer */
-enum { REQ_NONE, REQ_PLAY, REQ_STOP, REQ_PAUSE, REQ_RESUME, REQ_RELOAD };
+static int *order;                /* shuffle order (see neighbour) */
+static int order_n, order_pos = -1;
+
+enum { REQ_NONE, REQ_PLAY, REQ_STOP, REQ_PAUSE, REQ_RESUME, REQ_RELOAD, REQ_NEXT, REQ_PREV };
 static int req, req_song;
 
 /* -------------------------------------------------------------- helpers */
@@ -114,6 +118,17 @@ static bool is_song(const char *name) {
 }
 
 static int cmp_names(const void *a, const void *b) { return strcasecmp((const char *)a, (const char *)b); }
+
+/* Reading samples from the SD card can take seconds; it's done at a low
+ * priority so the browser stays responsive, then playing resumes at the
+ * sequencer's high one. */
+static void slow_work(bool on) {
+#ifdef GEKKO
+    LWP_SetThreadPriority(LWP_GetSelf(), on ? 50 : 110);
+#else
+    (void)on;
+#endif
+}
 
 /* ===================================================== hardware voices */
 
@@ -196,6 +211,11 @@ static void hw_callback(AESNDPB *pb, u32 st) {
     HwVoice *h = AESND_GetVoiceUserData(pb);
     if (!h) return;
     if (st == VOICE_STATE_RUNNING) {
+        /* AESND copies every voice's samples to sound memory through one
+         * shared buffer. If the previous copy is still going, the next voice
+         * would overwrite it (heard as clicks and stray noises), so wait
+         * for it here; it takes a few microseconds at most. */
+        for (int k = 0; k < 4000 && AR_GetDMAStatus(); k++) {}
         if (hw_stop_req || h->want_stop) {
             AESND_SetVoiceStop(pb, true);
             h->state = HV_STOPPING;
@@ -558,6 +578,7 @@ int midi_scan(void) {
         snprintf(planned, sizeof(planned), "%s", w[0] ? (b ? b + 1 : w) : "");
     }
     nsongs = n;
+    order_n = 0;   /* the list changed: shuffle afresh */
     current = -1;
     for (int i = 0; i < n && keep[0]; i++)
         if (!strcmp(songs[i], keep)) current = i;
@@ -638,12 +659,51 @@ static bool load_song(int i) {
 }
 
 /* Which song comes after (dir +1) or before (-1) the current one; -1 = none. */
+/* Shuffle plays every song once, in a random order, before any repeats
+ * (like shuffling a deck of cards); with Repeat on, a new order follows
+ * that doesn't start with the song that just ended. */
+
+static void shuffle_order(int first, int avoid_first) {
+    free(order);
+    order = malloc(sizeof(int) * (size_t)(nsongs > 0 ? nsongs : 1));
+    order_n = order ? nsongs : 0;
+    for (int i = 0; i < order_n; i++) order[i] = i;
+    for (int i = order_n - 1; i > 0; i--) {   /* Fisher-Yates */
+        int j = rand() % (i + 1), t = order[i];
+        order[i] = order[j];
+        order[j] = t;
+    }
+    if (first >= 0 && first < order_n)
+        for (int i = 0; i < order_n; i++)
+            if (order[i] == first) { order[i] = order[0]; order[0] = first; break; }
+    if (avoid_first >= 0 && order_n > 1 && order[0] == avoid_first) { order[0] = order[1]; order[1] = avoid_first; }
+    order_pos = (first >= 0) ? 0 : -1;
+}
+
+/* Keeps the shuffle order in step with the song now starting. */
+static void shuffle_follow(int song_index) {
+    if (!g_set.music_shuffle) return;
+    if (order_n != nsongs || !order) { shuffle_order(song_index, -1); return; }
+    if (order_pos + 1 < order_n && order[order_pos + 1] == song_index) { order_pos++; return; }
+    if (order_pos > 0 && order[order_pos - 1] == song_index) { order_pos--; return; }
+    if (order_pos >= 0 && order_pos < order_n && order[order_pos] == song_index) return;
+    shuffle_order(song_index, -1);   /* picked by hand: a fresh order from here */
+}
+
+/* Which song comes after (dir +1) or before (-1) the current one; -1 = none. */
 static int neighbour(int dir) {
     if (nsongs <= 0) return -1;
     if (g_set.music_shuffle && nsongs > 1) {
-        int r;
-        do r = rand() % nsongs; while (r == current);
-        return r;
+        if (order_n != nsongs || !order || order_pos < 0) shuffle_order(current, -1);
+        if (!order) return -1;
+        if (dir > 0) {
+            if (order_pos + 1 < order_n) return order[order_pos + 1];
+            if (!g_set.music_repeat) return -1;
+            shuffle_order(-1, current);   /* everything has played: deal again */
+            order_pos = -1;
+            return order[0];
+        }
+        return order_pos > 0 ? order[order_pos - 1] : current;
     }
     int n = current + dir;
     if (n >= nsongs) return g_set.music_repeat ? 0 : -1;
@@ -671,7 +731,9 @@ static void load_song_instruments(void) {
     thr_unlock(&lock);
     hw_end();   /* no voice may read a sample while samples are swapped */
     char msg[160];
+    slow_work(true);
     bool ok = instruments_need_load(msg, sizeof(msg));
+    slow_work(false);
     thr_lock(&lock);
     if (!ok) snprintf(message, sizeof(message), "%s", msg);
 }
@@ -682,6 +744,7 @@ static void start_song(int i) {
     for (int tries = 0; tries < nsongs && i >= 0; tries++) {
         current = i;
         message[0] = 0;
+        shuffle_follow(i);
         if (load_song(i)) {
             load_song_instruments();
             hw_begin();
@@ -725,12 +788,21 @@ static void process_request(void) {
     int r = req, s = req_song;
     req = REQ_NONE;
     switch (r) {
+    case REQ_NEXT:
+    case REQ_PREV:
+        if (r == REQ_PREV && state != MIDI_STOPPED && song_pos > 3 && current >= 0) s = current;   /* back to its start */
+        else s = neighbour(r == REQ_NEXT ? +1 : -1);
+        if (s < 0) s = (r == REQ_NEXT && g_set.music_shuffle) ? -1 : 0;
+        if (s < 0) { stop_song(); break; }
+        /* fall through: play it */
     case REQ_PLAY:
         if (s < 0 || s >= nsongs) break;
         all_voices_off();
         state = MIDI_LOADING;
         thr_unlock(&lock);
+        slow_work(true);
         ensure_instruments();   /* may take a while for a big SoundFont */
+        slow_work(false);
         thr_lock(&lock);
         if (req != REQ_NONE) break;   /* something else was asked meanwhile */
         start_song(s);
@@ -742,7 +814,9 @@ static void process_request(void) {
         instruments_checked = false;
         message[0] = 0;
         thr_unlock(&lock);
+        slow_work(true);
         ensure_instruments();
+        slow_work(false);
         thr_lock(&lock);
         state = MIDI_STOPPED;
         if (was && cur >= 0 && req == REQ_NONE) start_song(cur);
@@ -783,10 +857,15 @@ static void *seq_main(void *arg) {
 
 void midi_init(void) {
     lock_ok = thr_mutex_init(&lock);
+#ifdef GEKKO
+    srand((unsigned)gettime());   /* a different shuffle each time */
+#else
+    srand((unsigned)time(NULL));
+#endif
     channels_reset();
     hw_init();
 #ifdef GEKKO
-    if (lock_ok) thr_create(&seq_thread, seq_main, NULL, 64 * 1024, 90);
+    if (lock_ok) thr_create(&seq_thread, seq_main, NULL, 64 * 1024, 110);   /* above page layout (100) so music never stalls */
 #endif
 }
 
@@ -821,25 +900,25 @@ void midi_stop(void) { request(REQ_STOP, 0); }
 void midi_toggle_pause(void) {
     if (state == MIDI_PLAYING) request(REQ_PAUSE, 0);
     else if (state == MIDI_PAUSED) request(REQ_RESUME, 0);
-    else if (state == MIDI_STOPPED && nsongs > 0) request(REQ_PLAY, current >= 0 ? current : 0);
+    else if (state == MIDI_STOPPED && nsongs > 0) {
+        if (current < 0 && g_set.music_shuffle) request(REQ_NEXT, 0);   /* shuffle: a random first song */
+        else request(REQ_PLAY, current >= 0 ? current : 0);
+    }
 }
 
-void midi_next(void) {
-    int n = neighbour(+1);
-    if (n < 0) n = 0;
-    if (nsongs) request(REQ_PLAY, n);
-}
+void midi_next(void) { if (nsongs) request(REQ_NEXT, 0); }
 
-void midi_prev(void) {
-    if (state != MIDI_STOPPED && song_pos > 3 && current >= 0) { request(REQ_PLAY, current); return; }
-    int n = current < 0 ? 0 : neighbour(-1);
-    if (n < 0) n = 0;
-    if (nsongs) request(REQ_PLAY, n);
-}
+void midi_prev(void) { if (nsongs) request(REQ_PREV, 0); }
 
 void midi_instruments_changed(void) { request(REQ_RELOAD, 0); }
 
-void midi_set_shuffle(bool on) { g_set.music_shuffle = on; }
+void midi_set_shuffle(bool on) {
+    if (lock_ok) thr_lock(&lock);
+    g_set.music_shuffle = on;
+    order_pos = -1;   /* a new order starting from the current song */
+    order_n = 0;
+    if (lock_ok) thr_unlock(&lock);
+}
 void midi_set_repeat(bool on) { g_set.music_repeat = on; }
 bool midi_shuffle(void) { return g_set.music_shuffle != 0; }
 bool midi_repeat(void) { return g_set.music_repeat != 0; }
