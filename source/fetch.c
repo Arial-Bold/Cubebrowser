@@ -44,7 +44,8 @@ static char task_err[256];
 bool is_download_name(const char *url) {
     static const char *const ext[] = { ".dol", ".elf", ".iso", ".gcm", ".gcz", ".ciso", ".rvz", ".tgc", ".zip", ".7z",
                                        ".rar", ".gz", ".tar", ".bin", ".img", ".dff", ".nkit.iso", ".exe", ".pdf",
-                                       ".mp3", ".mp4", ".wav", ".ogg", ".flac", ".gci", ".sav", ".raw", NULL };
+                                       ".mp3", ".mp4", ".wav", ".ogg", ".flac", ".gci", ".sav", ".raw", ".mid", ".midi",
+                                       ".kar", ".rmi", ".sf2", NULL };
     char path[URL_MAX];
     snprintf(path, sizeof(path), "%s", url);
     char *q = strpbrk(path, "?#");

@@ -389,6 +389,16 @@ static bool ends_with_ci(const char *s, const char *suffix) {
 }
 
 /* A safe file name from the server's suggestion or the address. */
+/* Songs and SoundFonts go straight to the music player's folder. */
+static bool is_music_file(const char *name) {
+    static const char *const exts[] = { ".mid", ".midi", ".kar", ".rmi", ".sf2", NULL };
+    for (int i = 0; exts[i]; i++)
+        if (ends_with_ci(name, exts[i])) return true;
+    return false;
+}
+
+static const char *download_dir(const char *name) { return is_music_file(name) ? MIDI_DIR : g_set.dl_folder; }
+
 static void pick_download_name(const char *url, const char *suggested) {
     char raw[256] = "";
     if (suggested && suggested[0]) {
@@ -425,7 +435,7 @@ static void pick_download_name(const char *url, const char *suggested) {
     if (!dl_name[0] || dl_name[0] == '.') snprintf(dl_name, sizeof(dl_name), "download.bin");
 
     /* an unfinished download of the same name is continued; finished ones aren't overwritten */
-    snprintf(dl_path, sizeof(dl_path), "%s/%s", g_set.dl_folder, dl_name);
+    snprintf(dl_path, sizeof(dl_path), "%s/%s", download_dir(dl_name), dl_name);
     char part[620];
     snprintf(part, sizeof(part), "%s.part", dl_path);
     if (file_exists(part) || !file_exists(dl_path)) return;
@@ -435,7 +445,7 @@ static void pick_download_name(const char *url, const char *suggested) {
     if (dot && strlen(dot) < sizeof(ext)) { snprintf(ext, sizeof(ext), "%s", dot); *dot = 0; }
     for (int k = 2; k < 100; k++) {
         snprintf(dl_name, sizeof(dl_name), "%.90s (%d)%s", base, k, ext);
-        snprintf(dl_path, sizeof(dl_path), "%s/%s", g_set.dl_folder, dl_name);
+        snprintf(dl_path, sizeof(dl_path), "%s/%s", download_dir(dl_name), dl_name);
         if (!file_exists(dl_path)) break;
     }
 }
@@ -459,7 +469,7 @@ static void offer_download(const HttpResult *r) {
 
 static void start_download(void) {
     if (!storage_ok()) { snprintf(dl_msg, sizeof(dl_msg), "No SD card was found."); dl_state = DL_FAILED; return; }
-    make_dirs(g_set.dl_folder);
+    make_dirs(download_dir(dl_name));
     if (!fetch_start_download(dl_url, dl_path)) {
         snprintf(dl_msg, sizeof(dl_msg), "The network is busy or not connected. Try again in a moment.");
         dl_state = DL_FAILED;
@@ -566,7 +576,7 @@ static void draw_download(bool interactive) {
         fmt_size(dl_size, a, sizeof(a));
         snprintf(line, sizeof(line), "Size: %s", a);
         gfx_text(FONT_BODY, 17, tx, ty, t->text_dim, line, -1);
-        snprintf(line, sizeof(line), "Saves to: %s", g_set.dl_folder);
+        snprintf(line, sizeof(line), "Saves to: %s", download_dir(dl_name));
         gfx_text(FONT_BODY, 17, tx, ty + 26, t->text_dim, line, gfx_text_fit(FONT_BODY, 17, line, -1, tw));
         if (dl_size > 200LL * 1024 * 1024)
             wrap_text(FONT_BODY, 16, tx, ty + 58, tw, t->text_dim, "This is a big file, so it may take a while. Keep the GameCube on until it finishes.", 2);
@@ -634,8 +644,22 @@ static void draw_download(bool interactive) {
     } else if (dl_state == DL_DONE) {
         snprintf(line, sizeof(line), "Saved to %s", dl_path);
         wrap_text(FONT_BODY, 17, tx, ty, tw, t->text_dim, line, 2);
-        wrap_text(FONT_BODY, 16, tx, ty + 56, tw, t->text_dim, "You can open it from Swiss after leaving the browser.", 2);
-        float bw = dl_is_zip ? (tw - 12) / 2 : tw * 0.5f, bx = dl_is_zip ? tx : tx + tw * 0.25f;
+        bool song = is_music_file(dl_name) && !ends_with_ci(dl_name, ".sf2");
+        wrap_text(FONT_BODY, 16, tx, ty + 56, tw, t->text_dim,
+                  song ? "It's in the music player's song list."
+                       : ends_with_ci(dl_name, ".sf2") ? "Choose it under Settings > Music > Instruments."
+                                                       : "You can open it from Swiss after leaving the browser.", 2);
+        bool two = dl_is_zip || song;
+        float bw = two ? (tw - 12) / 2 : tw * 0.5f, bx = two ? tx : tx + tw * 0.25f;
+        if (song) {
+            if (ui_button(ui_id("dl-done", 2), bx, by, bw, bh, "Play now", 17, UIB_NORMAL)) {
+                int n = midi_scan();
+                for (int i = 0; i < n; i++)
+                    if (!strcmp(midi_file(i), dl_name)) { midi_play(i); break; }
+                close = true;
+            }
+            bx += bw + 12;
+        }
         if (dl_is_zip) {
             if (ui_button(ui_id("dl-done", 0), bx, by, bw, bh, "Unzip", 17, UIB_NORMAL)) start_unzip();
             bx += bw + 12;
