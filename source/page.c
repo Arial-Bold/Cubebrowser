@@ -26,7 +26,7 @@
 #define WORD_MAX 400
 #define MAX_TABLE_COLS 32
 #define MAX_TABLE_ROWS 600
-#define MAX_TABLE_DEPTH 8
+#define MAX_TABLE_DEPTH 10
 #define SHEET_MAX_BYTES (256 * 1024)
 
 /* ================================================================ arenas */
@@ -396,7 +396,8 @@ typedef struct {
     float origin, max_line, max_atom;
     float fscale;
     int link;
-    int depth;
+    int depth;     /* element nesting (guards recursion) */
+    int tdepth;    /* table nesting: each level has its own row list */
 } L;
 
 typedef struct {
@@ -967,7 +968,7 @@ static __attribute__((noinline)) void layout_float(L *c, Flow *f, Node *n, const
 
 /* ------------------------------------------------------------- tables */
 
-typedef struct { Node *n; int col, span; float minw, maxw, h; int start, end, bg; float x, w, y; } Cell;
+typedef struct { Node *n; int col, span, row, rspan; float minw, maxw, h; int start, end, bg; float x, w, y; } Cell;
 
 static void collect_rows(Node *t, Node **rows, int *nrows, Node **caps, int *ncaps, int depth) {
     for (Node *ch = t->first; ch; ch = ch->next) {
@@ -1031,8 +1032,8 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
                           float specified, float *out_w) {
     Page *p = c->p;
     static Node *rows_buf[MAX_TABLE_DEPTH][MAX_TABLE_ROWS];
-    int depth = c->depth;
-    if (depth >= MAX_TABLE_DEPTH) {   /* too deeply nested: treat as a plain block */
+    int depth = c->tdepth;
+    if (depth >= MAX_TABLE_DEPTH || c->depth > 100) {   /* too deeply nested: treat as a plain block */
         float esc = 0;
         if (c->measure) { Flow f; flow_init(&f, tx, tx + avail, y, ts->align); flow_children(c, &f, t, ts); *out_w = avail; return 0; }
         float h = block_box(c, t, ts, tx, avail, y, NULL, &esc);
@@ -1056,12 +1057,15 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
     int *row_first = malloc(sizeof(int) * (size_t)(nrows + 1));
     if (!cells || !row_first) { free(cells); free(row_first); *out_w = 0; return 0; }
     int ncols = 0;
+    int held[MAX_TABLE_COLS];   /* rows still covered by a rowspan cell from above */
+    memset(held, 0, sizeof(held));
     for (int r = 0; r < nrows; r++) {
         row_first[r] = ncells;
         int col = 0;
         for (Node *ch = rows[r]->first; ch; ch = ch->next) {
             if (ch->type != NT_ELEM || !ch->style || ch->style->display == D_NONE) continue;
             if (ch->style->display != D_CELL && ch->tag != TAG_TD && ch->tag != TAG_TH) continue;
+            while (col < MAX_TABLE_COLS && held[col] > 0) col++;   /* skip columns taken from above */
             if (col >= MAX_TABLE_COLS) break;
             if (ncells == cap) {
                 Cell *nc = realloc(cells, sizeof(Cell) * (size_t)cap * 2);
@@ -1077,9 +1081,24 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
             ce->span = cs ? atoi(cs) : 1;
             if (ce->span < 1) ce->span = 1;
             if (col + ce->span > MAX_TABLE_COLS) ce->span = MAX_TABLE_COLS - col;
+            /* a colspan may not run into columns held from above */
+            for (int k = 1; k < ce->span; k++)
+                if (held[col + k] > 0) { ce->span = k; break; }
+            ce->row = r;
+            const char *rsp = dom_attr(ch, "rowspan");
+            ce->rspan = rsp ? atoi(rsp) : 1;
+            if (rsp && ce->rspan == 0) ce->rspan = nrows - r;   /* rowspan="0": to the end */
+            if (ce->rspan < 1) ce->rspan = 1;
+            if (ce->rspan > nrows - r) ce->rspan = nrows - r;
+            if (ce->rspan > 1)
+                for (int k = 0; k < ce->span; k++) held[col + k] = ce->rspan;
             col += ce->span;
         }
         if (col > ncols) ncols = col;
+        for (int k = 0; k < MAX_TABLE_COLS; k++) {
+            if (held[k] > 0) held[k]--;
+            if (held[k] > 0 && k + 1 > ncols) ncols = k + 1;
+        }
     }
     row_first[nrows] = ncells;
     if (ncols == 0) ncols = 1;
@@ -1088,7 +1107,8 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
     float colmin[MAX_TABLE_COLS], colmax[MAX_TABLE_COLS];
     for (int i = 0; i < ncols; i++) colmin[i] = colmax[i] = 0;
     L mc = *c;
-    mc.depth = depth + 1;
+    mc.depth = c->depth + 1;
+    mc.tdepth = depth + 1;
     for (int pass = 0; pass < 2; pass++) {
         for (int i = 0; i < ncells; i++) {
             Cell *ce = &cells[i];
@@ -1184,32 +1204,41 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
             Cell *ce = &cells[i];
             ce->x = colx[ce->col];
             ce->w = colx[ce->col + ce->span] - spacing - ce->x;
+            ce->y = cy;
             ce->start = p->nboxes;
             float esc = 0;
             L cc = *c;
-            cc.depth = depth + 1;
+            cc.depth = c->depth + 1;
+            cc.tdepth = depth + 1;
             ce->h = block_box(&cc, ce->n, ce->n->style, ce->x, ce->w, cy, NULL, &esc);
             ce->end = p->nboxes;
             if (ce->n->style->height.u == U_PX && ce->n->style->height.v > ce->h) ce->h = ce->n->style->height.v;
-            if (ce->h > row_h) row_h = ce->h;
+            if (ce->rspan == 1 && ce->h > row_h) row_h = ce->h;   /* taller rowspan cells are settled on their last row */
         }
         if (rs && rs->height.u == U_PX && rs->height.v > row_h) row_h = rs->height.v;
-        for (int i = row_first[r]; i < row_first[r + 1]; i++) {
+        /* rowspan cells ending here: this row grows if they need more room */
+        for (int i = 0; i < row_first[r + 1]; i++) {
             Cell *ce = &cells[i];
+            if (ce->rspan > 1 && ce->row + ce->rspan - 1 == r && ce->h - (cy - ce->y) > row_h) row_h = ce->h - (cy - ce->y);
+        }
+        for (int i = 0; i < row_first[r + 1]; i++) {
+            Cell *ce = &cells[i];
+            if (ce->row + ce->rspan - 1 != r) continue;   /* finished on a later row */
+            float full = cy + row_h - ce->y;               /* the cell's whole height */
             float dy = 0;
             int va = ce->n->style->valign;
-            if (va == VA_MIDDLE) dy = (row_h - ce->h) * 0.5f;
-            else if (va == VA_BOTTOM) dy = row_h - ce->h;
+            if (va == VA_MIDDLE) dy = (full - ce->h) * 0.5f;
+            else if (va == VA_BOTTOM) dy = full - ce->h;
             /* block_box reserved the cell's own decoration first: background,
              * then top/right/bottom/left borders. Stretch them to the row. */
             const Style *s = ce->n->style;
             int k = ce->start;
-            if (s->has_bg && k < ce->end) p->boxes[k++].h = row_h;
+            if (s->has_bg && k < ce->end) p->boxes[k++].h = full;
             for (int side = 0; side < 4; side++) {
                 if (s->border[side] <= 0 || k >= ce->end) continue;
                 Box *b = &p->boxes[k++];
-                if (side == 1 || side == 3) b->h = row_h;
-                else if (side == 2) b->y = cy + row_h - s->border[2];
+                if (side == 1 || side == 3) b->h = full;
+                else if (side == 2) b->y = ce->y + full - s->border[2];
             }
             for (; k < ce->end; k++) p->boxes[k].y += dy;
         }
