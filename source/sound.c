@@ -6,7 +6,6 @@
 #include <gccore.h>
 #include <aesndlib.h>
 #include <ogc/lwp_watchdog.h>
-#include <ogc/machine/processor.h>
 #include <malloc.h>
 #include <math.h>
 #include <string.h>
@@ -84,22 +83,11 @@ void sound_init(void) {
     ready = true;
 }
 
-extern void __dsp_shutdown(void);   /* libogc2 (system.c): halts and resets the DSP */
-
 void sound_shutdown(void) {
     if (!ready) return;
     ready = false;
-    /* AESND_Reset() waits for the DSP to answer, which it may never do while
-     * a mix is in flight, leaving a black screen instead of the next program.
-     * So stop the audio and reset the DSP directly, as libogc2 does itself
-     * before a reset; the next program sets it up from scratch. */
     AESND_Pause(true);
-    u32 level;
-    _CPU_ISR_Disable(level);
-    AUDIO_StopDMA();
-    AUDIO_RegisterDMACallback(NULL);
-    __dsp_shutdown();
-    _CPU_ISR_Restore(level);
+    AESND_Reset();
 }
 
 void sound_play(Sfx s) {
