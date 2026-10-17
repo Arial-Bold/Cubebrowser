@@ -11,6 +11,8 @@
 #include "storage.h"
 #include "home.h"
 #include "update.h"
+#include "version.h"
+#include "swissupd.h"
 #include "sound.h"
 #include "url.h"
 #include "image.h"
@@ -283,6 +285,11 @@ static void start_load(const char *url, const char *post) {
             show_html("<title>Software Update</title>", "about:update", false);
             home_update_reset();
             if (update_state() == UPD_NONE || update_state() == UPD_CHECK_FAILED) update_request_check(false);
+        }
+        else if (!strcasecmp(url, "about:swiss")) {
+            show_html("<title>Swiss Update</title>", "about:swiss", false);
+            home_update_reset();
+            if (swiss_state() == UPD_NONE || swiss_state() == UPD_CHECK_FAILED || swiss_state() == UPD_LATEST) swiss_request_check();
         }
         else
             show_error(url, "There's no built-in page with that name.");
@@ -846,7 +853,7 @@ static int images_pending(void) {
 
 static void handle_fetch_result(void) {
     if (fetch_state() != FETCH_DONE) return;
-    if (fetch_job_kind() == JOB_UPDATE_CHECK || fetch_job_kind() == JOB_UPDATE_INSTALL) return;   /* update_poll() takes these */
+    if (fetch_job_is_update()) return;   /* update_poll() / swiss_poll() take these */
     if (fetch_job_kind() == JOB_DOWNLOAD || fetch_job_kind() == JOB_UNZIP) { handle_task_result(); return; }
     if (queued) {
         /* a new page was requested while something was downloading */
@@ -1184,6 +1191,7 @@ void browser_frame(bool interactive) {
         if (g_set.update_auto) update_request_check(true);
     }
     update_poll();
+    swiss_poll();
     handle_fetch_result();
 
     float sx, sy, sw, sh;
@@ -1270,8 +1278,39 @@ void browser_frame(bool interactive) {
     bool on_home = has_page && !strcmp(page.url, "about:home");
     bool on_help = has_page && !strcmp(page.url, "about:help");
     bool on_update = has_page && !strcmp(page.url, "about:update");
-    if (on_update) {
-        HomeAction ua = home_update_draw(cx, cy, cw, ch, input_ok);
+    bool on_swiss = has_page && !strcmp(page.url, "about:swiss");
+    if (on_swiss) {
+        static char have[24], avail[200], done_text[300];
+        snprintf(have, sizeof(have), "%s", swiss_installed());
+        const char *tgt = swiss_target();
+        char dest[300];
+        swiss_destination(dest, sizeof(dest));
+        snprintf(avail, sizeof(avail), "%s%s. It will be saved as %s (a file already there is kept as .old).",
+                 swiss_installed()[0] ? "You have " : "Your Swiss version is unknown", swiss_installed(), dest);
+        snprintf(done_text, sizeof(done_text), "Saved as %s. The old version was kept as a backup (.old).", tgt);
+        UpdView v = { "Swiss Update", "Swiss", have, SWISS_REPO, swiss_latest(), swiss_notes(), swiss_error(),
+                      avail, done_text, "START THE NEW SWISS", swiss_state(), swiss_step() };
+        HomeAction ua = home_update_draw(cx, cy, cw, ch, input_ok, &v);
+        if (ua != HOME_NONE) sound_play(SFX_SELECT);
+        if (ua == HOME_OPEN_URL) navigate("about:home", NULL, true);
+        else if (ua == HOME_UPDATE_INSTALL) { midi_release_memory(); swiss_request_install(); }
+        else if (ua == HOME_UPDATE_CHECK) swiss_request_check();
+        else if (ua == HOME_UPDATE_STOP) fetch_cancel_update();
+        else if (ua == HOME_UPDATE_RESTART) {
+            settings_save();
+            cookies_save_if_needed();
+            char err[256];
+            if (!swiss_launch(err, sizeof(err))) { ui_toast(err); sound_play(SFX_ERROR); }
+        }
+    } else if (on_update) {
+        static char have[24], avail[160];
+        snprintf(have, sizeof(have), "v%s", CB_VERSION);
+        snprintf(avail, sizeof(avail), "You have v%s. Installing keeps your settings, bookmarks and logins.", CB_VERSION);
+        UpdView v = { "Software Update", "CubeBrowser", have, UPDATE_REPO, update_latest_version(), update_notes(),
+                      update_error(), avail,
+                      "Exit to Swiss and start CubeBrowser again to use it. The old version was kept as a backup (.old).",
+                      "EXIT TO SWISS", update_state(), update_step() };
+        HomeAction ua = home_update_draw(cx, cy, cw, ch, input_ok, &v);
         if (ua != HOME_NONE) sound_play(SFX_SELECT);
         if (ua == HOME_OPEN_URL) navigate("about:home", NULL, true);
         else if (ua == HOME_UPDATE_INSTALL) update_request_install();

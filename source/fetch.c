@@ -5,6 +5,7 @@
 #include "diag.h"
 #include "cookies.h"
 #include "update.h"
+#include "swissupd.h"
 #include <gccore.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -127,6 +128,10 @@ static void *worker_main(void *arg) {
                 update_worker_check(&cancel_flag);
             } else if (kind == JOB_UPDATE_INSTALL) {
                 update_worker_install(&cancel_flag);
+            } else if (kind == JOB_SWISS_CHECK) {
+                swiss_worker_check(&cancel_flag);
+            } else if (kind == JOB_SWISS_INSTALL) {
+                swiss_worker_install(&cancel_flag);
             } else if (kind == JOB_UNZIP) {
                 diag_note(DIAG_WORKER, "unzipping %.120s", task_path);
                 task_ok = unzip_file(task_path, task_dest, &uz_progress, &cancel_flag, task_err, sizeof(task_err));
@@ -265,8 +270,26 @@ bool fetch_take_task(bool *ok, char *err, size_t errlen) {
 
 /* Page navigation cancels the current job, except a software update
  * (cut off halfway, it would just have to start again). */
-void fetch_cancel(void) { if (state == FETCH_BUSY && kind != JOB_UPDATE_CHECK && kind != JOB_UPDATE_INSTALL) cancel_flag = 1; }
-void fetch_cancel_update(void) { if (state == FETCH_BUSY && (kind == JOB_UPDATE_CHECK || kind == JOB_UPDATE_INSTALL)) cancel_flag = 1; }
+static bool is_update_kind(JobKind k) {
+    return k == JOB_UPDATE_CHECK || k == JOB_UPDATE_INSTALL || k == JOB_SWISS_CHECK || k == JOB_SWISS_INSTALL;
+}
+bool fetch_job_is_update(void) { return is_update_kind(kind); }
+void fetch_cancel(void) { if (state == FETCH_BUSY && !is_update_kind(kind)) cancel_flag = 1; }
+void fetch_cancel_update(void) { if (state == FETCH_BUSY && is_update_kind(kind)) cancel_flag = 1; }
+
+bool fetch_start_swiss(bool install) {
+    if (state != FETCH_IDLE || !net_ready) return false;
+    memset(&dl_progress, 0, sizeof(dl_progress));
+    dl_progress.total = -1;
+    memset(&uz_progress, 0, sizeof(uz_progress));
+    return start_task(install ? JOB_SWISS_INSTALL : JOB_SWISS_CHECK);
+}
+
+bool fetch_take_swiss(void) {
+    if (state != FETCH_DONE || (kind != JOB_SWISS_CHECK && kind != JOB_SWISS_INSTALL)) return false;
+    state = FETCH_IDLE;
+    return true;
+}
 
 bool fetch_start_update(bool install) {
     if (state != FETCH_IDLE || !net_ready) return false;
@@ -307,7 +330,7 @@ bool fetch_take_image(ImageResult *out) {
 void fetch_discard(void) {
     if (state != FETCH_DONE) return;
     if (kind == JOB_DOWNLOAD || kind == JOB_UNZIP) { state = FETCH_IDLE; return; }
-    if (kind == JOB_UPDATE_CHECK || kind == JOB_UPDATE_INSTALL) return;   /* update.c collects these */
+    if (is_update_kind(kind)) return;   /* update.c / swissupd.c collect these */
     if (kind == JOB_IMAGE) image_free(&img_result.img);
     else http_result_free(&result);
     state = FETCH_IDLE;

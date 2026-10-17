@@ -35,6 +35,9 @@ typedef struct {
     char dl_folder[128];
     int  dl_delete_zip, dl_connections;
     int  update_auto;
+    int  swiss_name;           /* how a new Swiss is named (SWISS_NAME_*) */
+    int  swiss_rev;            /* Swiss revision this browser installed ... */
+    char swiss_rev_path[256];  /* ... and where */
     /* Leaving the browser */
     int  exit_action;
     char swiss_dol[256];
@@ -42,18 +45,18 @@ typedef struct {
 
 extern Settings g_set;
 
-typedef enum { CAT_NETWORK, CAT_CONTROLS, CAT_DISPLAY, CAT_MUSIC, CAT_BROWSING, CAT_SECURITY, CAT_DATA, CAT_COUNT } SetCategory;
+typedef enum { CAT_NETWORK, CAT_CONTROLS, CAT_DISPLAY, CAT_MUSIC, CAT_BROWSING, CAT_SECURITY, CAT_UPDATES, CAT_DATA, CAT_COUNT } SetCategory;
 extern const char *const category_names[CAT_COUNT];
 
 typedef enum { ST_BOOL, ST_INT, ST_CHOICE, ST_STR, ST_BIND, ST_ACTION } SetType;
 
-enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE, SA_OPEN_MUSIC };
+enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE, SA_OPEN_MUSIC, SA_CHECK_SWISS };
 enum { OSK_TEXTMODE_TEXT = 0, OSK_TEXTMODE_URL = 1, OSK_TEXTMODE_IP = 2 };
 
 typedef struct {
     int cat;
     const char *key;           /* INI key; NULL for actions */
-    const char *label;
+    const char *label;         /* NULL: saved but not shown in Settings */
     SetType type;
     size_t off;                /* offset into Settings */
     int min, max, step;        /* ints; for ST_STR max = buffer size, min = OSK mode; for ST_ACTION min = id */

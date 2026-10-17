@@ -9,7 +9,8 @@
 #include "unzip.h"
 
 typedef enum { FETCH_IDLE, FETCH_BUSY, FETCH_DONE } FetchState;
-typedef enum { JOB_PAGE, JOB_IMAGE, JOB_CSS, JOB_DOWNLOAD, JOB_UNZIP, JOB_UPDATE_CHECK, JOB_UPDATE_INSTALL } JobKind;
+typedef enum { JOB_PAGE, JOB_IMAGE, JOB_CSS, JOB_DOWNLOAD, JOB_UNZIP, JOB_UPDATE_CHECK, JOB_UPDATE_INSTALL,
+               JOB_SWISS_CHECK, JOB_SWISS_INSTALL } JobKind;
 
 typedef struct {
     int tag;              /* caller's identifier */
@@ -43,5 +44,9 @@ bool        is_download_name(const char *url);
 /* Software update jobs (update.c). Page loads never cancel these. */
 bool        fetch_start_update(bool install);
 bool        fetch_take_update(void);              /* true once one has finished; back to IDLE */
-void        fetch_cancel_update(void);
+void        fetch_cancel_update(void);             /* also stops a Swiss update */
+/* Swiss update jobs (swissupd.c), handled the same way. */
+bool        fetch_start_swiss(bool install);
+bool        fetch_take_swiss(void);
+bool        fetch_job_is_update(void);              /* the finished/running job is either kind of update */
 void        fetch_retry_network(void);

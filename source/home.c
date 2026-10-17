@@ -681,7 +681,7 @@ static bool flat_button(const char *id, float x, float y, float h, const char *l
     return clicked(hov, input_ok);
 }
 
-HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
+HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok, const UpdView *v) {
     const Theme *t = theme();
     HomeAction act = HOME_NONE;
     Color base = opaque(color_lerp(t->panel_bottom, t->bg_top, 0.25f));
@@ -690,7 +690,7 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
     gfx_rrect(x, y, w, h, 14, base);
     gfx_set_clip(x, y, w, h);
     float m = 10, hx = x + m, hw = w - 2 * m, cy = y + m;
-    UpdateState us = update_state();
+    UpdateState us = v->state;
 
     /* header bar */
     float a0 = intro(0), bar_h = 34;
@@ -706,10 +706,10 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
     }
     float tsz = w < 700 ? 21 : 23;
     caps(hx + 42, cy + (bar_h - gfx_line_height(FONT_UI, tsz)) / 2, tsz, 0.8f, color_alpha(gold, a0),
-         color_alpha(rgba(0, 0, 0, 255), a0), "Software Update");
-    float title_end = hx + 42 + caps_width(tsz, 0.8f, "Software Update");
+         color_alpha(rgba(0, 0, 0, 255), a0), v->title);
+    float title_end = hx + 42 + caps_width(tsz, 0.8f, v->title);
     char bubble[48];
-    snprintf(bubble, sizeof(bubble), "YOU HAVE v%s", CB_VERSION);
+    snprintf(bubble, sizeof(bubble), "YOU HAVE %s", v->have[0] ? v->have : "UNKNOWN");
     float bub_w = caps_width(9.5f, 1.1f, bubble) + 20, bub_h = 22;
     float bub_x = hx + hw - 22 - bub_w, bub_y = cy + (bar_h - bub_h) / 2;
     if (bub_x > title_end + 20) {
@@ -729,25 +729,25 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
     case UPD_NONE:
     case UPD_CHECKING:
         snprintf(line1, sizeof(line1), "Checking GitHub for a newer version...");
-        snprintf(line2, sizeof(line2), "Releases come from github.com/%s", UPDATE_REPO);
+        snprintf(line2, sizeof(line2), "Releases come from github.com/%s", v->repo);
         break;
     case UPD_LATEST:
         snprintf(line1, sizeof(line1), "You have the latest version.");
-        snprintf(line2, sizeof(line2), "CubeBrowser v%s is up to date.", CB_VERSION);
+        snprintf(line2, sizeof(line2), "%s %s is up to date.", v->product, v->have);
         break;
     case UPD_AVAILABLE:
-        snprintf(line1, sizeof(line1), "Version %s is available!", update_latest_version());
-        snprintf(line2, sizeof(line2), "You have v%s. Installing keeps your settings, bookmarks and logins.", CB_VERSION);
+        snprintf(line1, sizeof(line1), "Version %s is available!", v->latest);
+        snprintf(line2, sizeof(line2), "%s", v->available_text);
         break;
     case UPD_CHECK_FAILED:
         snprintf(line1, sizeof(line1), "Couldn't check for updates.");
-        snprintf(line2, sizeof(line2), "%s", update_error());
+        snprintf(line2, sizeof(line2), "%s", v->error);
         break;
     case UPD_INSTALLING: {
         const DownloadProgress *dp = fetch_download_progress();
         const UnzipProgress *up = fetch_unzip_progress();
-        UpdateStep st = update_step();
-        snprintf(line1, sizeof(line1), "Installing version %s...", update_latest_version());
+        UpdateStep st = v->step;
+        snprintf(line1, sizeof(line1), "Installing version %s...", v->latest);
         if (st == UPD_STEP_DOWNLOAD) {
             if (dp->total > 0) {
                 progress = (float)dp->done / (float)dp->total * 0.8f;
@@ -766,13 +766,13 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
         break;
     }
     case UPD_INSTALLED:
-        snprintf(line1, sizeof(line1), "Version %s is installed.", update_latest_version());
-        snprintf(line2, sizeof(line2), "Exit to Swiss and start CubeBrowser again to use it. The old version was kept as a backup (.old).");
+        snprintf(line1, sizeof(line1), "Version %s is installed.", v->latest);
+        snprintf(line2, sizeof(line2), "%s", v->installed_text);
         progress = 1;
         break;
     case UPD_FAILED:
         snprintf(line1, sizeof(line1), "The update couldn't be installed.");
-        snprintf(line2, sizeof(line2), "%s", update_error());
+        snprintf(line2, sizeof(line2), "%s", v->error);
         break;
     }
     float ts = w < 700 ? 13.0f : 14.0f, tw = hw - 28;
@@ -804,7 +804,7 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
         bx += bw + 10;
     }
     if (us == UPD_INSTALLED) {
-        if (flat_button("upd-restart", bx, by, row_h, "EXIT TO SWISS", false, input_ok, a3, &bw)) act = HOME_UPDATE_RESTART;
+        if (flat_button("upd-restart", bx, by, row_h, v->done_button, false, input_ok, a3, &bw)) act = HOME_UPDATE_RESTART;
         bx += bw + 10;
     }
     if (us == UPD_LATEST || us == UPD_CHECK_FAILED) {
@@ -818,7 +818,7 @@ HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok) {
     }
 
     /* release notes in the space between */
-    const char *notes = update_notes();
+    const char *notes = v->notes;
     if ((us == UPD_AVAILABLE || us == UPD_INSTALLING || us == UPD_INSTALLED || us == UPD_FAILED) && notes[0]) {
         float a2 = intro(2);
         caps(hx + 2, cy, 15, 1.0f, color_alpha(white, a2), color_alpha(rgba(20, 16, 50, 200), a2), "WHAT'S NEW");

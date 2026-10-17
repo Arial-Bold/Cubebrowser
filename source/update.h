@@ -39,6 +39,11 @@ void update_request_install(void);
 void update_poll(void);                    /* call every frame (UI thread): starts queued jobs, collects results */
 bool update_restart(char *err, size_t errlen);   /* starts the newly installed .dol */
 
+/* Helpers shared with the Swiss updater: "key": "value" in GitHub's JSON,
+ * and Markdown release notes tidied for plain display. */
+bool update_json_string(const char *json, const char *key, char *out, size_t cap, const char **after);
+void update_tidy_notes(char *s);
+
 /* Worker-thread side (called by fetch.c). */
 void update_worker_check(volatile int *cancel);
 void update_worker_install(volatile int *cancel);

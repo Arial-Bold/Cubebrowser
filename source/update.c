@@ -128,6 +128,12 @@ static void tidy_notes(char *s) {
     while (w > s && (w[-1] == '\n' || w[-1] == ' ')) *--w = 0;
 }
 
+/* Shared with the Swiss updater (swissupd.c). */
+bool update_json_string(const char *json, const char *key, char *out, size_t cap, const char **after) {
+    return json_find_string(json, key, out, cap, after);
+}
+void update_tidy_notes(char *s) { tidy_notes(s); }
+
 /* ------------------------------------------------------------ worker: check */
 
 void update_worker_check(volatile int *cancel) {

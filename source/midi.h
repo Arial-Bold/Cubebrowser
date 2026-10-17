@@ -12,6 +12,7 @@ typedef enum { MIDI_STOPPED, MIDI_LOADING, MIDI_PLAYING, MIDI_PAUSED } MidiState
 
 void midi_init(void);          /* after sound_init() */
 void midi_shutdown(void);      /* stops everything (before launching another program) */
+void midi_release_memory(void);   /* stops the music and frees its samples */
 
 /* the song list (the midi folder, sorted by name) */
 int  midi_scan(void);          /* re-reads the folder; returns how many songs */

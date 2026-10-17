@@ -33,6 +33,7 @@ void instruments_unload_sf2(void);
 bool instruments_have_sf2(void);
 const char *instruments_name(void);   /* SoundFont's name, or "Built-in" */
 size_t instruments_memory(void);      /* bytes of SoundFont samples loaded now */
+void instruments_free_samples(void);  /* gives their memory back (no voice may be playing) */
 
 /* Before a song: list every note it plays (begin, then need for each), then
  * load the samples those notes use from the SD card. Returns false (with a

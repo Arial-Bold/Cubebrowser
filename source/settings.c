@@ -12,7 +12,7 @@
 Settings g_set;
 
 const char *const category_names[CAT_COUNT] = {
-    "Network", "Controls", "Display", "Music", "Browsing", "Security", "Data"
+    "Network", "Controls", "Display", "Music", "Browsing", "Security", "Updates", "Data"
 };
 
 static const char *const video_mode_names[] = { "Auto", "480i", "480p", NULL };
@@ -21,6 +21,8 @@ static const char *const width_names[] = { "Standard (640)", "Full (704)", NULL 
 static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platinum", "Spice", NULL };
 static const char *const osk_layout_names[] = { "QWERTY", "ABC", NULL };
 static const char *const img_size_names[] = { "Small", "Medium", "Large", NULL };
+static const char *const swiss_name_names[] = { "Keep its name", "swiss_r + number", "swiss.dol", "boot.dol (card root)",
+                                                  "ipl.dol (card root)", NULL };
 static const char *const exit_names[] = { "Load Swiss .dol", "Restart console", NULL };
 const char *const search_engine_names[] = { "DuckDuckGo Lite", "FrogFind", "Wiby", "Custom", NULL };
 static const char *const search_engine_prefixes[] = {
@@ -36,11 +38,7 @@ const char *const user_agent_strings[] = {
 #define O(f) offsetof(Settings, f)
 
 const SetDef g_setdefs[] = {
-    /* Network: updates first, then the connection, then the clock */
-    { CAT_NETWORK, NULL, "Check for updates", ST_ACTION, 0, SA_CHECK_UPDATE, 0, 0, NULL, NULL,
-      "Looks for a newer CubeBrowser on GitHub and can install it for you." },
-    { CAT_NETWORK, "upd.auto", "Check for updates at start", ST_BOOL, O(update_auto), 0, 1, 1, NULL, NULL,
-      "A quick check when the network connects. The start page says when there's a new version." },
+    /* Network: the connection, then the clock */
     { CAT_NETWORK, "net.dhcp", "Automatic IP (DHCP)", ST_BOOL, O(dhcp), 0, 1, 1, NULL, NULL,
       "Get an address from your router. Changes apply next launch." },
     { CAT_NETWORK, "net.ip", "IP address", ST_STR, O(ip), OSK_TEXTMODE_IP, 16, 0, NULL, NULL,
@@ -144,6 +142,17 @@ const SetDef g_setdefs[] = {
       "Saves cookies to the SD card. Anyone with the card could use your logins." },
     { CAT_SECURITY, "sec.ca", "Certificate file", ST_STR, O(ca_path), OSK_TEXTMODE_URL, 128, 0, NULL, NULL,
       "Trusted root certificates (PEM). Applies next launch." },
+    /* Updates */
+    { CAT_UPDATES, NULL, "Check for CubeBrowser updates", ST_ACTION, 0, SA_CHECK_UPDATE, 0, 0, NULL, NULL,
+      "Looks for a newer CubeBrowser on GitHub and can install it for you." },
+    { CAT_UPDATES, "upd.auto", "Check for CubeBrowser updates at start", ST_BOOL, O(update_auto), 0, 1, 1, NULL, NULL,
+      "A quick check when the network connects. The start page says when there's a new version." },
+    { CAT_UPDATES, NULL, "Check for Swiss updates", ST_ACTION, 0, SA_CHECK_SWISS, 0, 0, NULL, NULL,
+      "Looks for a newer Swiss on GitHub and can replace the Swiss .dol the Exit button starts." },
+    { CAT_UPDATES, "swiss.name", "Save new Swiss as", ST_CHOICE, O(swiss_name), 0, 4, 1, swiss_name_names, NULL,
+      "Use boot.dol or ipl.dol if your console starts Swiss from that file. The file it replaces is kept as .old." },
+    { CAT_UPDATES, "swiss.rev", NULL, ST_INT, O(swiss_rev), 0, 999999, 1, NULL, NULL, NULL },
+    { CAT_UPDATES, "swiss.revpath", NULL, ST_STR, O(swiss_rev_path), OSK_TEXTMODE_URL, 256, 0, NULL, NULL, NULL },
     /* Data */
     { CAT_DATA, "exit.action", "Exit button", ST_CHOICE, O(exit_action), 0, 1, 1, exit_names, NULL,
       "Restart console suits setups where Swiss starts automatically at power-on." },

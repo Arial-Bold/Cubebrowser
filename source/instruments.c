@@ -80,6 +80,12 @@ const char *instruments_name(void) { return sf_loaded ? sf.name : "Built-in"; }
 
 size_t instruments_memory(void) { return sf_loaded ? sf.loaded_bytes : 0; }
 
+static void slot_free(SampleSlot *sl);
+void instruments_free_samples(void) {
+    if (!sf_loaded) return;
+    for (uint32_t i = 0; i < sf.nshdr; i++) slot_free(&sf.slots[i]);
+}
+
 static bool read_at(FILE *f, long off, void *buf, size_t n) {
     return fseek(f, off, SEEK_SET) == 0 && fread(buf, 1, n, f) == n;
 }

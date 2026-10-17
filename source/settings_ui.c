@@ -175,6 +175,10 @@ static void run_action(int idx) {
         browser_open_music();
         leave_now = true;
         break;
+    case SA_CHECK_SWISS:
+        browser_navigate("about:swiss");
+        leave_now = true;
+        break;
     case SA_CHECK_UPDATE:
         update_request_check(false);
         browser_navigate("about:update");
@@ -333,7 +337,7 @@ bool settings_ui_frame(bool interactive) {
     /* categories */
     float top = sy + hh + 16;
     float cat_w = gfx_width() < 700 ? 148 : 180;   /* narrower in 4:3 so option values fit */
-    float bh = 38, gap = 6;
+    float bh = CAT_COUNT > 7 ? 35 : 38, gap = CAT_COUNT > 7 ? 5 : 6;   /* room for every section */
     float list_h = sh - hh - 16 - 8;
     ui_panel(sx + 4, top, cat_w + 16, list_h, 18);
     for (int c = 0; c < CAT_COUNT; c++) {
@@ -357,7 +361,7 @@ bool settings_ui_frame(bool interactive) {
 
     int idxs[64], n = 0;
     for (int i = 0; i < g_setdef_count && n < 64; i++)
-        if (g_setdefs[i].cat == category) idxs[n++] = i;
+        if (g_setdefs[i].cat == category && g_setdefs[i].label) idxs[n++] = i;
     float content_h = n * row_h;
     if (input_ok) {
         scroll_target += input_scroll_delta() * 0.5f;

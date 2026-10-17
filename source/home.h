@@ -19,7 +19,20 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
 void home_help_reset(void);
 HomeAction home_help_draw(float x, float y, float w, float h, bool input_ok);
 
-/* Software Update (about:update): status, release notes and buttons.
- * Returns HOME_OPEN_URL for "Back to start page", or a HOME_UPDATE_* action. */
+/* An update page (about:update for CubeBrowser, about:swiss for Swiss):
+ * status, release notes and buttons. Returns HOME_OPEN_URL for "Back to
+ * start page", or a HOME_UPDATE_* action. */
+typedef struct {
+    const char *title;           /* "Software Update" */
+    const char *product;         /* "CubeBrowser" */
+    const char *have;            /* installed version, e.g. "v2.0" ("" if unknown) */
+    const char *repo;            /* GitHub owner/name */
+    const char *latest;          /* newest version */
+    const char *notes, *error;
+    const char *available_text;  /* under "Version x is available!" */
+    const char *installed_text;  /* under "Version x is installed." */
+    const char *done_button;     /* e.g. "EXIT TO SWISS" */
+    int state, step;             /* UpdateState, UpdateStep */
+} UpdView;
 void home_update_reset(void);
-HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok);
+HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok, const UpdView *v);
