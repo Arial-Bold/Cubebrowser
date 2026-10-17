@@ -134,6 +134,9 @@ CubeBrowser can play MIDI music in the background while you browse.
 - Put `.mid` files (also `.midi`, `.kar` and `.rmi`) in a folder called `midi`
   at the root of your SD card. The folder is created for you the first time
   you open the player.
+- MIDI files you download in the browser are saved straight to the `midi`
+  folder, and the "Download complete" screen has a **Play now** button.
+  Downloaded SoundFonts (`.sf2`) go there too.
 - Press the **note button** in the toolbar to open the player: play/pause,
   previous, next, stop, shuffle, repeat, volume and the list of songs. Close it
   and the music keeps playing; the note button pulses while it does.
