@@ -140,9 +140,11 @@ CubeBrowser can play MIDI music in the background while you browse.
 - The music is played the way GameCube games play theirs: each note is a
   recorded instrument sound on one of the console's hardware sound voices.
 - **Instruments:** for real instrument sounds, add a General MIDI SoundFont
-  (`.sf2`) to the `midi` folder. Small ones (up to about 24 MB; 2 to 8 MB is
-  ideal) work best, since the whole file is loaded into memory. Without one,
-  simple built-in instruments are used. Pick a SoundFont, or switch back to the
+  (`.sf2`) to the `midi` folder. Any size works, even 100 MB and more: like a
+  game loading a level's sounds, each song loads only the instrument samples
+  it uses (up to about 10 MB of them), so a song may take a few seconds to
+  start the first time. Without a SoundFont, simple built-in instruments are
+  used. Pick a SoundFont, or switch back to the
   built-in instruments, under Settings > Music > Instruments.
 
 ## How pages look
