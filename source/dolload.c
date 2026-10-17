@@ -141,6 +141,27 @@ int dol_find(const char *root, char (*out)[256], int max) {
 #include "midi.h"
 #include <fat.h>
 #include <ogc/irq.h>
+#include <ogc/exi.h>
+#include <unistd.h>
+
+/* Waits until no driver is in the middle of talking to a device on the
+ * expansion ports (the network adapter, SD adapters, memory cards) and then
+ * keeps every port locked, so the next program finds them idle. Without this,
+ * stopping while the network adapter is busy (e.g. just after a download) can
+ * leave a port half-way through a transfer, and the next program hangs on a
+ * black screen when it tries to use it. */
+static void quiesce_exi(void) {
+    for (int ch = 0; ch < EXI_CHANNEL_MAX; ch++) {
+        for (int t = 0; t < 500; t++) {          /* up to half a second per port */
+            if (EXI_Lock(ch, EXI_DEVICE_0, NULL)) break;
+            usleep(1000);
+        }
+    }
+    for (int ch = 0; ch < EXI_CHANNEL_MAX; ch++) {
+        EXI_RegisterEXICallback(ch, NULL);       /* no more device interrupts */
+        EXI_Deselect(ch);
+    }
+}
 
 /* The copier. It runs after everything else has stopped and while the memory
  * holding the browser's own code is being overwritten, so it must not call any
@@ -201,6 +222,7 @@ bool dol_launch(const char *path, char *err, size_t errlen) {
     sound_shutdown();
     GX_AbortFrame();
     fatUnmount("sd");
+    quiesce_exi();
     IRQ_Disable();   /* no more interrupts or thread switches from here on */
 
     /* move everything up (the file buffer may overlap the destination: memmove) */
