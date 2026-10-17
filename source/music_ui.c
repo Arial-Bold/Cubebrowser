@@ -70,7 +70,11 @@ bool music_ui_draw(bool interactive) {
     int n = gfx_text_fit(FONT_UI, 20, show, -1, bw - 28);
     gfx_text(FONT_UI, 20, bx + 14, by + 26, t->field_text, show, n);
     char info[160];
-    snprintf(info, sizeof(info), "Instruments: %s", midi_instruments());
+    if (st == MIDI_PLAYING)   /* notes playing and how busy the sound processor is */
+        snprintf(info, sizeof(info), "Instruments: %s  |  %d voices  |  DSP %d%%", midi_instruments(), midi_voices_in_use(),
+                 (int)(midi_dsp_load() + 0.5f));
+    else
+        snprintf(info, sizeof(info), "Instruments: %s", midi_instruments());
     n = gfx_text_fit(FONT_BODY, 14, info, -1, bw - 120);
     gfx_text(FONT_BODY, 14, bx + 14, by + 52, color_alpha(t->field_text, 0.65f), info, n);
     /* time and progress */

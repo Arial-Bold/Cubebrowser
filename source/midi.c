@@ -30,12 +30,13 @@
 #ifdef GEKKO
 #include <gccore.h>
 #include <aesndlib.h>
+#include <ogc/machine/processor.h>
 #include <ogc/lwp_watchdog.h>
 #else
 #include <time.h>
 #endif
 
-#define NVOICES 24          /* hardware voices used for music (the DSP has 32) */
+#define NVOICES 24          /* hardware voices for music (the DSP has 32; only playing notes use one) */
 #define MAX_SONGS 400
 #define NAME_LEN 128
 #define OUT_GAIN 0.9f       /* keeps many loud notes from clipping */
@@ -120,27 +121,42 @@ static int cmp_names(const void *a, const void *b) { return strcasecmp((const ch
 
 #define STAGE_SAMPLES 1152    /* one DSP stream block is 576 samples; the first fill takes two */
 
+/* A voice is only switched on while it plays a note, so the DSP mixes just
+ * the notes sounding now (mixing every voice all the time can take longer
+ * than the 2 ms the DSP has per block, which is heard as skips).
+ *
+ * Who may touch a voice: while it runs, AESND copies its settings out at the
+ * start of each 2 ms block and back at the end, so changes must be made in
+ * its callback. Once stopped, it's left alone, and after a few blocks the
+ * sequencer may start it again directly. */
+enum { HV_STOPPED, HV_RUNNING, HV_STOPPING };
+
 typedef struct {
     AESNDPB *pb;
-    /* written by the sequencer; a new note is published by bumping gen */
+    /* a new note for a running voice, published by bumping gen */
     const int16_t *data;
     uint32_t len, loop_start, loop_end;
     bool loop;
     volatile uint32_t gen;
     volatile uint32_t freq;
     volatile uint16_t vl, vr;
-    /* owned by the voice callback (runs in the audio interrupt) */
+    volatile bool want_stop;      /* the note ended: switch the voice off */
+    volatile int state;
+    volatile uint32_t stop_frame;
+    /* the note being played, owned by the callback while the voice runs */
     uint32_t applied;
     const int16_t *c_data;
     uint32_t c_len, c_ls, c_le, pos;
     bool c_loop, done;
-    volatile bool running;
     int16_t staging[STAGE_SAMPLES] __attribute__((aligned(32)));
 } HwVoice;
 
 static HwVoice hw[NVOICES] __attribute__((aligned(32)));
 static volatile bool hw_stop_req;
-static bool hw_on, hw_ok;
+static volatile uint32_t frame_no;   /* counts the 2 ms audio blocks */
+static bool hw_ok;
+
+static void audio_block(void *buf, u32 len) { (void)buf; (void)len; frame_no++; }
 
 /* Copies the next n samples of the note into dst, wrapping at the loop. */
 static void hw_fill(HwVoice *h, int16_t *dst, int n) {
@@ -161,28 +177,33 @@ static void hw_fill(HwVoice *h, int16_t *dst, int n) {
     }
 }
 
-/* Called by AESND for each voice every 2 ms (RUNNING) and whenever the
- * voice has used up its block of samples (STREAM). Integer work only. */
+static void hw_take_note(HwVoice *h) {
+    h->applied = h->gen;
+    h->c_data = h->data;
+    h->c_len = h->len;
+    h->c_ls = h->loop_start;
+    h->c_le = h->loop_end;
+    h->c_loop = h->loop;
+    h->pos = 0;
+    h->done = false;
+    hw_fill(h, h->staging, STAGE_SAMPLES);
+}
+
+/* Called by AESND (in the audio interrupt) at the start of each block for a
+ * running voice (RUNNING), and when it has used up its samples (STREAM).
+ * Integer work only. */
 static void hw_callback(AESNDPB *pb, u32 st) {
     HwVoice *h = AESND_GetVoiceUserData(pb);
     if (!h) return;
     if (st == VOICE_STATE_RUNNING) {
-        h->running = true;
-        if (hw_stop_req) {
+        if (hw_stop_req || h->want_stop) {
             AESND_SetVoiceStop(pb, true);
-            h->running = false;
+            h->state = HV_STOPPING;
+            h->stop_frame = frame_no;
             return;
         }
-        if (h->gen != h->applied) {   /* a new note on this voice */
-            h->applied = h->gen;
-            h->c_data = h->data;
-            h->c_len = h->len;
-            h->c_ls = h->loop_start;
-            h->c_le = h->loop_end;
-            h->c_loop = h->loop;
-            h->pos = 0;
-            h->done = false;
-            hw_fill(h, h->staging, STAGE_SAMPLES);
+        if (h->gen != h->applied) {   /* a new note on this running voice */
+            hw_take_note(h);
             AESND_PlayVoice(pb, VOICE_MONO16, h->staging, STAGE_SAMPLES * 2, h->freq, 0, true);
             AESND_SetVoiceStream(pb, true);
         }
@@ -194,6 +215,13 @@ static void hw_callback(AESNDPB *pb, u32 st) {
     }
 }
 
+/* A stopped voice is safe to start once AESND has finished with it. */
+static bool hw_settled(const HwVoice *h) {
+    return h->state == HV_STOPPED || (h->state == HV_STOPPING && frame_no - h->stop_frame >= 3);
+}
+
+static bool hw_ready(int i) { return hw_ok && hw_settled(&hw[i]); }
+
 static void hw_init(void) {
     for (int i = 0; i < NVOICES; i++) {
         memset(&hw[i], 0, sizeof(hw[i]));
@@ -201,46 +229,50 @@ static void hw_init(void) {
         if (!hw[i].pb) return;
         AESND_SetVoiceUserData(hw[i].pb, &hw[i]);
     }
+    AESND_RegisterAudioCallback(audio_block);
     hw_ok = true;
 }
 
-/* Starts all music voices, silent (only while music plays, to spare the DSP). */
-static void hw_begin(void) {
-    if (!hw_ok || hw_on) return;
-    hw_stop_req = false;
-    for (int i = 0; i < NVOICES; i++) {
-        HwVoice *h = &hw[i];
-        h->data = h->c_data = NULL;
-        h->vl = h->vr = 0;
-        h->freq = 8000;
-        h->applied = h->gen;
-        memset(h->staging, 0, sizeof(h->staging));
-        /* stopped voices aren't touched by the interrupt, so this is safe */
-        AESND_PlayVoice(h->pb, VOICE_MONO16, h->staging, STAGE_SAMPLES * 2, 8000, 0, true);
-        AESND_SetVoiceVolume(h->pb, 0, 0);
-        AESND_SetVoiceStream(h->pb, true);
-        h->running = true;
-        AESND_SetVoiceStop(h->pb, false);
-    }
-    hw_on = true;
-}
+static void hw_begin(void) { hw_stop_req = false; }
 
-/* Stops the voices from inside their own callback, then waits for it. */
+/* Switches every voice off (from inside their callbacks) and waits for it. */
 static void hw_end(void) {
-    if (!hw_on) return;
+    if (!hw_ok) return;
     hw_stop_req = true;
-    for (int k = 0; k < 40; k++) {
-        bool any = false;
-        for (int i = 0; i < NVOICES; i++) if (hw[i].running) any = true;
-        if (!any) break;
-        thr_sleep_ms(5);
+    for (int k = 0; k < 60; k++) {
+        bool busy = false;
+        for (int i = 0; i < NVOICES; i++) if (!hw_settled(&hw[i])) busy = true;
+        if (!busy) break;
+        thr_sleep_ms(2);
     }
-    thr_sleep_ms(10);
-    hw_on = false;
+    for (int i = 0; i < NVOICES; i++) hw[i].state = HV_STOPPED;
+    hw_stop_req = false;
 }
 
 static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t vr) {
+    if (!hw_ok) return;
     HwVoice *h = &hw[i];
+    u32 level;
+    _CPU_ISR_Disable(level);
+    if (h->state == HV_RUNNING) {
+        /* still running: hand the note to its callback */
+        h->data = z->data;
+        h->len = z->len;
+        h->loop_start = z->loop_start;
+        h->loop_end = z->loop_end;
+        h->loop = z->loop;
+        h->freq = freq;
+        h->vl = vl;
+        h->vr = vr;
+        h->want_stop = false;
+        h->gen++;
+        _CPU_ISR_Restore(level);
+        return;
+    }
+    _CPU_ISR_Restore(level);
+    /* switched off: wait until AESND is done with it (a few ms at most) */
+    for (int k = 0; k < 10 && !hw_settled(h); k++) thr_sleep_ms(1);
+    if (!hw_settled(h)) return;
     h->data = z->data;
     h->len = z->len;
     h->loop_start = z->loop_start;
@@ -249,8 +281,12 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
     h->freq = freq;
     h->vl = vl;
     h->vr = vr;
-    __asm__ volatile("sync" ::: "memory");
-    h->gen++;
+    h->want_stop = false;
+    hw_take_note(h);
+    h->state = HV_RUNNING;
+    AESND_SetVoiceVolume(h->pb, vl, vr);
+    AESND_PlayVoice(h->pb, VOICE_MONO16, h->staging, STAGE_SAMPLES * 2, freq, 0, true);
+    AESND_SetVoiceStream(h->pb, true);
 }
 
 static void hw_set(int i, uint32_t freq, uint16_t vl, uint16_t vr) {
@@ -260,13 +296,11 @@ static void hw_set(int i, uint32_t freq, uint16_t vl, uint16_t vr) {
 }
 
 static void hw_silence(int i) {
-    HwVoice *h = &hw[i];
-    h->vl = h->vr = 0;
-    h->data = NULL;
-    h->freq = 8000;
-    __asm__ volatile("sync" ::: "memory");
-    h->gen++;
+    hw[i].vl = hw[i].vr = 0;
+    hw[i].want_stop = true;
 }
+
+float midi_dsp_load(void) { return AESND_GetDSPProcessUsage(); }
 
 #else   /* ------------------------------------------- PC software mixer */
 
@@ -282,11 +316,13 @@ static SwVoice sw[NVOICES];
 static void hw_init(void) {}
 static void hw_begin(void) {}
 static void hw_end(void) { memset(sw, 0, sizeof(sw)); }
+static bool hw_ready(int i) { return !sw[i].on; }
 static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t vr) {
     sw[i] = (SwVoice){ z->data, z->len, z->loop_start, z->loop_end, z->loop, true, 0, freq, vl / 256.0f, vr / 256.0f };
 }
 static void hw_set(int i, uint32_t freq, uint16_t vl, uint16_t vr) { sw[i].freq = freq; sw[i].vl = vl / 256.0f; sw[i].vr = vr / 256.0f; }
 static void hw_silence(int i) { sw[i].on = false; }
+float midi_dsp_load(void) { return 0; }
 
 #endif
 
@@ -337,6 +373,9 @@ static void voice_volume(const Voice *v, bool paused, uint16_t *vl, uint16_t *vr
 
 static int voice_pick(void) {
     int best = -1;
+    /* a free voice the DSP has finished with, else any free voice */
+    for (int i = 0; i < NVOICES; i++)
+        if (!voices[i].active && hw_ready(i)) return i;
     for (int i = 0; i < NVOICES; i++)
         if (!voices[i].active) return i;
     /* all busy: take the quietest released note, else the oldest note */
@@ -358,8 +397,11 @@ static void note_on(int ch, int key, int vel) {
         /* exclusive class: e.g. a closed hi-hat cuts an open one */
         if (zs[k].exclusive)
             for (int i = 0; i < NVOICES; i++)
-                if (voices[i].active && voices[i].ch == ch && voices[i].z.exclusive == zs[k].exclusive && voices[i].started < song_pos)
-                    voice_free(i);
+                if (voices[i].active && voices[i].ch == ch && voices[i].z.exclusive == zs[k].exclusive && voices[i].started < song_pos) {
+                    voices[i].released = true;   /* a very quick fade rather than a click */
+                    voices[i].stage = ENV_RELEASE;
+                    voices[i].z.release = 0.03f;
+                }
         int i = voice_pick();
         if (i < 0) return;
         Voice *v = &voices[i];
