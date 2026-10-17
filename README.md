@@ -101,10 +101,11 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 
 - **Go anywhere:** press X, type an address like `text.npr.org`, or type any
   words to search. Addresses open securely (HTTPS) automatically.
-- **Toolbar:** Back, Forward, Reload (Stop while loading), Home, the address
-  bar, Exit (power), Bookmarks (star) and Settings (gear). A green lock means
-  the site's security certificate checked out.
-- **Exit to Swiss:** press the power button twice to leave the browser and
+- **Toolbar:** Back, Forward, Home, Exit (door), the address bar (with a stop
+  button inside it while a page loads), Music (note), Bookmarks (star) and
+  Settings (gear). A green lock means the site's security certificate checked
+  out.
+- **Exit to Swiss:** press the Exit button twice to leave the browser and
   start Swiss. Choose which `.dol` it starts under Settings > Data (**Find .dol
   files on SD card** lists them), or set the Exit button to **Restart console**
   if Swiss starts automatically when your GameCube powers on. If the chosen
@@ -125,6 +126,24 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
   the time.
 
 ---
+
+## Music player
+
+CubeBrowser can play MIDI music in the background while you browse.
+
+- Put `.mid` files (also `.midi`, `.kar` and `.rmi`) in a folder called `midi`
+  at the root of your SD card. The folder is created for you the first time
+  you open the player.
+- Press the **note button** in the toolbar to open the player: play/pause,
+  previous, next, stop, shuffle, repeat, volume and the list of songs. Close it
+  and the music keeps playing; the note button pulses while it does.
+- The music is played the way GameCube games play theirs: each note is a
+  recorded instrument sound on one of the console's hardware sound voices.
+- **Instruments:** for real instrument sounds, add a General MIDI SoundFont
+  (`.sf2`) to the `midi` folder. Small ones (up to about 24 MB; 2 to 8 MB is
+  ideal) work best, since the whole file is loaded into memory. Without one,
+  simple built-in instruments are used. Pick a SoundFont, or switch back to the
+  built-in instruments, under Settings > Music > Instruments.
 
 ## How pages look
 
@@ -194,6 +213,7 @@ defaults.
 | **Network** | Check for updates (now, and automatically at start), automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server, time zone and daylight saving. |
 | **Controls** | Stick dead zone, pointer speed and acceleration, scroll speed, pointer snapping, rumble, the button for each action, on-screen key layout (QWERTY or ABC) and key repeat speed. |
 | **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), picture width (Full 704 or Standard 640), screen margin, page text size, theme, animations, sound effects and volume. |
+| **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle and repeat. |
 | **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture labels, maximum page size. |
 | **Security** | Cookies on/off, keep logins after restart, certificate checking and the certificate file. |
 | **Data** | Exit button action and Swiss `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear history, delete bookmarks, reset all settings. |
@@ -276,7 +296,8 @@ If you report a problem, please include these files and the page address.
   shown as a single column.
 - **Logins that need JavaScript** (most big sites) don't work; classic login
   forms do.
-- **No video or audio.** Animated GIFs show their first frame.
+- **No video, and no sound on web pages.** Animated GIFs show their first frame.
+  (MIDI songs from your SD card play in the music player.)
 - **Unzipping** supports standard `.zip` files; 7z, RAR and RVZ aren't
   supported.
 - **Speed:** very heavy pages can take a few seconds to lay out, and each new

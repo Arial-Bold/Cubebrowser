@@ -39,7 +39,7 @@ CXXFLAGS	=	$(CFLAGS)
 LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
 # libfat and libbba (GameCube network stack) must come before libogc
-LIBS	:=	-lfat -lasnd -lbba -logc -lm
+LIBS	:=	-lfat -laesnd -lbba -logc -lm
 LIBDIRS	:=	$(PORTLIBS)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
