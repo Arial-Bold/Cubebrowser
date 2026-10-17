@@ -432,3 +432,13 @@ void ui_draw_toast(void) {
              toast_msg, tn);
     if (frame + 1 >= toast_until) toast_msg[0] = 0;
 }
+
+int ui_scroll_rows(float *acc, float step) {
+    float d = input_scroll_delta();
+    if (d == 0) { *acc = 0; return 0; }   /* stick released: no half-row left over */
+    if ((d > 0) != (*acc > 0)) *acc = 0;  /* changed direction */
+    *acc += d;
+    int rows = (int)(*acc / step);
+    *acc -= rows * step;
+    return rows;
+}

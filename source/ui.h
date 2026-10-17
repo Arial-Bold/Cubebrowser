@@ -21,6 +21,10 @@ void  ui_end_frame(void);
 void  ui_set_input(bool enabled);   /* disables hit testing for layers under a modal */
 bool  ui_input(void);
 int   ui_dpad_unhandled(void);      /* D-pad direction no widget could take, or DIR_NONE */
+/* For lists that move a row at a time: rows to move this frame from the
+ * C-Stick (and L/R), which give a few pixels per frame. acc keeps the
+ * leftover between frames; step is one row's height in pixels. */
+int   ui_scroll_rows(float *acc, float step);
 float ui_time(void);
 int   ui_frame(void);
 

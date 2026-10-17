@@ -1170,17 +1170,10 @@ void browser_frame(bool interactive) {
     float right = sx + sw - 30;
     if (ui_icon_button(ui_id("tb", 5), right, by, r, ICON_GEAR, true)) settings_request = true;
     if (ui_icon_button(ui_id("tb", 4), right - 44, by, r, ICON_STAR, true)) { bm_open = true; bm_scroll = 0; confirm_delete = -1; sound_play(SFX_OPEN); }
-    /* while music plays the note button glows, pulsing gently */
-    bool music_on = midi_state() == MIDI_PLAYING;
-    float pulse = music_on ? 0.5f + 0.5f * sinf(ui_time() * 4.0f) : 0;
-    if (music_on)   /* soft light spilling out behind the button */
-        for (int k = 3; k >= 1; k--)
-            gfx_circle(right - 88, by, r + 2 + k * 2.5f, color_alpha(t->accent, (0.14f + 0.12f * pulse) / k));
     if (ui_icon_button(ui_id("tb", 7), right - 88, by, r, ICON_MUSIC, true)) { music_open = true; music_ui_reset(); sound_play(SFX_OPEN); }
-    if (music_on) {   /* the button face itself lights up */
-        gfx_circle(right - 88, by, r - 1, color_alpha(t->accent, 0.65f + 0.3f * pulse));
-        gfx_circle(right - 88, by - r * 0.35f, r * 0.5f, rgba(255, 255, 255, (int)(40 + 30 * pulse)));
-        ui_draw_icon(ICON_MUSIC, right - 88, by, r * 1.1f, rgba(255, 255, 255, 255));
+    if (midi_state() == MIDI_PLAYING) {   /* a small pulse on the note while music plays */
+        float k = 0.5f + 0.5f * sinf(ui_time() * 6.0f);
+        gfx_ring(right - 88, by, r + 4 + k * 2, 2, 0, 2 * (float)M_PI, color_alpha(t->accent, 0.35f + 0.4f * k));
     }
 
     /* address field (with a stop button inside it while a page loads) */

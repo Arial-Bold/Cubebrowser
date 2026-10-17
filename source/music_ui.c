@@ -128,9 +128,10 @@ bool music_ui_draw(bool interactive) {
         gfx_text_centered(FONT_UI, 14, mid, ly + 62, t->text_dim, "A SoundFont (.sf2) there gives real instruments.");
     } else {
         int dir = ui_dpad_unhandled();
-        float sd = input_scroll_delta();
-        if ((dir == DIR_DOWN || sd > 20) && list_scroll + visible < count) list_scroll++;
-        if ((dir == DIR_UP || sd < -20) && list_scroll > 0) list_scroll--;
+        static float scroll_acc;
+        list_scroll += ui_scroll_rows(&scroll_acc, row_h + gap);
+        if (dir == DIR_DOWN) list_scroll++;
+        if (dir == DIR_UP) list_scroll--;
         if (list_scroll > count - visible) list_scroll = count - visible;
         if (list_scroll < 0) list_scroll = 0;
         for (int i = list_scroll; i < count && i < list_scroll + visible; i++) {

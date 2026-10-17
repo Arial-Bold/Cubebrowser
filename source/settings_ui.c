@@ -267,9 +267,12 @@ static void draw_picker(bool interactive) {
     const int visible = 6;
     float row_h = 40, ly = py + 56;
     int dir = ui_dpad_unhandled();
-    float sd = input_scroll_delta();
-    if ((dir == DIR_DOWN || sd > 20) && pick_scroll + visible < pick_count) pick_scroll++;
-    if ((dir == DIR_UP || sd < -20) && pick_scroll > 0) pick_scroll--;
+    static float scroll_acc;
+    pick_scroll += ui_scroll_rows(&scroll_acc, row_h + 6);
+    if (dir == DIR_DOWN) pick_scroll++;
+    if (dir == DIR_UP) pick_scroll--;
+    if (pick_scroll > pick_count - visible) pick_scroll = pick_count - visible;
+    if (pick_scroll < 0) pick_scroll = 0;
     for (int i = pick_scroll; i < pick_count && i < pick_scroll + visible; i++) {
         const char *shown = pick_sf2 ? sf2_label(pick_list[i]) : pick_list[i] + (strncmp(pick_list[i], "sd:", 3) ? 0 : 3);
         bool current = !strcmp(pick_list[i], pick_sf2 ? g_set.music_sf2 : g_set.swiss_dol);
