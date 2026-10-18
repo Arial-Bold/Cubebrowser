@@ -29,7 +29,7 @@
  * song while there's room. */
 
 #define SAMPLE_BUDGET (10u * 1024u * 1024u)   /* most memory for loaded samples */
-#define SAMPLE_RESERVE (5u * 1024u * 1024u)   /* ...but always leave this much for web pages */
+#define SAMPLE_RESERVE (8u * 1024u * 1024u)   /* ...but always leave this much for web pages (long ones like Wikipedia need it) */
 #define META_MAX (4u * 1024u * 1024u)
 
 typedef struct {
