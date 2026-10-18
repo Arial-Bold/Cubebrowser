@@ -1,6 +1,6 @@
-/* picache.h - keeps downloaded pictures on the SD card (the "webcache"
- * folder inside the gcbrowser data folder), so a page seen before shows its
- * pictures without downloading them again.
+/* picache.h - keeps downloaded pictures and style sheets on the SD card (the
+ * "webcache" folder inside the gcbrowser data folder), so a page seen before
+ * shows its pictures and styles without downloading them again.
  *
  * What's saved is the picture file exactly as it was downloaded (usually a
  * small JPEG or PNG from the image helper), filed under the address it was
@@ -13,7 +13,7 @@
 
 #define PICACHE_DIR "webcache"   /* inside the data folder */
 
-/* Worker thread. get: a malloc'd copy of the saved picture, or NULL. */
+/* Worker thread. get: a malloc'd, NUL-terminated copy of the saved file, or NULL. */
 void *picache_get(const char *url, size_t *len);
 void  picache_put(const char *url, const void *data, size_t len);
 

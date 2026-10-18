@@ -176,8 +176,8 @@ void *picache_get(const char *url, size_t *len) {
             if (start > 0 && end > start && end - start <= MAX_PICTURE) {
                 fseek(f, start, SEEK_SET);
                 size_t n = (size_t)(end - start);
-                out = malloc(n);
-                if (out && fread(out, 1, n, f) == n) *len = n;
+                out = malloc(n + 1);
+                if (out && fread(out, 1, n, f) == n) { ((char *)out)[n] = 0; *len = n; }
                 else { free(out); out = NULL; }
             }
         }

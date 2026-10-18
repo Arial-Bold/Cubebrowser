@@ -164,9 +164,25 @@ static void *worker_main(void *arg) {
                 task_ok = unzip_file(task_path, task_dest, &uz_progress, &cancel_flag, task_err, sizeof(task_err));
             } else if (kind == JOB_CSS) {
                 diag_note(DIAG_WORKER, "downloading stylesheet %.120s", job_url);
-                HttpHooks hooks = { &cancel_flag, &progress, no_stage };
                 HttpResult r;
-                if (http_fetch(job_url, NULL, "text/css,*/*;q=0.1", &r, &hooks) && r.status >= 400) http_result_free(&r);
+                size_t clen = 0;
+                char *cached = picache_get(job_url, &clen);
+                if (cached) {   /* saved on the SD card from an earlier visit */
+                    memset(&r, 0, sizeof(r));
+                    snprintf(r.url, sizeof(r.url), "%s", job_url);
+                    r.status = 200;
+                    snprintf(r.content_type, sizeof(r.content_type), "text/css");
+                    r.body = cached;
+                    r.body_len = clen;
+                    r.length = (long long)clen;
+                    http_log_note("css     | from SD card cache (%u KB) | %.70s", (unsigned)((clen + 1023) / 1024), job_url);
+                } else {
+                    HttpHooks hooks = { &cancel_flag, &progress, no_stage };
+                    bool ok = http_fetch(job_url, NULL, "text/css,*/*;q=0.1", &r, &hooks);
+                    if (ok && r.status >= 400) http_result_free(&r);
+                    else if (ok && r.status == 200 && r.body && !r.truncated && !cancel_flag)
+                        picache_put(job_url, r.body, r.body_len);
+                }
                 result = r;
             } else {
                 diag_note(DIAG_WORKER, "downloading page %.120s", job_url);

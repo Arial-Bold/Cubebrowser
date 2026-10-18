@@ -143,7 +143,7 @@ static void run_action(int idx) {
         if (!storage_ok()) { ui_toast("No SD card found"); break; }
         unsigned long long freed = picache_clear();
         char msg[96];
-        snprintf(msg, sizeof(msg), "Picture cache cleared (%.1f MB freed)", (double)freed / (1024.0 * 1024.0));
+        snprintf(msg, sizeof(msg), "Cache cleared (%.1f MB freed)", (double)freed / (1024.0 * 1024.0));
         ui_toast(msg);
         break;
     }
