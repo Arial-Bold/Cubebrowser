@@ -8,6 +8,10 @@ files straight to your SD card, and control everything with a GameCube
 controller. It runs as a `.dol` program launched from Swiss,
 with menus designed to feel like they belong on the console.
 
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/8effcf94-d77b-44d6-b720-f05436d28679" />
+
+
 ---
 
 ## What you need
@@ -99,6 +103,10 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 
 ## Browsing
 
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/a211904f-7e8e-4d70-84e2-d2c23e3bee9e" />
+
+
 - **Go anywhere:** press X, type an address like `text.npr.org`, or type any
   words to search. Addresses open securely (HTTPS) automatically.
 - **Toolbar:** Back, Forward, Home, Exit (door), the address bar (with a stop
@@ -145,6 +153,9 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 ## Music player
 
 CubeBrowser can play MIDI music in the background while you browse.
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/4b507b46-7a34-4c0c-90de-a70d859909a7" />
+
 
 - Put `.mid` files (also `.midi`, `.kar` and `.rmi`) in a folder called `midi`
   at the root of your SD card. The folder is created for you the first time
