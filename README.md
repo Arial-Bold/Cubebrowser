@@ -116,6 +116,15 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
   replaces the one the Exit button starts (the old one is kept as `.old`).
   If your console starts Swiss from `boot.dol` or `ipl.dol`, set **Save new
   Swiss as** to that name; those are saved at the root of the card.
+- **Loading screen:** while a page loads, an underwater scene fills the page
+  window, and the page appears all at once when its styles and the pictures
+  on the first screen are in (after 8 seconds at most). Turn it off in
+  Settings > Display > Loading screen to watch pages fill in instead.
+- **Search results** open the real page directly, skipping the search
+  engine's tracking redirect, and pages that forward you elsewhere are
+  followed automatically.
+- **Pages that need JavaScript** show a short note saying so, with a **Try
+  text mode** button that asks the site for a simpler version.
 - **Back and Forward** return instantly to your last few pages, scrolled to
   where you left them, and Back after a search takes you to your results.
 - **Bookmarks:** press Y, then **Bookmark this page**. Click a bookmark to open
@@ -151,10 +160,16 @@ CubeBrowser can play MIDI music in the background while you browse.
 - **Instruments:** for real instrument sounds, add a General MIDI SoundFont
   (`.sf2`) to the `midi` folder. Any size works, even 100 MB and more: like a
   game loading a level's sounds, each song loads only the instrument samples
-  it uses (up to about 10 MB of them), so a song may take a few seconds to
-  start the first time. Without a SoundFont, simple built-in instruments are
-  used. Pick a SoundFont, or switch back to the
-  built-in instruments, under Settings > Music > Instruments.
+  it uses, so a song may take a few seconds to start the first time. Without
+  a SoundFont, simple built-in instruments are used. Pick a SoundFont, or
+  switch back to the built-in instruments, under Settings > Music >
+  Instruments.
+- **Audio memory:** the instrument sounds are kept in the GameCube's 16 MB of
+  audio memory at full 16-bit quality, the way games keep theirs, so music
+  doesn't take memory away from web pages. Sounds stay loaded between songs,
+  so the next song often starts sooner. In the rare case a song needs more
+  than fits, the rest is kept in main memory at 8-bit, which sounds almost
+  the same.
 
 ## How pages look
 
@@ -168,10 +183,13 @@ rather than plain text:
   many sites send their simpler single-column versions, which suit a TV well.
 - **Tables** with real side-by-side columns, so classic table-based sites look
   the way they were built.
-- **Pictures** (JPEG, PNG, GIF, BMP), loaded after the text so pages appear
-  quickly. Text wraps around pictures placed to the side, and duplicate copies
+- **Pictures** (JPEG, PNG, GIF, BMP), loaded after the text and only near
+  where you're reading. Pictures far up or down the page are let go to save
+  memory and come back (from the SD card cache) as you scroll to them, so
+  even very long pages fit. Text wraps around pictures placed to the side, and duplicate copies
   of the same photo (which news sites often include for different screen
   sizes) are shown only once.
+- **Modern sizing:** `calc()`, `min()`, `max()` and `clamp()` in page styles.
 - **Fonts:** regular, bold, italic and monospace.
 - **Lists** with bullets, numbers and letters.
 - **Framed pages** (a 1990s technique) show a link to each part of the page.
@@ -223,12 +241,12 @@ defaults.
 |---|---|
 | **Network** | Automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server, time zone and daylight saving. |
 | **Controls** | Stick dead zone, pointer speed and acceleration, scroll speed, pointer snapping, rumble, the button for each action, on-screen key layout (QWERTY or ABC) and key repeat speed. |
-| **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), picture width (Full 704 or Standard 640), screen margin, page text size, theme, animations, sound effects and volume. |
-| **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle and repeat. |
-| **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture cache, picture labels, maximum page size. |
+| **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), picture width (Full 704 or Standard 640), screen margin, page text size, theme, animations, loading screen, sound effects and volume. |
+| **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle, repeat and the glowing note button. |
+| **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture & style cache, picture labels, maximum page size. |
 | **Security** | Cookies on/off, keep logins after restart, certificate checking and the certificate file. |
 | **Updates** | Check for CubeBrowser updates (now, and automatically at start), check for Swiss updates, and the name to save a new Swiss as (keep its name, numbered, swiss.dol, boot.dol or ipl.dol). |
-| **Data** | Exit button action and Swiss `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear picture cache, clear history, delete bookmarks, reset all settings. |
+| **Data** | Exit button action and Swiss `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear picture & style cache, clear history, delete bookmarks, reset all settings. |
 
 A few worth knowing about:
 
@@ -241,12 +259,13 @@ A few worth knowing about:
   images.weserv.nl service, which shrinks them for your screen and converts
   formats the GameCube can't read. It makes pictures much faster and work on
   more sites, but that service sees the addresses of pictures you view.
-- **Picture cache** (100 MB by default) keeps the pictures you've seen in a
+- **Picture & style cache** (100 MB by default) keeps the pictures and page
+  styles (style sheets) you've seen in a
   `webcache` folder inside the `gcbrowser` folder on the SD card, so going back to a page or
-  reloading it shows its pictures straight away instead of downloading them
+  reloading it shows its pictures and styles straight away instead of downloading them
   again. Pictures older than a week are downloaded fresh, and the oldest are
   removed when the folder reaches its size. Choose Off, 25, 50, 100 or 250 MB,
-  or empty it with Settings > Data > Clear picture cache. Deleting the `webcache`
+  or empty it with Settings > Data > Clear picture & style cache. Deleting the `webcache`
   folder on a PC is fine too. Moving the data folder empties it.
 - **Identify as: Lynx (text mode)** makes some sites send very simple pages
   that load faster.
@@ -277,7 +296,8 @@ Older and hobbyist sites from the 1990s and 2000s usually display very well.
 |---|---|
 | **"No network (error -1)"** | Check the Ethernet cable and that the adapter is seated firmly. If you use manual settings, check Settings > Network. Opening any page retries the connection. |
 | **"Certificate couldn't be verified"** | Usually the clock: make sure the time server in Settings > Network is reachable. If it persists, replace `gcbrowser/cacert.pem` with a fresh copy from `https://curl.se/ca/cacert.pem`. |
-| **A page is blank or nearly empty** | The site builds its content with JavaScript, which isn't supported. Try its mobile or "lite" version, or open it through FrogFind. |
+| **A page is blank or nearly empty** | The site builds its content with JavaScript, which isn't supported. Try the **Try text mode** button on the note that appears, the site's mobile or "lite" version, or open it through FrogFind. |
+| **"Low on memory: some pictures were skipped"** | A very long or picture-heavy page filled the memory. Scroll on and pictures far away are let go; stopping the music frees a little more. Skipped pictures load by themselves once there's room. |
 | **A page looks cluttered** | Turn off Settings > Browsing > Page styles. |
 | **Pictures don't appear** | Check Settings > Browsing > Load images, and leave Image helper on for best results. |
 | **A page is cut off at the end** | Raise Settings > Browsing > Max page size. |
