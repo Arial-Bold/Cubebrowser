@@ -22,7 +22,6 @@ typedef struct {
     /* Music */
     char music_sf2[256];   /* "" = first .sf2 in the midi folder, "builtin", or a file */
     int  music_volume, music_shuffle, music_repeat, music_glow;
-    int  music_mem;            /* how SoundFont samples are kept: 0 16-bit, 1 8-bit, 2 4-bit */
     /* Browsing */
     char home[256];
     int  search_engine;

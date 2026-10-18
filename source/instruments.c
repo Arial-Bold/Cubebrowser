@@ -41,13 +41,13 @@
 #define SAMPLE_SAFETY (1536u * 1024u)         /* ...as long as this much stays free */
 #define META_MAX (4u * 1024u * 1024u)
 
-/* How SoundFont samples are kept (Settings > Music > Instrument memory):
- * 16-bit, 8-bit with block scales (half), or 4-bit ADPCM (a quarter). Test
- * programs on a PC always keep 16-bit (their mixer reads samples directly). */
+/* Samples normally go to audio memory at full 16-bit quality (see the ARAM
+ * pass in instruments_need_load). Any that don't fit there are kept in main
+ * memory as 8-bit with block scales (half the size, almost the same sound).
+ * Test programs on a PC always keep 16-bit (their mixer reads samples directly). */
 static int wanted_fmt(void) {
 #if defined(GEKKO) || defined(SF2_PACK_TEST)
-    int m = g_set.music_mem;
-    return m == 0 ? SFMT_PCM16 : m == 2 ? SFMT_ADPCM : SFMT_BLOCK8;
+    return SFMT_BLOCK8;
 #else
     return SFMT_PCM16;
 #endif
@@ -691,7 +691,7 @@ bool instruments_need_load(char *msg, size_t msglen) {
     msg[0] = 0;
     if (!sf_loaded) return true;
     /* drop what the coming song doesn't use, and anything kept in another
-     * format than the Instrument memory setting now asks for */
+     * format than main memory uses now */
     int fmt = wanted_fmt();
     for (uint32_t i = 0; i < sf.nshdr; i++) {
         SampleSlot *sl = &sf.slots[i];

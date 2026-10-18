@@ -1,5 +1,5 @@
-/* packsamp.h - smaller ways to keep SoundFont samples in memory (Settings >
- * Music > Instrument memory), decoded as the music player streams each voice.
+/* packsamp.h - smaller ways to keep SoundFont samples in memory (used for
+ * sounds that don't fit in audio memory), decoded as the music player streams each voice.
  *
  * BLOCK8: 8 bits per sample, with one shared scale for each 16 samples
  *   (about half the memory of 16-bit; on real SoundFonts around 46 dB signal to
