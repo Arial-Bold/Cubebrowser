@@ -273,7 +273,7 @@ static void draw_picker(bool interactive) {
     float sx, sy, sw, sh;
     ui_safe_area(&sx, &sy, &sw, &sh);
     gfx_rect(0, 0, gfx_width(), 480, color_alpha(t->shadow, 0.6f));
-    float pw = fminf(600, sw - 20), ph = 380;
+    float pw = fminf(600, sw - 20), ph = fminf(404, sh - 8);
     float px = sx + (sw - pw) * 0.5f, py = sy + (sh - ph) * 0.5f;
     ui_set_input(interactive);
     ui_panel(px, py, pw, ph, 20);
@@ -314,12 +314,15 @@ static void draw_picker(bool interactive) {
             ui_toast(err);
         }
     }
-    if (pick_count > visible) {
-        char more[48];
-        snprintf(more, sizeof(more), "%d-%d of %d", pick_scroll + 1, pick_scroll + visible, pick_count);
-        gfx_text_centered(FONT_UI, 14, px + pw * 0.5f, py + ph - 76, t->text_dim, more);
+    if (pick_count > visible) {   /* a slim scroll bar beside the list */
+        float list_h = visible * (row_h + 6) - 6;
+        float bh = fmaxf(24, list_h * visible / pick_count);
+        float by = ly + (list_h - bh) * pick_scroll / (float)(pick_count - visible);
+        gfx_rrect(px + pw - 13, ly, 4, list_h, 2, color_alpha(t->text_dim, 0.25f));
+        gfx_rrect(px + pw - 13, by, 4, bh, 2, t->accent);
     }
-    if (ui_button(ui_id("pick-cancel", 0), px + pw * 0.3f, py + ph - 54, pw * 0.4f, 40, "Cancel", 17, UIB_NORMAL) ||
+    /* Cancel sits well clear of the last row */
+    if (ui_button(ui_id("pick-cancel", 0), px + pw * 0.3f, py + ph - 56, pw * 0.4f, 40, "Cancel", 17, UIB_NORMAL) ||
         (interactive && input_pressed(ACT_BACK))) {
         input_consume(ACT_BACK);
         pick_count = -1;

@@ -1865,18 +1865,11 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
         case BOX_FILL:
             if (b->bg.a) gfx_rect(bx, by, b->w, b->h, b->bg);
             break;
-        case BOX_TEXT: {
-            Color c = b->color;
+        case BOX_TEXT:   /* backgrounds now; the words themselves after everything else (below) */
             if (b->flags & BF_BG) gfx_rect(bx - 1, by, b->w + 2, b->h, b->bg);
-            if (b->link >= 0 && b->link == hover_link) {
+            if (b->link >= 0 && b->link == hover_link)
                 gfx_rrect(bx - 3, by - 1, b->w + 6, b->h + 2, 5, color_alpha(t->accent, 0.3f));
-                c = t->page_link_hover;
-            }
-            gfx_text((FontId)b->font, b->size, bx, by, c, p->arena + b->text, b->len);
-            if (b->flags & BF_UNDERLINE) gfx_rect(bx, by + b->h - 3, b->w, b->link == hover_link ? 2 : 1, color_alpha(c, 0.8f));
-            if (b->flags & BF_STRIKE) gfx_rect(bx, by + b->h * 0.55f, b->w, 1.5f, c);
             break;
-        }
         case BOX_BULLET:
             if (b->flags & BF_SQUARE) gfx_rect(bx, by + b->h * 0.2f, b->w, b->w, b->color);
             else if (b->flags & BF_CIRCLE) gfx_ring(bx + b->w * 0.5f, by + b->h * 0.5f, b->w * 0.5f, 1.2f, 0, 6.2832f, b->color);
@@ -1980,6 +1973,31 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
             }
             break;
         }
+        }
+    }
+    /* The words go last, in batches: first every underline and strike-out
+     * line (plain colour), then the text grouped by font. Drawing word, line,
+     * word, line... switched the graphics chip between its colour and text
+     * modes for every link, which made scrolling through link-heavy text
+     * (like Wikipedia) slow. */
+    for (int pass = -1; pass < FONT_COUNT; pass++) {
+        for (int i = 0; i < p->nboxes; i++) {
+            Box *b = &p->boxes[i];
+            if (b->type != BOX_TEXT || b->y + b->h < top || b->y > top + h) continue;
+            if (!isfinite(b->x) || !isfinite(b->y) || !isfinite(b->w) || !isfinite(b->h) || b->w > 8192 ||
+                b->h > 8192 || b->w < 0 || b->h < 0 || b->x < -8192 || b->x > 8192)
+                continue;
+            if (pass >= 0 && b->font != pass) continue;
+            if (pass < 0 && !(b->flags & (BF_UNDERLINE | BF_STRIKE))) continue;
+            float bx = x + b->x, by = y + b->y - top;
+            bool hov = b->link >= 0 && b->link == hover_link;
+            Color c = hov ? t->page_link_hover : b->color;
+            if (pass >= 0) {
+                gfx_text((FontId)b->font, b->size, bx, by, c, p->arena + b->text, b->len);
+            } else {
+                if (b->flags & BF_UNDERLINE) gfx_rect(bx, by + b->h - 3, b->w, hov ? 2 : 1, color_alpha(c, 0.8f));
+                if (b->flags & BF_STRIKE) gfx_rect(bx, by + b->h * 0.55f, b->w, 1.5f, c);
+            }
         }
     }
     gfx_clear_clip();
