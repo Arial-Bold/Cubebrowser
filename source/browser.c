@@ -832,6 +832,8 @@ static void stop_pictures_low_memory(void) {
     if (changed) page.relayout = true;
     if (low_memory_gen != page_gen) {
         low_memory_gen = page_gen;
+        http_log_note("pic     | low memory: %u KB free, %u KB of pictures loaded, music %s", (unsigned)(cb_mem_free() / 1024),
+                      (unsigned)(page.image_bytes / 1024), midi_state() == MIDI_STOPPED ? "off" : "on");
         ui_toast(midi_state() == MIDI_PLAYING || midi_state() == MIDI_PAUSED
                      ? "Low on memory: some pictures were skipped (stopping the music frees some)"
                      : "Low on memory: some pictures were skipped");
@@ -1586,7 +1588,9 @@ void browser_frame(bool interactive) {
         u64 t0 = gettime();
         page_layout(&page, cw, scale);
         unsigned ms = (unsigned)ticks_to_millisecs(gettime() - t0);
-        if (ms > 100) http_log_note("layout  | %u ms for %d boxes | %.70s", ms, page.nboxes, page.url);
+        if (ms > 100 || last_layout_w != cw)   /* also once per page: its size and the memory left */
+            http_log_note("layout  | %u ms, %d boxes, page %u KB, %u KB free | %.70s", ms, page.nboxes,
+                          (unsigned)(page.src_len / 1024), (unsigned)(cb_mem_free() / 1024), page.url);
         last_layout_w = cw;
         last_layout_scale = scale;
         if (restore_scroll >= 0) { page.scroll = page.scroll_target = restore_scroll; restore_scroll = -1; }

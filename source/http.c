@@ -2,6 +2,10 @@
  * and keep-alive: the last connection stays open so the next request to the
  * same site (e.g. a run of images) skips the slow TLS handshake. */
 #include "http.h"
+#ifdef GEKKO
+#include <gccore.h>
+#include <ogc/machine/processor.h>
+#endif
 #include "conn.h"
 #include "netio.h"
 #include "settings.h"
@@ -176,11 +180,19 @@ static double ms_clock(void) {
 #endif
 }
 
+/* Lines come from several threads (pages, pictures, music): one at a time. */
 static void plog_add(const char *line) {
+#ifdef GEKKO
+    u32 level;
+    _CPU_ISR_Disable(level);
+#endif
     snprintf(plog[plog_next], sizeof(plog[0]), "%s", line);
     plog_next = (plog_next + 1) % PLOG_LINES;
     if (plog_count < PLOG_LINES) plog_count++;
     plog_dirty = true;
+#ifdef GEKKO
+    _CPU_ISR_Restore(level);
+#endif
 }
 
 void http_log_note(const char *fmt, ...) {

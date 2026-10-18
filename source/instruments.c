@@ -4,6 +4,7 @@
  * the volume envelope. Modulators, filters and LFOs are not used. */
 #include "instruments.h"
 #include "memstat.h"
+#include "http.h"
 #include "settings.h"
 #include <math.h>
 #include <stdio.h>
@@ -585,15 +586,24 @@ bool instruments_need_load(char *msg, size_t msglen) {
     if (budget > SAMPLE_BUDGET) budget = SAMPLE_BUDGET;
     FILE *f = fopen(sf.path, "rb");
     if (!f) { snprintf(msg, msglen, "Couldn't open the SoundFont"); return false; }
-    int skipped = 0;
+    int skipped = 0, over_budget = 0, failed = 0;
+    size_t needed = 0;
+    for (uint32_t i = 0; i < sf.nshdr; i++)
+        if (sf.slots[i].needed) needed += fmt_bytes(fmt, sf.slots[i].need_end / sample_div((int)i));
     /* in file order, so the card reads mostly forwards */
     for (uint32_t i = 0; i < sf.nshdr; i++) {
         SampleSlot *sl = &sf.slots[i];
         if (!sl->needed || (slot_loaded(sl) && sl->raw_end >= sl->need_end)) continue;
         size_t bytes = fmt_bytes(fmt, sl->need_end / sample_div((int)i));
-        if (sf.loaded_bytes - sl->bytes + bytes > budget || !load_slot(f, (int)i, sl->need_end)) skipped++;
+        if (sf.loaded_bytes - sl->bytes + bytes > budget) { skipped++; over_budget++; }
+        else if (!load_slot(f, (int)i, sl->need_end)) { skipped++; failed++; }
     }
     fclose(f);
+    /* page.log: what the music got, so memory problems can be told apart */
+    static const char *const fmt_names[] = { "16-bit", "8-bit", "4-bit" };
+    http_log_note("music   | %s: needs %u KB, has %u KB, limit %u KB, %u KB free | %d skipped (%d over limit, %d no memory)",
+                  fmt_names[fmt], (unsigned)(needed / 1024), (unsigned)(sf.loaded_bytes / 1024), (unsigned)(budget / 1024),
+                  (unsigned)(free_now / 1024), skipped, over_budget, failed);
     if (skipped)
         snprintf(msg, msglen, "Low memory: %d sounds use built-in instruments", skipped);
     return skipped == 0;
