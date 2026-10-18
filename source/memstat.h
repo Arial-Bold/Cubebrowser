@@ -6,4 +6,4 @@
 /* Bytes malloc can still hand out: free space inside the heap plus the part
  * of main memory the heap hasn't grown into yet. (Not all of it in one
  * piece, so leave a margin.) */
-size_t mem_free(void);
+size_t cb_mem_free(void);

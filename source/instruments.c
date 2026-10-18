@@ -505,7 +505,7 @@ bool instruments_need_load(char *msg, size_t msglen) {
     /* web pages need memory too: never leave less than SAMPLE_RESERVE free */
     for (uint32_t i = 0; i < sf.nshdr; i++)
         if (!sf.slots[i].needed) slot_free(&sf.slots[i]);
-    size_t free_now = mem_free();
+    size_t free_now = cb_mem_free();
     size_t budget = sf.loaded_bytes + (free_now > SAMPLE_RESERVE ? free_now - SAMPLE_RESERVE : 0);
     if (budget > SAMPLE_BUDGET) budget = SAMPLE_BUDGET;
     (void)want;

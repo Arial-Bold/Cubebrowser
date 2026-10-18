@@ -870,7 +870,7 @@ static void schedule_images(float view_top, float view_h, float max_w) {
         if (sheets_pending()) return;
     }
     if (!g_set.load_images) return;
-    if (mem_free() < 2u * 1024u * 1024u) { stop_pictures_low_memory(); return; }
+    if (cb_mem_free() < 2u * 1024u * 1024u) { stop_pictures_low_memory(); return; }
     if (page.image_bytes >= IMAGE_BUDGET) {
         bool changed = false;
         for (int i = 0; i < page.nimages; i++)

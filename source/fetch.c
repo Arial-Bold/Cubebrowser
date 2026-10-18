@@ -120,13 +120,13 @@ static void run_image_job(void) {
         snprintf(ir.error, sizeof(ir.error), "not enough memory");
         ir.low_memory = true;
         http_log_note("pic     | not enough memory for this picture (free %u KB) | %.70s",
-                      (unsigned)(mem_free() / 1024), job_url);
+                      (unsigned)(cb_mem_free() / 1024), job_url);
     } else if (!cancel_flag) {
         diag_note(DIAG_WORKER, "decoding picture (%u bytes)", (unsigned)r.body_len);
         ir.ok = image_decode((const unsigned char *)r.body, r.body_len, job_max_w, job_max_h, MAX_SRC_PIXELS,
                              &ir.img, ir.error, sizeof(ir.error));
         if (ir.ok && r.status == 200 && !r.truncated && !cancel_flag) picache_put(job_url, r.body, r.body_len);
-        if (!ir.ok && mem_free() < 2u * 1024u * 1024u) ir.low_memory = true;
+        if (!ir.ok && cb_mem_free() < 2u * 1024u * 1024u) ir.low_memory = true;
         if (!ir.ok) http_log_note("pic     | couldn't show: %.60s (%s, %u bytes) | %.70s", ir.error, r.content_type,
                                   (unsigned)r.body_len, job_url);
     }
