@@ -905,10 +905,29 @@ static void schedule_images(float view_top, float view_h, float max_w) {
     else if (!req[0]) { im->state = IMG_SKIPPED; page.relayout = true; }
 }
 
+/* Pictures still to come: ones downloading, and ones waiting that are
+ * actually on the page. Pictures inside hidden parts (closed menus and the
+ * like) have no place on screen, are never loaded, and don't count. */
 static int images_pending(void) {
     int n = 0;
     for (int i = 0; i < page.nimages; i++)
-        if (page.images[i].state == IMG_NONE || page.images[i].state == IMG_LOADING) n++;
+        if (page.images[i].state == IMG_LOADING) n++;
+    static unsigned char *seen;
+    static int seen_cap;
+    if (page.nimages > seen_cap) {
+        unsigned char *ns = realloc(seen, (size_t)page.nimages);
+        if (!ns) return n;
+        seen = ns;
+        seen_cap = page.nimages;
+    }
+    if (page.nimages > 0) memset(seen, 0, (size_t)page.nimages);
+    for (int i = 0; i < page.nboxes; i++) {
+        const Box *b = &page.boxes[i];
+        if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages) continue;
+        if (page.images[b->text].state != IMG_NONE || seen[b->text]) continue;
+        seen[b->text] = 1;   /* once, even if it has several boxes */
+        n++;
+    }
     return n;
 }
 
@@ -1579,6 +1598,7 @@ void browser_frame(bool interactive) {
     /* ---- status bar */
     float sbx = sx + 14, sby = sy + sh - 28;
     char status[300];
+    int pics_left = 0;
     if (loading) {
         int kb = fetch_progress() / 1024;
         if (kb > 0) snprintf(status, sizeof(status), "%s %d KB", fetch_stage(), kb);
@@ -1593,8 +1613,8 @@ void browser_frame(bool interactive) {
         snprintf(status, sizeof(status), "Loading page styles...");
         ui_spinner(sbx + 8, sby + 10, 14);
         sbx += 24;
-    } else if (has_page && g_set.load_images && images_pending() > 0 && netio_state() == NET_UP) {
-        snprintf(status, sizeof(status), "Loading pictures (%d left)", images_pending());
+    } else if (has_page && g_set.load_images && (pics_left = images_pending()) > 0 && netio_state() == NET_UP) {
+        snprintf(status, sizeof(status), "Loading pictures (%d left)", pics_left);
         ui_spinner(sbx + 8, sby + 10, 14);
         sbx += 24;
     } else if (netio_state() != NET_UP) {

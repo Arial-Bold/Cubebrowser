@@ -9,8 +9,9 @@
 #define CSS_VIEWPORT_W 480.0f   /* pretend phone-sized screen so sites use mobile layouts */
 #define CSS_VIEWPORT_H 640.0f
 
-enum { U_UNSET, U_AUTO, U_PX, U_EM, U_REM, U_PCT, U_VW, U_VH };
-typedef struct { float v; unsigned char u; } Len;
+enum { U_UNSET, U_AUTO, U_PX, U_EM, U_REM, U_PCT, U_VW, U_VH, U_CALC };
+/* U_CALC (from calc()): v pixels plus pct/100 percent of the containing size */
+typedef struct { float v; unsigned char u; short pct; } Len;
 
 enum { D_NONE, D_INLINE, D_BLOCK, D_LIST_ITEM, D_TABLE, D_ROW, D_CELL, D_ROWGROUP, D_CAPTION };
 enum { TA_LEFT, TA_CENTER, TA_RIGHT };

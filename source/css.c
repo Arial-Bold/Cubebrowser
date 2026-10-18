@@ -239,16 +239,140 @@ static int parse_color(const char *s, Color *out) {
 
 /* --------------------------------------------------------------- lengths */
 
+/* ---- calc(), min(), max(), clamp()
+ * A value is kept as pixels + a percentage of the containing size (em and rem
+ * count as 16px, vw/vh use the pretend screen), which covers the usual
+ * "calc(100% - 20px)" and "calc(50% - 50vw)" patterns. */
+typedef struct { float px, pct; bool num; bool ok; } CVal;
+
+static CVal c_expr(const char **p);
+
+static void c_ws(const char **p) { while (isspace((unsigned char)**p)) (*p)++; }
+
+static CVal c_bad(void) { CVal v = { 0, 0, false, false }; return v; }
+
+/* compares two values as they'd come out for a typical box */
+static float c_guess(CVal v) { return v.px + v.pct * 6.0f; }
+
+static CVal c_func_args(const char **p, int kind) {   /* kind: 0 min, 1 max, 2 clamp */
+    CVal a[3];
+    int n = 0;
+    for (;;) {
+        CVal v = c_expr(p);
+        if (!v.ok) return c_bad();
+        if (n < 3) a[n++] = v;
+        c_ws(p);
+        if (**p == ',') { (*p)++; continue; }
+        if (**p == ')') { (*p)++; break; }
+        return c_bad();
+    }
+    if (kind == 2) {
+        if (n != 3) return c_bad();
+        CVal r = a[1];
+        if (c_guess(r) < c_guess(a[0])) r = a[0];
+        if (c_guess(r) > c_guess(a[2])) r = a[2];
+        return r;
+    }
+    CVal r = a[0];
+    for (int i = 1; i < n; i++)
+        if (kind == 0 ? c_guess(a[i]) < c_guess(r) : c_guess(a[i]) > c_guess(r)) r = a[i];
+    return r;
+}
+
+static CVal c_factor(const char **p) {
+    c_ws(p);
+    const char *s = *p;
+    if (*s == '-' && !isdigit((unsigned char)s[1]) && s[1] != '.') {
+        (*p)++;
+        CVal v = c_factor(p);
+        v.px = -v.px; v.pct = -v.pct;
+        return v;
+    }
+    if (*s == '+') { (*p)++; return c_factor(p); }
+    if (*s == '(') {
+        (*p)++;
+        CVal v = c_expr(p);
+        c_ws(p);
+        if (**p != ')') return c_bad();
+        (*p)++;
+        return v;
+    }
+    if (!strncasecmp(s, "calc(", 5)) { *p = s + 4; return c_factor(p); }
+    if (!strncasecmp(s, "min(", 4)) { *p = s + 4; return c_func_args(p, 0); }
+    if (!strncasecmp(s, "max(", 4)) { *p = s + 4; return c_func_args(p, 1); }
+    if (!strncasecmp(s, "clamp(", 6)) { *p = s + 6; return c_func_args(p, 2); }
+    char *end;
+    float v = strtof(s, &end);
+    if (end == s || !isfinite(v)) return c_bad();
+    char unit[8];
+    int n = 0;
+    while ((isalpha((unsigned char)*end) || *end == '%') && n < 7) unit[n++] = (char)tolower((unsigned char)*end++);
+    unit[n] = 0;
+    *p = end;
+    CVal r = { 0, 0, false, true };
+    if (!n) { r.px = v; r.num = true; }
+    else if (!strcmp(unit, "%")) r.pct = v;
+    else if (!strcmp(unit, "px")) r.px = v;
+    else if (!strcmp(unit, "em") || !strcmp(unit, "rem")) r.px = v * 16.0f;
+    else if (!strcmp(unit, "vw") || !strcmp(unit, "vmin")) r.px = v * CSS_VIEWPORT_W / 100.0f;
+    else if (!strcmp(unit, "vh") || !strcmp(unit, "vmax")) r.px = v * CSS_VIEWPORT_H / 100.0f;
+    else if (!strcmp(unit, "pt")) r.px = v * 4.0f / 3.0f;
+    else if (!strcmp(unit, "ch") || !strcmp(unit, "ex")) r.px = v * 8.0f;
+    else return c_bad();
+    return r;
+}
+
+static CVal c_term(const char **p) {
+    CVal a = c_factor(p);
+    for (;;) {
+        if (!a.ok) return a;
+        c_ws(p);
+        char op = **p;
+        if (op != '*' && op != '/') return a;
+        (*p)++;
+        CVal b = c_factor(p);
+        if (!b.ok) return c_bad();
+        if (op == '*') {
+            if (b.num) { a.px *= b.px; a.pct *= b.px; }
+            else if (a.num) { b.px *= a.px; b.pct *= a.px; a = b; }
+            else return c_bad();
+        } else {
+            if (!b.num || b.px == 0) return c_bad();
+            a.px /= b.px; a.pct /= b.px;
+        }
+    }
+}
+
+static CVal c_expr(const char **p) {
+    CVal a = c_term(p);
+    for (;;) {
+        if (!a.ok) return a;
+        c_ws(p);
+        char op = **p;
+        if (op != '+' && op != '-') return a;
+        (*p)++;
+        CVal b = c_term(p);
+        if (!b.ok) return c_bad();
+        float k = op == '+' ? 1.0f : -1.0f;
+        a.px += k * b.px;
+        a.pct += k * b.pct;
+        a.num = a.num && b.num;
+    }
+}
+
 static bool parse_len(const char *s, Len *out) {
     while (isspace((unsigned char)*s)) s++;
     if (!strncasecmp(s, "auto", 4)) { out->u = U_AUTO; out->v = 0; return true; }
     if (!strncasecmp(s, "calc(", 5) || !strncasecmp(s, "min(", 4) || !strncasecmp(s, "max(", 4) ||
         !strncasecmp(s, "clamp(", 6)) {
-        /* take the first plain length inside as an approximation */
-        const char *p = strchr(s, '(') + 1;
-        while (*p && !(isdigit((unsigned char)*p) || *p == '.' || *p == '-')) p++;
-        if (!*p) return false;
-        return parse_len(p, out);
+        const char *p = s;
+        CVal v = c_factor(&p);
+        if (!v.ok || !isfinite(v.px) || !isfinite(v.pct) || fabsf(v.px) > 1e6f || fabsf(v.pct) > 300.0f) return false;
+        out->pct = 0;
+        if (v.pct == 0) { out->u = U_PX; out->v = v.px; }
+        else if (v.px == 0) { out->u = U_PCT; out->v = v.pct; }
+        else { out->u = U_CALC; out->v = v.px; out->pct = (short)lrintf(v.pct * 100.0f); }
+        return true;
     }
     char *end;
     float v = strtof(s, &end);
@@ -258,6 +382,7 @@ static bool parse_len(const char *s, Len *out) {
     while ((isalpha((unsigned char)*end) || *end == '%') && n < 7) unit[n++] = (char)tolower((unsigned char)*end++);
     unit[n] = 0;
     out->v = v;
+    out->pct = 0;
     if (!n || !strcmp(unit, "px")) out->u = U_PX;
     else if (!strcmp(unit, "em")) out->u = U_EM;
     else if (!strcmp(unit, "rem")) out->u = U_REM;
@@ -283,6 +408,7 @@ float css_len(Len l, float pct_base, float fsize, float auto_val) {
     case U_PCT: return l.v * pct_base / 100.0f;
     case U_VW: return l.v * CSS_VIEWPORT_W / 100.0f;
     case U_VH: return l.v * CSS_VIEWPORT_H / 100.0f;
+    case U_CALC: return l.v + (float)l.pct / 100.0f * pct_base / 100.0f;
     default: return auto_val;
     }
 }

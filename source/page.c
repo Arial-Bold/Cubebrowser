@@ -1401,6 +1401,14 @@ static void layout_block(L *c, Flow *pf, Node *n, const Style *s) {
         if (auto_l && auto_r) ml += (cw - ml - mr - bw) * 0.5f;
         else if (auto_l) ml = cw - mr - bw;
     }
+    /* nothing can be scrolled to left of the page: a negative margin that
+     * would push a block past its edge (full-width tricks, grid gutters whose
+     * matching padding we didn't get) is cut back at the edge instead */
+    if (!c->measure && pf->left + ml < 0) {
+        float over = -(pf->left + ml);
+        ml += over;
+        if (bw - over > extra + 8) bw -= over;
+    }
     if (c->measure && has_w) {
         float line = (pf->left - c->origin) + ml + bw + mr;
         if (line > c->max_line) c->max_line = line;
