@@ -9,13 +9,14 @@
 #include <stdint.h>
 #include "packsamp.h"
 
-enum { SFMT_PCM16, SFMT_BLOCK8, SFMT_ADPCM };
+enum { SFMT_PCM16, SFMT_BLOCK8, SFMT_ADPCM, SFMT_ARAM };   /* SFMT_ARAM: 16-bit, kept in audio memory */
 
 typedef struct {
     const int16_t *data;      /* 16-bit samples in the console's byte order (SFMT_PCM16) */
     uint8_t fmt;              /* or packed smaller (packsamp.h): */
     const void *packed;       /*   BLOCK8: int8 samples; ADPCM: 4-bit codes */
     const void *aux;          /*   BLOCK8: scales; ADPCM: checkpoints */
+    uint32_t aram;            /*   SFMT_ARAM: the sample's address in audio memory */
     uint32_t first;           /*   where in them this zone's sample 0 is */
     uint32_t len;             /* playable length in samples */
     uint32_t loop_start, loop_end;
@@ -39,7 +40,8 @@ void instruments_builtin_init(void);
 void instruments_unload_sf2(void);
 bool instruments_have_sf2(void);
 const char *instruments_name(void);   /* SoundFont's name, or "Built-in" */
-size_t instruments_memory(void);      /* bytes of SoundFont samples loaded now */
+size_t instruments_memory(void);      /* bytes of SoundFont samples loaded now (main memory) */
+size_t instruments_aram(void);        /* ...and in the audio memory (ARAM) */
 void instruments_free_samples(void);  /* gives their memory back (no voice may be playing) */
 
 /* Before a song: list every note it plays (begin, then need for each), then

@@ -113,7 +113,7 @@ const SetDef g_setdefs[] = {
     { CAT_MUSIC, "music.repeat", "Repeat", ST_BOOL, O(music_repeat), 0, 1, 1, NULL, NULL,
       "Starts the list again after the last song." },
     { CAT_MUSIC, "music.mem", "Instrument memory", ST_CHOICE, O(music_mem), 0, 2, 1, music_mem_names, NULL,
-      "How SoundFont sounds are kept. 8-bit fits twice as many and sounds almost the same; 4-bit fits four times as many with a little hiss." },
+      "Sounds go in the audio memory at full quality; this is only for any that don't fit there. 8-bit: twice as many, almost the same. 4-bit: four times, a little hiss." },
     { CAT_MUSIC, "music.glow", "Glowing note button", ST_BOOL, O(music_glow), 0, 1, 1, NULL, NULL,
       "The toolbar's note button lights up and pulses while music plays." },
     /* Browsing */

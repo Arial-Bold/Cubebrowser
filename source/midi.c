@@ -139,6 +139,7 @@ static void slow_work(bool on) {
 #ifdef GEKKO
 
 #define STAGE_SAMPLES 1152    /* one DSP stream block is 576 samples; the first fill takes two */
+#define LOOP_CACHE 2048       /* loops up to this long are copied from audio memory once per note */
 
 /* A voice is only switched on while it plays a note, so the DSP mixes just
  * the notes sounding now (mixing every voice all the time can take longer
@@ -154,8 +155,9 @@ typedef struct {
     AESNDPB *pb;
     /* a new note for a running voice, published by bumping gen */
     const int16_t *data;
-    uint8_t fmt;                   /* or packed (packsamp.h): */
+    uint8_t fmt;                   /* or packed (packsamp.h), or in audio memory: */
     const void *packed, *aux;
+    uint32_t aram;
     uint32_t first;
     uint32_t len, loop_start, loop_end;
     bool loop;
@@ -170,11 +172,15 @@ typedef struct {
     const int16_t *c_data;
     uint8_t c_fmt;
     const void *c_packed, *c_aux;
+    uint32_t c_aram;
     uint32_t c_first;
     AdpcmDec dec;                  /* where the ADPCM decoding has got to */
     uint32_t c_len, c_ls, c_le, pos;
     bool c_loop, done;
+    bool loop_cached;              /* ARAM: a short loop kept in loopbuf */
     int16_t staging[STAGE_SAMPLES] __attribute__((aligned(32)));
+    int16_t bounce[STAGE_SAMPLES + 32] __attribute__((aligned(32)));   /* ARAM copies land here */
+    int16_t loopbuf[LOOP_CACHE + 32] __attribute__((aligned(32)));
 } HwVoice;
 
 static HwVoice hw[NVOICES] __attribute__((aligned(32)));
@@ -184,10 +190,41 @@ static bool hw_ok;
 
 static void audio_block(void *buf, u32 len) { (void)buf; (void)len; frame_no++; }
 
+/* Copies n samples starting at sample `at` of the note's ARAM sample into
+ * dst (n <= STAGE_SAMPLES), through the voice's bounce buffer. The copy engine
+ * is shared with the sound library, which only starts its copies from
+ * interrupts: with interrupts off, wait for any copy in progress, make ours,
+ * and wait for it. (The library's own completion still reaches it: the
+ * engine reports "done" once for both.) */
+static bool aram_copy(HwVoice *h, int16_t *dst, uint32_t at, uint32_t n, int16_t *bounce) {
+    uint32_t src = h->c_aram + at * 2;
+    uint32_t a0 = src & ~31u, a1 = (src + n * 2 + 31) & ~31u, len = a1 - a0;
+    u32 level;
+    _CPU_ISR_Disable(level);
+    int k;
+    for (k = 0; k < 200000 && AR_GetDMAStatus(); k++) {}
+    if (k == 200000) { _CPU_ISR_Restore(level); return false; }
+    DCInvalidateRange(bounce, len);
+    AR_StartDMA(AR_ARAMTOMRAM, (u32)MEM_VIRTUAL_TO_PHYSICAL(bounce), a0, len);
+    for (k = 0; k < 200000 && AR_GetDMAStatus(); k++) {}
+    _CPU_ISR_Restore(level);
+    if (k == 200000) return false;
+    memcpy(dst, (const char *)bounce + (src - a0), n * 2);
+    return true;
+}
+
+static void aram_read(HwVoice *h, int16_t *dst, uint32_t pos, uint32_t n) {
+    if (h->loop_cached && pos >= h->c_ls) {   /* inside a short loop: from the copy made at note start */
+        memcpy(dst, h->loopbuf + (pos - h->c_ls), n * 2);
+        return;
+    }
+    if (!aram_copy(h, dst, h->c_first + pos, n, h->bounce)) memset(dst, 0, n * 2);
+}
+
 /* Copies the next n samples of the note into dst, wrapping at the loop. */
 static void hw_fill(HwVoice *h, int16_t *dst, int n) {
     while (n > 0) {
-        if ((!h->c_data && !h->c_packed) || h->done) { memset(dst, 0, (size_t)n * 2); return; }
+        if ((!h->c_data && !h->c_packed && !h->c_aram) || h->done) { memset(dst, 0, (size_t)n * 2); return; }
         uint32_t end = h->c_loop ? h->c_le : h->c_len;
         if (h->pos >= end) {
             if (h->c_loop) {
@@ -200,7 +237,8 @@ static void hw_fill(HwVoice *h, int16_t *dst, int n) {
         }
         uint32_t k = end - h->pos;
         if (k > (uint32_t)n) k = (uint32_t)n;
-        if (h->c_fmt == SFMT_ADPCM) adpcm_read(&h->dec, dst, k);
+        if (h->c_fmt == SFMT_ARAM) aram_read(h, dst, h->pos, k);
+        else if (h->c_fmt == SFMT_ADPCM) adpcm_read(&h->dec, dst, k);
         else if (h->c_fmt == SFMT_BLOCK8) blk8_read(h->c_packed, h->c_aux, h->c_first + h->pos, dst, k);
         else memcpy(dst, h->c_data + h->pos, k * 2);
         dst += k;
@@ -215,7 +253,9 @@ static void hw_take_note(HwVoice *h) {
     h->c_fmt = h->fmt;
     h->c_packed = h->packed;
     h->c_aux = h->aux;
+    h->c_aram = h->aram;
     h->c_first = h->first;
+    h->loop_cached = false;
     if (h->c_fmt == SFMT_ADPCM) {
         h->dec.data = h->c_packed;
         h->dec.ck = h->c_aux;
@@ -227,6 +267,19 @@ static void hw_take_note(HwVoice *h) {
     h->c_loop = h->loop;
     h->pos = 0;
     h->done = false;
+    /* a short loop is copied out of audio memory once, rather than in many
+     * tiny pieces every time it comes round */
+    if (h->c_fmt == SFMT_ARAM && h->c_loop && h->c_le > h->c_ls && h->c_le - h->c_ls <= LOOP_CACHE) {
+        uint32_t llen = h->c_le - h->c_ls;
+        /* copy in pieces the bounce buffer can hold */
+        bool ok = true;
+        for (uint32_t done_n = 0; done_n < llen && ok; ) {
+            uint32_t piece = llen - done_n > STAGE_SAMPLES ? STAGE_SAMPLES : llen - done_n;
+            ok = aram_copy(h, h->loopbuf + done_n, h->c_first + h->c_ls + done_n, piece, h->bounce);
+            done_n += piece;
+        }
+        h->loop_cached = ok;
+    }
     hw_fill(h, h->staging, STAGE_SAMPLES);
 }
 
@@ -306,6 +359,7 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
         h->fmt = z->fmt;
         h->packed = z->packed;
         h->aux = z->aux;
+        h->aram = z->aram;
         h->first = z->first;
         h->len = z->len;
         h->loop_start = z->loop_start;
@@ -327,6 +381,7 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
     h->fmt = z->fmt;
     h->packed = z->packed;
     h->aux = z->aux;
+    h->aram = z->aram;
     h->first = z->first;
     h->len = z->len;
     h->loop_start = z->loop_start;

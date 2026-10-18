@@ -12,6 +12,11 @@
 #include <string.h>
 #ifdef GEKKO
 #include <malloc.h>
+#ifdef GEKKO
+#include <gccore.h>
+#include <ogc/aram.h>
+#include <ogc/arqueue.h>
+#endif
 #endif
 
 #ifndef M_PI
@@ -57,6 +62,7 @@ static size_t fmt_bytes(int fmt, uint32_t frames) {
 }
 
 typedef struct {
+    uint32_t aram, aram_bytes;   /* SFMT_ARAM: where in audio memory, and how much (0 = not there) */
     int16_t *data;        /* SFMT_PCM16: loaded frames, from the sample's start */
     void *block;          /* packed formats: one allocation holding aux then packed */
     const void *packed, *aux;
@@ -68,7 +74,7 @@ typedef struct {
     uint32_t bytes;
 } SampleSlot;
 
-static bool slot_loaded(const SampleSlot *sl) { return sl->data || sl->block; }
+static bool slot_loaded(const SampleSlot *sl) { return sl->data || sl->block || sl->aram_bytes; }
 
 typedef struct {
     char path[256];
@@ -114,7 +120,10 @@ size_t instruments_memory(void) { return sf_loaded ? sf.loaded_bytes : 0; }
 static void slot_free(SampleSlot *sl);
 void instruments_free_samples(void) {
     if (!sf_loaded) return;
-    for (uint32_t i = 0; i < sf.nshdr; i++) slot_free(&sf.slots[i]);
+    /* main memory only: samples in the audio memory cost web pages nothing,
+     * and stay ready for the next song */
+    for (uint32_t i = 0; i < sf.nshdr; i++)
+        if (!sf.slots[i].aram_bytes) slot_free(&sf.slots[i]);
 }
 
 static bool read_at(FILE *f, long off, void *buf, size_t n) {
@@ -420,7 +429,12 @@ static bool spec_zone(const ZoneSpec *sp, Zone *z) {
     uint32_t avail = sl->raw_end / d;
     z->fmt = sl->fmt;
     z->first = off;
-    if (sl->fmt == SFMT_PCM16) {
+    z->aram = 0;
+    if (sl->fmt == SFMT_ARAM) {
+        z->data = NULL;
+        z->packed = z->aux = NULL;
+        z->aram = sl->aram;
+    } else if (sl->fmt == SFMT_PCM16) {
         z->data = sl->data + off;
         z->packed = z->aux = NULL;
     } else {
@@ -475,6 +489,11 @@ void instruments_need(int bank, int program, bool drums, int key, int vel) {
 
 static void slot_free(SampleSlot *sl) {
     if (!slot_loaded(sl)) return;
+    if (sl->aram_bytes) {   /* audio memory: just forget it (the space is free again) */
+        sl->aram = sl->aram_bytes = 0;
+        sl->raw_end = 0;
+        return;
+    }
     free(sl->data);
     free(sl->block);
     sf.loaded_bytes -= sl->bytes;
@@ -567,14 +586,118 @@ static bool load_slot(FILE *f, int sid, uint32_t need) {
     return true;
 }
 
+/* ---------------------------------------------------------- audio memory
+ * The GameCube's 16 MB of audio memory (ARAM) is almost unused: the sound
+ * library takes about 75 KB at its start. SoundFont samples go there at full
+ * 16-bit quality, and the music player copies pieces back as they play
+ * (midi.c), so they take nothing from the main memory web pages need. */
+#ifdef GEKKO
+#define ARAM_FROM 0x20000u                  /* the sound library's buffers end well before this */
+
+static uint32_t aram_top(void) { return AR_CheckInit() ? AR_GetSize() : 0; }
+
+/* First gap of len bytes between the samples already there; 0 if none. */
+static uint32_t aram_find(uint32_t len) {
+    uint32_t top = aram_top();
+    if (top <= ARAM_FROM || len > top - ARAM_FROM) return 0;
+    uint32_t at = ARAM_FROM;
+    for (;;) {
+        bool moved = false;
+        for (uint32_t i = 0; i < sf.nshdr; i++) {
+            const SampleSlot *o = &sf.slots[i];
+            if (o->aram_bytes && o->aram < at + len && at < o->aram + o->aram_bytes) {
+                at = o->aram + o->aram_bytes;   /* past this one; check again from here */
+                moved = true;
+            }
+        }
+        if (!moved) break;
+        if (at + len > top) return 0;
+    }
+    return at + len <= top ? at : 0;
+}
+
+/* Reads frames [0, need) of sample sid into audio memory. */
+static bool load_slot_aram(FILE *f, int sid, uint32_t need) {
+    SampleSlot *sl = &sf.slots[sid];
+    const unsigned char *sh = sf.shdr + (uint32_t)sid * 46;
+    uint32_t base = rd32(sh + 20);
+    if (base >= sf.nsmpl) return false;
+    if (need > sf.nsmpl - base) need = sf.nsmpl - base;
+    uint8_t div = sample_div(sid);
+    uint32_t frames = need / div;
+    if (frames < 4) return false;
+    uint32_t bytes = (frames * 2 + 31) & ~31u;
+    uint32_t at = aram_find(bytes);
+    if (!at) return false;
+    #define ABUF 8192
+    static int16_t abuf[ABUF] __attribute__((aligned(32)));
+    static int16_t chunk[16384];
+    uint32_t nbuf = 0, written = 0, got = 0, out = 0;
+    int16_t prev = 0;
+    bool swap = host_big_endian();
+    if (fseek(f, sf.smpl_off + (long)base * 2, SEEK_SET) != 0) return false;
+    #define AFLUSH() do { \
+        uint32_t len_ = ((nbuf * 2) + 31) & ~31u; \
+        if (len_ > nbuf * 2) memset((char *)abuf + nbuf * 2, 0, len_ - nbuf * 2); \
+        DCFlushRange(abuf, len_); \
+        ARQRequest req_; \
+        ARQ_PostRequest(&req_, 0xCB, ARQ_MRAMTOARAM, ARQ_PRIO_LO, at + written, (u32)MEM_VIRTUAL_TO_PHYSICAL(abuf), len_); \
+        written += len_; nbuf = 0; } while (0)
+    #define APUT(v) do { abuf[nbuf++] = (v); out++; if (nbuf == ABUF) AFLUSH(); } while (0)
+    while (got < need) {
+        uint32_t n = need - got;
+        if (n > 16384) n = 16384;
+        if (fread(chunk, 2, n, f) != n) return false;
+        for (uint32_t i = 0; i < n; i++) {
+            int16_t v = chunk[i];
+            if (swap) v = (int16_t)(uint16_t)(((uint16_t)v >> 8) | ((uint16_t)v << 8));
+            chunk[i] = v;
+        }
+        if (div == 1) {
+            for (uint32_t i = 0; i < n && out < frames; i++) APUT(chunk[i]);
+        } else {
+            for (uint32_t i = 0; i < n; i++) {
+                if (((got + i) & 1) == 0 && out < frames) {
+                    int32_t nx = (i + 1 < n) ? chunk[i + 1] : chunk[i];
+                    APUT((int16_t)((prev + 2 * (int32_t)chunk[i] + nx) / 4));
+                }
+                prev = chunk[i];
+            }
+        }
+        got += n;
+    }
+    if (nbuf) AFLUSH();
+    #undef APUT
+    #undef AFLUSH
+    #undef ABUF
+    slot_free(sl);
+    sl->aram = at;
+    sl->aram_bytes = bytes;
+    sl->fmt = SFMT_ARAM;
+    sl->div = div;
+    sl->raw_end = out * div;
+    return true;
+}
+#endif
+
+size_t instruments_aram(void) {
+    size_t n = 0;
+    if (sf_loaded)
+        for (uint32_t i = 0; i < sf.nshdr; i++) n += sf.slots[i].aram_bytes;
+    return n;
+}
+
 bool instruments_need_load(char *msg, size_t msglen) {
     msg[0] = 0;
     if (!sf_loaded) return true;
     /* drop what the coming song doesn't use, and anything kept in another
      * format than the Instrument memory setting now asks for */
     int fmt = wanted_fmt();
-    for (uint32_t i = 0; i < sf.nshdr; i++)
-        if (!sf.slots[i].needed || (slot_loaded(&sf.slots[i]) && sf.slots[i].fmt != fmt)) slot_free(&sf.slots[i]);
+    for (uint32_t i = 0; i < sf.nshdr; i++) {
+        SampleSlot *sl = &sf.slots[i];
+        if (sl->aram_bytes) continue;   /* audio memory: kept for later songs until the room is needed */
+        if (!sl->needed || (slot_loaded(sl) && sl->fmt != fmt)) slot_free(sl);
+    }
     /* web pages need memory too: leave SAMPLE_RESERVE free when possible */
     size_t free_now = cb_mem_free();
     size_t budget = sf.loaded_bytes + (free_now > SAMPLE_RESERVE ? free_now - SAMPLE_RESERVE : 0);
@@ -588,6 +711,22 @@ bool instruments_need_load(char *msg, size_t msglen) {
     if (budget > SAMPLE_BUDGET) budget = SAMPLE_BUDGET;
     FILE *f = fopen(sf.path, "rb");
     if (!f) { snprintf(msg, msglen, "Couldn't open the SoundFont"); return false; }
+#ifdef GEKKO
+    /* audio memory first, at full quality; samples there that this song
+     * doesn't use make way when room runs out */
+    bool evicted = false;
+    for (uint32_t i = 0; i < sf.nshdr; i++) {
+        SampleSlot *sl = &sf.slots[i];
+        if (!sl->needed || (slot_loaded(sl) && sl->raw_end + sl->div - 1 >= sl->need_end)) continue;
+        if (load_slot_aram(f, (int)i, sl->need_end)) continue;
+        if (!evicted) {
+            evicted = true;
+            for (uint32_t j = 0; j < sf.nshdr; j++)
+                if (!sf.slots[j].needed && sf.slots[j].aram_bytes) slot_free(&sf.slots[j]);
+            load_slot_aram(f, (int)i, sl->need_end);
+        }
+    }
+#endif
     int skipped = 0, over_budget = 0, failed = 0;
     size_t needed = 0;
     for (uint32_t i = 0; i < sf.nshdr; i++)
@@ -603,9 +742,10 @@ bool instruments_need_load(char *msg, size_t msglen) {
     fclose(f);
     /* page.log: what the music got, so memory problems can be told apart */
     static const char *const fmt_names[] = { "16-bit", "8-bit", "4-bit" };
-    http_log_note("music   | %s: needs %u KB, has %u KB, limit %u KB, %u KB free | %d skipped (%d over limit, %d no memory)",
-                  fmt_names[fmt], (unsigned)(needed / 1024), (unsigned)(sf.loaded_bytes / 1024), (unsigned)(budget / 1024),
+    http_log_note("music   | %u KB in audio memory, %u KB more in main (%s, limit %u KB, %u KB free) | %d skipped (%d over limit, %d no memory)",
+                  (unsigned)(instruments_aram() / 1024), (unsigned)(sf.loaded_bytes / 1024), fmt_names[fmt], (unsigned)(budget / 1024),
                   (unsigned)(free_now / 1024), skipped, over_budget, failed);
+    (void)needed;
     if (skipped)
         snprintf(msg, msglen, "Low memory: %d sounds use built-in instruments", skipped);
     return skipped == 0;
