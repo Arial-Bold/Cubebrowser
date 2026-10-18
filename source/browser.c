@@ -273,6 +273,10 @@ static void restore_entry(HistEntry *e) {
 }
 
 static void start_load(const char *url, const char *post) {
+    /* search results' tracking links: go straight to the real page (the
+     * tracking page forwards with script, which this browser doesn't run) */
+    static char unwrapped[URL_MAX];
+    if (!post && url != unwrapped && url_unwrap_redirect(url, unwrapped, sizeof(unwrapped))) url = unwrapped;
     if (!strncasecmp(url, "about:", 6)) {
         if (loading) { queued = false; fetch_cancel(); loading = false; }
         free(cur_post);
@@ -316,8 +320,14 @@ static void start_load(const char *url, const char *post) {
     fetch_start(url, post);
 }
 
+/* <meta http-equiv="refresh"> forwarding: where to, and when */
+static char refresh_url[URL_MAX];
+static int refresh_at, refresh_gen, refresh_hops;
+
 static void navigate(const char *url, const char *post, bool record) {
     if (!url[0]) return;
+    refresh_hops = 0;
+    refresh_at = 0;
     if (record) {
         push_history();
         clear_forward();
@@ -329,6 +339,8 @@ void browser_navigate(const char *url) { navigate(url, NULL, true); }
 
 /* "Save link": fetch just the headers and go straight to the save prompt. */
 static void save_link(const char *url) {
+    static char unwrapped[URL_MAX];
+    if (url_unwrap_redirect(url, unwrapped, sizeof(unwrapped))) url = unwrapped;
     if (strncasecmp(url, "http://", 7) && strncasecmp(url, "https://", 8)) {
         ui_toast("Only web (http/https) links can be saved");
         return;
@@ -933,6 +945,22 @@ static void handle_fetch_result(void) {
     last_layout_w = 0;
     if (r.truncated) ui_toast("This page was too big and has been cut short");
     sound_play(SFX_LOADED);
+    /* a page that forwards somewhere else (often instead of using script) */
+    int delay;
+    refresh_at = 0;
+    if (refresh_hops < 5 && page_meta_refresh(&page, refresh_url, sizeof(refresh_url), &delay) &&
+        strcmp(refresh_url, page.url) != 0 && delay <= 15) {
+        if (delay <= 1) {
+            refresh_hops++;
+            start_load(refresh_url, NULL);   /* replaces this page in history */
+        } else {
+            refresh_at = ui_frame() + delay * 60;
+            refresh_gen = page_gen;
+            char msg[80];
+            snprintf(msg, sizeof(msg), "This page moves on in %d seconds", delay);
+            ui_toast(msg);
+        }
+    }
 }
 
 /* ------------------------------------------------------------ keyboard */
@@ -1219,6 +1247,14 @@ void browser_frame(bool interactive) {
     update_poll();
     swiss_poll();
     handle_fetch_result();
+    if (refresh_at) {
+        if (loading || refresh_gen != page_gen) refresh_at = 0;   /* moved on already */
+        else if (ui_frame() >= refresh_at) {
+            refresh_at = 0;
+            refresh_hops++;
+            start_load(refresh_url, NULL);
+        }
+    }
 
     float sx, sy, sw, sh;
     ui_safe_area(&sx, &sy, &sw, &sh);

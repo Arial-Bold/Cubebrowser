@@ -2091,3 +2091,47 @@ bool page_build_submit(Page *p, int field_idx, int submit_field, char *url_out, 
     }
     return true;
 }
+
+/* ------------------------------------------------------------ meta refresh */
+
+bool page_meta_refresh(const Page *p, char *url_out, size_t url_len, int *delay) {
+    if (!p->dom || !p->dom->root || p->plain) return false;
+    /* walk the tree without recursion */
+    const Node *n = p->dom->root;
+    while (n) {
+        if (n->type == NT_ELEM && n->tag == TAG_META) {
+            const char *he = dom_attr(n, "http-equiv"), *content = dom_attr(n, "content");
+            if (he && content && !strcasecmp(he, "refresh")) {
+                const char *c = content;
+                while (*c == ' ') c++;
+                int secs = atoi(c);
+                while (*c && *c != ';' && *c != ',') c++;
+                if (*c) c++;
+                while (*c == ' ') c++;
+                if (!strncasecmp(c, "url", 3)) {
+                    c += 3;
+                    while (*c == ' ') c++;
+                    if (*c == '=') c++;
+                    while (*c == ' ') c++;
+                }
+                char target[URL_MAX];
+                size_t o = 0;
+                char quote = (*c == '\'' || *c == '"') ? *c++ : 0;
+                for (; *c && o + 1 < sizeof(target); c++) {
+                    if (quote ? *c == quote : false) break;
+                    target[o++] = *c;
+                }
+                while (o && (target[o - 1] == ' ' || target[o - 1] == '\n' || target[o - 1] == '\r')) o--;
+                target[o] = 0;
+                if (!target[0]) return false;   /* just reloads itself */
+                url_resolve(p->base, target, url_out, url_len);
+                *delay = secs < 0 ? 0 : secs;
+                return url_out[0] != 0;
+            }
+        }
+        if (n->first) { n = n->first; continue; }
+        while (n && !n->next) n = n->parent;
+        if (n) n = n->next;
+    }
+    return false;
+}

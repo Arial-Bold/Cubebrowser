@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* Percent-encodes bytes that can't appear raw in a request line: spaces,
  * control characters, quotes and other unsafe ASCII, and every non-ASCII
@@ -186,4 +187,59 @@ void url_from_input(const char *input, char *out, size_t outlen) {
     char enc[URL_MAX];
     url_encode_component(t, enc, sizeof(enc));
     snprintf(out, outlen, "%s%s", settings_search_prefix(), enc);
+}
+
+/* ------------------------------------------------------------ tracking links */
+
+static int hexval(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    c = tolower(c);
+    return (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
+}
+
+/* Finds name=value in a query string and percent-decodes the value. */
+static bool query_param(const char *query, const char *name, char *out, size_t outlen) {
+    size_t nl = strlen(name);
+    const char *q = query;
+    while (q && *q) {
+        if (*q == '?' || *q == '&' || *q == ';') q++;
+        if (!strncmp(q, name, nl) && q[nl] == '=') {
+            const char *v = q + nl + 1;
+            size_t o = 0;
+            for (; *v && *v != '&' && *v != '#' && o + 1 < outlen; v++) {
+                if (*v == '%' && hexval((unsigned char)v[1]) >= 0 && hexval((unsigned char)v[2]) >= 0) {
+                    out[o++] = (char)(hexval((unsigned char)v[1]) * 16 + hexval((unsigned char)v[2]));
+                    v += 2;
+                } else {
+                    out[o++] = *v;
+                }
+            }
+            out[o] = 0;
+            return o > 0;
+        }
+        q = strpbrk(q, "&;");
+    }
+    return false;
+}
+
+static bool host_is(const char *host, const char *domain) {
+    size_t hl = strlen(host), dl = strlen(domain);
+    if (hl < dl || strcasecmp(host + hl - dl, domain)) return false;
+    return hl == dl || host[hl - dl - 1] == '.';
+}
+
+bool url_unwrap_redirect(const char *url, char *out, size_t outlen) {
+    Url u;
+    if (!url_parse(url, &u) || (strcmp(u.scheme, "http") && strcmp(u.scheme, "https"))) return false;
+    char target[URL_MAX];
+    bool found = false;
+    const char *query = strchr(u.path, '?');
+    if (!query) return false;
+    if (host_is(u.host, "duckduckgo.com") && !strncmp(u.path, "/l/", 3))
+        found = query_param(query, "uddg", target, sizeof(target));
+    else if (!strncmp(u.host, "www.google.", 11) && !strncmp(u.path, "/url?", 5))
+        found = query_param(query, "q", target, sizeof(target)) || query_param(query, "url", target, sizeof(target));
+    if (!found || (strncasecmp(target, "http://", 7) && strncasecmp(target, "https://", 8))) return false;
+    snprintf(out, outlen, "%s", target);
+    return true;
 }

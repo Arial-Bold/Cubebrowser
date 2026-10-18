@@ -117,6 +117,9 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
 int  page_hit(Page *p, float px, float py, int *field_out);
 const char *page_link_url(Page *p, int link);
 bool page_link_is_download(Page *p, int link);
+/* <meta http-equiv="refresh" content="N; url=..."> in the page: the address
+ * it sends you to (resolved) and the delay in seconds. False if none. */
+bool page_meta_refresh(const Page *p, char *url_out, size_t url_len, int *delay);
 bool page_build_submit(Page *p, int field_idx, int submit_field, char *url_out, size_t url_len, char **post_out);
 void page_toggle_field(Page *p, int field);
 
