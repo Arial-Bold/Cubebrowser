@@ -45,10 +45,8 @@ static bool toggle_button(const char *id, float cx, float cy, int icon, bool on)
         gfx_circle(cx, cy, r - 1, color_alpha(t->accent, 0.8f));
         gfx_circle(cx, cy - r * 0.35f, r * 0.5f, rgba(255, 255, 255, 55));
         ui_draw_icon(icon, cx, cy, r * 1.1f, rgba(255, 255, 255, 255));
-    } else {
-        gfx_ring(cx, cy, 20, 1, 0, 2 * (float)M_PI, color_alpha(t->text_dim, 0.4f));
     }
-    return hit;
+    return hit;   /* off: a plain button like the others */
 }
 
 bool music_ui_draw(bool interactive) {
