@@ -28,8 +28,8 @@
  * loop, which the player never reaches. Samples stay cached for the next
  * song while there's room. */
 
-#define SAMPLE_BUDGET (8u * 1024u * 1024u)    /* most memory for loaded samples */
-#define SAMPLE_RESERVE (7u * 1024u * 1024u)   /* ...but always leave this much for web pages */
+#define SAMPLE_BUDGET (10u * 1024u * 1024u)   /* most memory for loaded samples */
+#define SAMPLE_RESERVE (5u * 1024u * 1024u)   /* ...but always leave this much for web pages */
 #define META_MAX (4u * 1024u * 1024u)
 
 typedef struct {

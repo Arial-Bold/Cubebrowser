@@ -824,6 +824,7 @@ static __attribute__((noinline)) void emit_image(L *c, Flow *f, Node *n, const S
     float iw = 0, ih = 0;
     if (im->decl_w && im->decl_h) { iw = im->decl_w; ih = im->decl_h; }
     else if (im->state == IMG_READY) { iw = im->img.w; ih = im->img.h; }
+    else if (im->known_w > 0 && im->known_h > 0) { iw = im->known_w; ih = im->known_h; }   /* unloaded off screen: same space */
     float ratio = (iw > 0 && ih > 0) ? ih / iw : (im->decl_w && im->decl_h ? (float)im->decl_h / im->decl_w : 0.66f);
     float w = -1, h = -1;
     if (s->width.u != U_UNSET && s->width.u != U_AUTO && !(c->measure && s->width.u == U_PCT))

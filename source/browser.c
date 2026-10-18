@@ -24,6 +24,7 @@
 #include "music_ui.h"
 #include "memstat.h"
 #include <sys/stat.h>
+#include <dirent.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
@@ -45,10 +46,11 @@ typedef struct {
     char *src;           /* cached page source, or NULL */
     size_t len;
     bool plain, secure, verified;
+    unsigned spill;      /* > 0: the source was moved to the SD card (hist_spill_path) */
 } HistEntry;
 
-#define HIST_CACHE_PAGES 4
-#define HIST_CACHE_BYTES (2u * 1024u * 1024u)
+#define HIST_CACHE_PAGES 1                      /* in memory; older ones go to the SD card */
+#define HIST_CACHE_BYTES (1u * 1024u * 1024u)
 typedef struct { char title[96]; char url[URL_MAX]; } Bookmark;
 
 static Page page;
@@ -192,10 +194,63 @@ static void show_error(const char *url, const char *msg) {
 static char *cur_post;       /* form data the current page was loaded with */
 static char *pending_post;   /* form data of the page being loaded */
 
+/* Older pages in Back/Forward are kept on the SD card instead of in memory
+ * (gcbrowser/webcache/hist/<n>.htm), so going back doesn't download them
+ * again but they don't take room from pictures and music. */
+static void hist_spill_path(unsigned id, char *out, size_t cap) {
+    char name[64];
+    snprintf(name, sizeof(name), "webcache/hist/%u.htm", id);
+    storage_path(out, cap, name);
+}
+
+static void hist_drop_spill(HistEntry *e) {
+    if (!e->spill) return;
+    char path[420];
+    hist_spill_path(e->spill, path, sizeof(path));
+    remove(path);
+    e->spill = 0;
+}
+
+/* Moves an entry's page source to the card (or just drops it if that fails). */
+static void hist_spill(HistEntry *e) {
+    static unsigned next_id;
+    if (!e->src) return;
+    if (storage_ok() && e->len < 4u * 1024u * 1024u) {
+        char dir[400], path[420];
+        storage_path(dir, sizeof(dir), "webcache");
+        mkdir(dir, 0777);
+        storage_path(dir, sizeof(dir), "webcache/hist");
+        mkdir(dir, 0777);
+        unsigned id = ++next_id;
+        hist_spill_path(id, path, sizeof(path));
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            bool ok = fwrite(e->src, 1, e->len, f) == e->len;
+            if (fclose(f) != 0) ok = false;
+            if (ok) e->spill = id;
+            else remove(path);
+        }
+    }
+    free(e->src);
+    e->src = NULL;
+}
+
+/* Brings a spilled page back into memory (on going back to it). */
+static void hist_unspill(HistEntry *e) {
+    if (e->src || !e->spill) return;
+    char path[420];
+    hist_spill_path(e->spill, path, sizeof(path));
+    size_t len = 0;
+    char *src = storage_read(path, &len);
+    hist_drop_spill(e);
+    if (src) { e->src = src; e->len = len; }
+}
+
 static void hist_free(HistEntry *e) {
     free(e->post);
     free(e->src);
     e->post = e->src = NULL;
+    hist_drop_spill(e);
 }
 
 /* Keep only the most recent few pages in memory. */
@@ -210,7 +265,7 @@ static void hist_trim_cache(void) {
     for (int i = 0; i < n; i++) {
         HistEntry *e = order[i];
         if (!e->src) continue;
-        if (count >= HIST_CACHE_PAGES || bytes + e->len > HIST_CACHE_BYTES) { free(e->src); e->src = NULL; continue; }
+        if (count >= HIST_CACHE_PAGES || bytes + e->len > HIST_CACHE_BYTES) { hist_spill(e); continue; }
         count++;
         bytes += e->len;
     }
@@ -256,6 +311,7 @@ static void restore_entry(HistEntry *e) {
     free(cur_post);
     cur_post = e->post;
     e->post = NULL;
+    hist_unspill(e);
     if (e->src) {
         page_set_source(&page, e->src, e->len, e->plain, e->url);
         e->src = NULL;
@@ -732,7 +788,7 @@ static void draw_download(bool interactive) {
 
 /* ---------------------------------------------------------------- images */
 
-#define IMAGE_BUDGET (6u * 1024u * 1024u)   /* texture memory per page */
+#define IMAGE_BUDGET (5u * 1024u * 1024u)   /* picture memory in use at once (far ones are let go) */
 
 /* Picture and style sheet requests carry the page generation and the index
  * (10 bits: up to 1024, pages may have several hundred pictures). */
@@ -751,6 +807,8 @@ static void share_image_result(int idx) {
             im->img = src->share >= 0 ? page.images[src->share].img : src->img;
             im->share = (short)(src->share >= 0 ? src->share : idx);
             im->state = IMG_READY;
+            im->known_w = (short)im->img.w;
+            im->known_h = (short)im->img.h;
         } else {
             im->state = src->state;   /* failed or skipped, same as the original */
         }
@@ -811,6 +869,11 @@ static void apply_image(ImageResult *ir) {
         gfx_image_init(&im->img, ir->img.tex, ir->img.w, ir->img.h, ir->img.tex_w, ir->img.tex_h);
         page.image_bytes += ir->img.bytes;
         im->state = IMG_READY;
+        im->share = -1;
+        /* reloaded after being let go: same size as before, nothing moves */
+        if (im->known_w == ir->img.w && im->known_h == ir->img.h) moved = false;
+        im->known_w = (short)ir->img.w;
+        im->known_h = (short)ir->img.h;
         /* a picture with a declared size already has its space: just draw it */
         if (im->decl_w && im->decl_h) moved = false;
     }
@@ -857,8 +920,60 @@ static bool sheets_pending(void) {
     return false;
 }
 
+/* Pictures are loaded only near where you're reading (from a screen above
+ * to a few screens below), and ones far away are let go to save memory; they
+ * come back from the SD card cache when you scroll near them again. */
+#define LOAD_ABOVE 1.0f   /* screens */
+#define LOAD_BELOW 3.0f
+#define KEEP_ABOVE 3.0f
+#define KEEP_BELOW 5.0f
+static float last_view_h = 400;
+
+static bool box_within(const Box *b, float view_top, float view_h, float above, float below) {
+    return b->y + b->h >= view_top - above * view_h && b->y <= view_top + view_h + below * view_h;
+}
+
+static void release_far_pictures(float view_top, float view_h) {
+    static int tick;
+    if (++tick % 30) return;   /* twice a second is plenty */
+    static unsigned char *near;
+    static int near_cap;
+    if (page.nimages > near_cap) {
+        unsigned char *nn = realloc(near, (size_t)page.nimages);
+        if (!nn) return;
+        near = nn;
+        near_cap = page.nimages;
+    }
+    if (!page.nimages) return;
+    memset(near, 0, (size_t)page.nimages);
+    for (int i = 0; i < page.nboxes; i++) {
+        const Box *b = &page.boxes[i];
+        if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages) continue;
+        if (!box_within(b, view_top, view_h, KEEP_ABOVE, KEEP_BELOW)) continue;
+        PageImage *im = &page.images[b->text];
+        near[im->share >= 0 ? im->share : b->text] = 1;   /* a shared picture counts for its owner */
+    }
+    for (int i = 0; i < page.nimages; i++) {
+        PageImage *im = &page.images[i];
+        if (im->state != IMG_READY || im->share >= 0 || near[i]) continue;
+        size_t bytes = (size_t)im->img.tex_w * im->img.tex_h * 2;
+        gfx_image_free(&im->img);
+        memset(&im->img, 0, sizeof(im->img));
+        im->state = IMG_NONE;
+        page.image_bytes = page.image_bytes > bytes ? page.image_bytes - bytes : 0;
+        for (int k = 0; k < page.nimages; k++)   /* copies of it go with it */
+            if (page.images[k].share == i) {
+                memset(&page.images[k].img, 0, sizeof(page.images[k].img));
+                page.images[k].share = -1;
+                page.images[k].state = IMG_NONE;
+            }
+    }
+}
+
 /* Downloads the page's stylesheets first, then its pictures. */
 static void schedule_images(float view_top, float view_h, float max_w) {
+    last_view_h = view_h;
+    release_far_pictures(view_top, view_h);
     if (loading || queued || fetch_state() != FETCH_IDLE || !fetch_net_ready()) return;
     if (g_set.page_styles) {
         int si = page_next_sheet(&page);
@@ -872,9 +987,16 @@ static void schedule_images(float view_top, float view_h, float max_w) {
     if (!g_set.load_images) return;
     if (cb_mem_free() < 2u * 1024u * 1024u) { stop_pictures_low_memory(); return; }
     if (page.image_bytes >= IMAGE_BUDGET) {
+        /* the pictures around here alone fill the budget: skip the rest of
+         * them (pictures further away still load once these are let go) */
         bool changed = false;
-        for (int i = 0; i < page.nimages; i++)
-            if (page.images[i].state == IMG_NONE) { page.images[i].state = IMG_SKIPPED; changed = true; }
+        for (int i = 0; i < page.nboxes; i++) {
+            const Box *b = &page.boxes[i];
+            if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages) continue;
+            if (page.images[b->text].state != IMG_NONE || !box_within(b, view_top, view_h, LOAD_ABOVE, LOAD_BELOW)) continue;
+            page.images[b->text].state = IMG_SKIPPED;
+            changed = true;
+        }
         if (changed) page.relayout = true;
         return;
     }
@@ -884,6 +1006,7 @@ static void schedule_images(float view_top, float view_h, float max_w) {
             Box *b = &page.boxes[i];
             if (b->type != BOX_IMAGE || page.images[b->text].state != IMG_NONE) continue;
             if (pass == 0 && (b->y + b->h < view_top - 100 || b->y > view_top + view_h + 400)) continue;
+            if (pass == 1 && !box_within(b, view_top, view_h, LOAD_ABOVE, LOAD_BELOW)) continue;
             pick = b->text;
             break;
         }
@@ -905,9 +1028,9 @@ static void schedule_images(float view_top, float view_h, float max_w) {
     else if (!req[0]) { im->state = IMG_SKIPPED; page.relayout = true; }
 }
 
-/* Pictures still to come: ones downloading, and ones waiting that are
- * actually on the page. Pictures inside hidden parts (closed menus and the
- * like) have no place on screen, are never loaded, and don't count. */
+/* Pictures still to come: ones downloading, and ones waiting near where
+ * you're reading. Pictures in hidden parts (closed menus and the like) are
+ * never loaded, and ones further down load as you scroll; neither counts. */
 static int images_pending(void) {
     int n = 0;
     for (int i = 0; i < page.nimages; i++)
@@ -925,6 +1048,7 @@ static int images_pending(void) {
         const Box *b = &page.boxes[i];
         if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages) continue;
         if (page.images[b->text].state != IMG_NONE || seen[b->text]) continue;
+        if (!box_within(b, page.scroll, last_view_h, LOAD_ABOVE, LOAD_BELOW)) continue;   /* loads when you get near */
         seen[b->text] = 1;   /* once, even if it has several boxes */
         n++;
     }
@@ -1294,6 +1418,25 @@ static bool exit_to_swiss(void) {
 }
 
 void browser_init(void) {
+    /* pages left on the card from last time aren't in any history now */
+    if (storage_ok()) {
+        char dir[400];
+        storage_path(dir, sizeof(dir), "webcache/hist");
+        DIR *d = opendir(dir);
+        if (d) {
+            static char names[64][32];
+            int n = 0;
+            struct dirent *de;
+            while ((de = readdir(d)) != NULL && n < 64)
+                if (de->d_name[0] != '.' && strlen(de->d_name) < 32) snprintf(names[n++], 32, "%s", de->d_name);
+            closedir(d);
+            for (int i = 0; i < n; i++) {
+                char path[440];
+                snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
+                remove(path);
+            }
+        }
+    }
     cookies_init();
     page_init(&page);
     bookmarks_load();

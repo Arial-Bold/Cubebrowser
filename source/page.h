@@ -47,6 +47,7 @@ typedef struct {
     unsigned char direct;   /* fetch from the site itself, not through the image helper */
     GfxImage img;
     const Node *node;   /* the <img> element (valid while the page is loaded) */
+    short known_w, known_h;   /* size once loaded, kept if its texture is let go off screen */
 } PageImage;
 
 enum { SHEET_NONE, SHEET_LOADING, SHEET_DONE };
