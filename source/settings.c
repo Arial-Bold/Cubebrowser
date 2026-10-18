@@ -21,6 +21,7 @@ static const char *const width_names[] = { "Standard (640)", "Full (704)", NULL 
 static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platinum", "Spice", NULL };
 static const char *const osk_layout_names[] = { "QWERTY", "ABC", NULL };
 static const char *const img_size_names[] = { "Small", "Medium", "Large", NULL };
+static const char *const pic_cache_names[] = { "Off", "25 MB", "50 MB", "100 MB", "250 MB", NULL };
 static const char *const swiss_name_names[] = { "Keep its name", "swiss_r + number", "swiss.dol", "boot.dol (card root)",
                                                   "ipl.dol (card root)", NULL };
 static const char *const exit_names[] = { "Load Swiss .dol", "Restart console", NULL };
@@ -129,6 +130,8 @@ const SetDef g_setdefs[] = {
       "Limits how tall pictures can be. Smaller means less scrolling and faster loading." },
     { CAT_BROWSING, "web.imgproxy", "Image helper", ST_BOOL, O(image_proxy), 0, 1, 1, NULL, NULL,
       "Shrinks pictures on images.weserv.nl. Faster, but that site sees image addresses." },
+    { CAT_BROWSING, "web.piccache", "Picture cache", ST_CHOICE, O(pic_cache), 0, 4, 1, pic_cache_names, NULL,
+      "Keeps pictures in sd:/webcache so pages you've seen before load faster. The oldest go when it's full." },
     { CAT_BROWSING, "web.alt", "Show image labels", ST_BOOL, O(show_alt), 0, 1, 1, NULL, NULL,
       "Show descriptions for pictures that can't be shown." },
     { CAT_BROWSING, "web.maxkb", "Max page size", ST_INT, O(max_page_kb), 256, 4096, 256, NULL, "KB",
@@ -168,6 +171,8 @@ const SetDef g_setdefs[] = {
       "Where settings, bookmarks and cookies are kept. Press twice to confirm." },
     { CAT_DATA, NULL, "Clear cookies and logins", ST_ACTION, 0, SA_CLEAR_COOKIES, 0, 0, NULL, NULL,
       "Signs you out of every site. Press twice to confirm." },
+    { CAT_DATA, NULL, "Clear picture cache", ST_ACTION, 0, SA_CLEAR_PIC_CACHE, 0, 0, NULL, NULL,
+      "Removes the pictures saved on the SD card. Pages download them again as needed." },
     { CAT_DATA, NULL, "Clear history", ST_ACTION, 0, SA_CLEAR_HISTORY, 0, 0, NULL, NULL,
       "Forget Back/Forward pages." },
     { CAT_DATA, NULL, "Delete all bookmarks", ST_ACTION, 0, SA_CLEAR_BOOKMARKS, 0, 0, NULL, NULL,
@@ -231,6 +236,7 @@ void settings_defaults(Settings *s) {
     s->page_styles = 1;
     s->img_size = 1;
     s->image_proxy = 1;
+    s->pic_cache = 3;
     s->max_page_kb = 1024;
     s->verify_certs = 1;
     s->cookies = 1;

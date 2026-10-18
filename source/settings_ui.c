@@ -17,6 +17,7 @@
 #include "update.h"
 #include "version.h"
 #include "midi.h"
+#include "picache.h"
 #include <dirent.h>
 #include <stddef.h>
 #include <strings.h>
@@ -138,6 +139,14 @@ static void run_action(int idx) {
         ui_toast("All settings reset");
         break;
     case SA_CLEAR_COOKIES: cookies_clear(); ui_toast("Signed out of all sites"); break;
+    case SA_CLEAR_PIC_CACHE: {
+        if (!storage_ok()) { ui_toast("No SD card found"); break; }
+        unsigned long long freed = picache_clear();
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Picture cache cleared (%.1f MB freed)", (double)freed / (1024.0 * 1024.0));
+        ui_toast(msg);
+        break;
+    }
     case SA_FIND_DOL:
         if (!storage_ok()) { ui_toast("No SD card found"); break; }
         if (!pick_list) pick_list = malloc(sizeof(*pick_list) * PICK_MAX);

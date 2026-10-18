@@ -27,6 +27,7 @@ typedef struct {
     int  search_engine;
     char search_custom[256];
     int  user_agent, show_alt, max_page_kb, load_images, image_proxy, page_styles, img_size;
+    int  pic_cache;            /* picture cache limit: 0 off, 1 25 MB, 2 50 MB, 3 100 MB, 4 250 MB */
     /* Security */
     int  verify_certs;
     char ca_path[128];
@@ -50,7 +51,7 @@ extern const char *const category_names[CAT_COUNT];
 
 typedef enum { ST_BOOL, ST_INT, ST_CHOICE, ST_STR, ST_BIND, ST_ACTION } SetType;
 
-enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE, SA_OPEN_MUSIC, SA_CHECK_SWISS };
+enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE, SA_OPEN_MUSIC, SA_CHECK_SWISS, SA_CLEAR_PIC_CACHE };
 enum { OSK_TEXTMODE_TEXT = 0, OSK_TEXTMODE_URL = 1, OSK_TEXTMODE_IP = 2 };
 
 typedef struct {

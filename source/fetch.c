@@ -6,6 +6,7 @@
 #include "cookies.h"
 #include "update.h"
 #include "swissupd.h"
+#include "picache.h"
 #include <gccore.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -91,6 +92,22 @@ static void run_image_job(void) {
     memset(&ir, 0, sizeof(ir));
     ir.tag = job_tag;
     HttpHooks hooks = { &cancel_flag, &progress, no_stage, NULL, strstr(job_url, "images.weserv.nl") != NULL, NULL };
+    /* saved on the SD card from an earlier visit? */
+    size_t clen = 0;
+    void *cached = picache_get(job_url, &clen);
+    if (cached) {
+        ir.ok = image_decode((const unsigned char *)cached, clen, job_max_w, job_max_h, MAX_SRC_PIXELS,
+                             &ir.img, ir.error, sizeof(ir.error));
+        free(cached);
+        if (ir.ok) {
+            http_log_note("pic     | from SD card cache (%u bytes) | %.70s", (unsigned)clen, job_url);
+            img_result = ir;
+            diag_note(DIAG_WORKER, "idle");
+            return;
+        }
+        memset(&ir, 0, sizeof(ir));   /* unreadable: download it again */
+        ir.tag = job_tag;
+    }
     HttpResult r;
     if (!http_fetch(job_url, NULL, "image/jpeg,image/png,image/gif;q=0.8,image/bmp;q=0.5", &r, &hooks)) {
         snprintf(ir.error, sizeof(ir.error), "%s", r.error);
@@ -100,6 +117,7 @@ static void run_image_job(void) {
         diag_note(DIAG_WORKER, "decoding picture (%u bytes)", (unsigned)r.body_len);
         ir.ok = image_decode((const unsigned char *)r.body, r.body_len, job_max_w, job_max_h, MAX_SRC_PIXELS,
                              &ir.img, ir.error, sizeof(ir.error));
+        if (ir.ok && r.status == 200 && !r.truncated && !cancel_flag) picache_put(job_url, r.body, r.body_len);
         if (!ir.ok) http_log_note("pic     | couldn't show: %.60s (%s, %u bytes) | %.70s", ir.error, r.content_type,
                                   (unsigned)r.body_len, job_url);
     }
