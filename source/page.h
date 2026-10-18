@@ -120,6 +120,10 @@ bool page_link_is_download(Page *p, int link);
 /* <meta http-equiv="refresh" content="N; url=..."> in the page: the address
  * it sends you to (resolved) and the delay in seconds. False if none. */
 bool page_meta_refresh(const Page *p, char *url_out, size_t url_len, int *delay);
+/* True when the page looks like it shows its content with script (which this
+ * browser doesn't run): next to no text of its own, but scripts, or a
+ * <noscript> asking for JavaScript. */
+bool page_needs_script(const Page *p);
 bool page_build_submit(Page *p, int field_idx, int submit_field, char *url_out, size_t url_len, char **post_out);
 void page_toggle_field(Page *p, int field);
 

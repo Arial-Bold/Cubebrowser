@@ -580,6 +580,7 @@ Dom *dom_parse(const char *src, size_t len, bool plain) {
             tag == TAG_STYLE || tag == TAG_TEXTAREA || tag == TAG_TITLE || tag == TAG_XMP ||
             tag == TAG_IFRAME || tag == TAG_OBJECT || tag == TAG_VIDEO || tag == TAG_AUDIO || tag == TAG_CANVAS) {
             size_t c = selfclose ? after : find_close(src, len, after, name);
+            if (tag == TAG_SCRIPT) d->nscripts++;
             if (tag == TAG_STYLE && d->nsheets < DOM_MAX_SHEETS) {
                 Node tmp;
                 memset(&tmp, 0, sizeof(tmp));

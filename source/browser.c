@@ -320,6 +320,30 @@ static void start_load(const char *url, const char *post) {
     fetch_start(url, post);
 }
 
+/* "This page needs JavaScript" card: shown for page_gen == script_note_gen */
+static int script_note_gen = -1;
+static bool text_mode_load;              /* the page loading now was asked for in text mode */
+static char text_mode_tried[URL_MAX];    /* last page tried in text mode */
+
+static float note_wrap(FontId f, float size, float x, float y, float w, Color c, const char *s, bool draw) {
+    float lh = gfx_line_height(f, size) * 1.05f, yy = y;
+    while (*s) {
+        while (*s == ' ') s++;
+        if (!*s) break;
+        int n = gfx_text_fit(f, size, s, -1, w);
+        if (s[n]) {
+            int b = n;
+            while (b > 0 && s[b] != ' ') b--;
+            if (b > 0) n = b;
+        }
+        if (n <= 0) n = 1;
+        if (draw) gfx_text(f, size, x, yy, c, s, n);
+        yy += lh;
+        s += n;
+    }
+    return yy - y;
+}
+
 /* <meta http-equiv="refresh"> forwarding: where to, and when */
 static char refresh_url[URL_MAX];
 static int refresh_at, refresh_gen, refresh_hops;
@@ -904,6 +928,8 @@ static void handle_fetch_result(void) {
     }
     HttpResult r;
     if (!fetch_take(&r)) return;
+    bool was_text_mode = text_mode_load;
+    if (text_mode_load) { text_mode_load = false; http_set_user_agent_override(-1); }
     if (!loading) { http_result_free(&r); return; }   /* user moved on */
     loading = false;
     if (r.download) {
@@ -945,6 +971,8 @@ static void handle_fetch_result(void) {
     last_layout_w = 0;
     if (r.truncated) ui_toast("This page was too big and has been cut short");
     sound_play(SFX_LOADED);
+    script_note_gen = page_needs_script(&page) ? page_gen : -1;
+    if (was_text_mode) snprintf(text_mode_tried, sizeof(text_mode_tried), "%s", page.url);
     /* a page that forwards somewhere else (often instead of using script) */
     int delay;
     refresh_at = 0;
@@ -1429,6 +1457,17 @@ void browser_frame(bool interactive) {
         page.scroll += (page.scroll_target - page.scroll) * (g_set.animations ? 0.3f : 1.0f);
         schedule_images(page.scroll, ch, fminf(cw - 32, 640));
 
+        /* the "needs JavaScript" card sits over the bottom of the page */
+        bool note = script_note_gen == page_gen && !loading;
+        static const char note_text[] =
+            "This site builds its pages with scripts, which CubeBrowser can't run, so some or all of it "
+            "may be missing. Text mode asks the site for a simpler version, which some sites offer.";
+        float nw = fminf(cw - 40, 600), nx = cx + (cw - nw) * 0.5f;
+        float ntext_h = note ? note_wrap(FONT_BODY, 17, 0, 0, nw - 48, t->text, note_text, false) : 0;
+        float nh = 24 + 30 + ntext_h + 14 + 40 + 20, ny = cy + ch - nh - 14;
+        bool over_note = note && input_cursor_x() >= nx && input_cursor_x() <= nx + nw &&
+                         input_cursor_y() >= ny && input_cursor_y() <= ny + nh;
+
         /* register visible links/fields as targets and find the hovered one */
         float px = input_cursor_x(), py = input_cursor_y();
         for (int i = 0; i < page.nboxes; i++) {
@@ -1443,6 +1482,7 @@ void browser_frame(bool interactive) {
             }
             (void)px; (void)py;
         }
+        if (over_note) hover_link = hover_field = -1;
         diag_note(DIAG_MAIN, "drawing page at scroll %.0f of %.0f (%d boxes)", page.scroll, page.content_h, page.nboxes);
         diag_note(DIAG_DRAW, "page at scroll %.0f of %.0f, %d boxes, %d pictures", page.scroll, page.content_h, page.nboxes, page.nimages);
         page_draw(&page, cx, cy, cw, ch, hover_link, hover_field);
@@ -1454,6 +1494,37 @@ void browser_frame(bool interactive) {
             float byy = cy + (ch - bh) * (page.scroll / (page.content_h - ch));
             gfx_rrect(cx + cw - 9, cy + 4, 5, ch - 8, 2.5f, color_alpha(t->page_rule, 0.6f));
             gfx_rrect(cx + cw - 9, byy + 4, 5, bh - 8, 2.5f, t->accent);
+        }
+
+        if (note) {
+            ui_panel(nx, ny, nw, nh, 18);
+            gfx_text(FONT_UI, 22, nx + 24, ny + 20, t->text, "This page needs JavaScript", -1);
+            note_wrap(FONT_BODY, 17, nx + 24, ny + 54, nw - 48, t->text_dim, note_text, true);
+            bool can_text = g_set.user_agent != 1 && strcmp(text_mode_tried, page.url) != 0;
+            int nb = 1 + (can_text ? 1 : 0) + (nback > 0 ? 1 : 0), k = 0;
+            float bw = (nw - 48 - (nb - 1) * 12) / nb, bh = 40, by = ny + nh - bh - 18;
+            if (can_text) {
+                if (ui_button(ui_id("js-note", 0), nx + 24, by, bw, bh, "Try text mode", 17, UIB_ACCENT) && input_ok) {
+                    char u[URL_MAX];
+                    snprintf(u, sizeof(u), "%s", page.url);
+                    http_set_user_agent_override(1);   /* Lynx, for this page only */
+                    text_mode_load = true;
+                    script_note_gen = -1;
+                    start_load(u, NULL);
+                }
+                k++;
+            }
+            if (nback > 0) {
+                if (ui_button(ui_id("js-note", 1), nx + 24 + k * (bw + 12), by, bw, bh, "Go back", 17,
+                              can_text ? UIB_NORMAL : UIB_ACCENT) && input_ok) {
+                    script_note_gen = -1;
+                    go_back();
+                }
+                k++;
+            }
+            if (ui_button(ui_id("js-note", 2), nx + 24 + k * (bw + 12), by, bw, bh, "Hide", 17, UIB_NORMAL) && input_ok) {
+                script_note_gen = -1;
+            }
         }
 
         if (input_ok && input_pressed(ACT_CLICK) && (hover_link >= 0 || hover_field >= 0)) {

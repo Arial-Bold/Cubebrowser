@@ -61,6 +61,7 @@ typedef struct {
     char title[128];
     DomSheet sheets[DOM_MAX_SHEETS];
     int nsheets;
+    int nscripts;       /* <script> elements (their content isn't kept) */
 } Dom;
 
 Dom *dom_parse(const char *src, size_t len, bool plain);

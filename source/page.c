@@ -2135,3 +2135,46 @@ bool page_meta_refresh(const Page *p, char *url_out, size_t url_len, int *delay)
     }
     return false;
 }
+
+/* ------------------------------------------------------------ script-only pages */
+
+static bool mentions_script(const Node *n, int depth) {
+    for (const Node *c = n->first; c; c = c->next) {
+        if (c->type == NT_TEXT) {
+            for (int i = 0; i + 10 <= c->len; i++)
+                if (!strncasecmp(c->text + i, "javascript", 10)) return true;
+        } else if (depth < 8 && mentions_script(c, depth + 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool page_needs_script(const Page *p) {
+    if (!p->dom || !p->dom->root || p->plain) return false;
+    if (!strncasecmp(p->url, "about:", 6)) return false;
+    int scripts = p->dom->nscripts, text = 0, links = 0;
+    bool asks = false;
+    const Node *n = p->dom->root;
+    while (n) {
+        bool skip = false;
+        if (n->type == NT_ELEM) {
+            switch (n->tag) {
+            case TAG_NOSCRIPT: if (mentions_script(n, 0)) asks = true; skip = true; break;
+            case TAG_HEAD: case TAG_STYLE: case TAG_TEMPLATE: case TAG_SVG: case TAG_TITLE: skip = true; break;
+            case TAG_A: links++; break;
+            default: break;
+            }
+        } else if (n->type == NT_TEXT && !n->hidden) {
+            for (int i = 0; i < n->len; i++)
+                if (!isspace((unsigned char)n->text[i]) && n->text[i] != 1) text++;
+        }
+        if (!skip && n->first) { n = n->first; continue; }
+        while (n && !n->next) n = n->parent;
+        if (n) n = n->next;
+    }
+    /* a page that is all script and no words, or one that says so itself */
+    if (scripts > 0 && text < 120 && links < 4) return true;
+    if (asks && text < 400) return true;
+    return false;
+}

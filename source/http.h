@@ -34,6 +34,9 @@ typedef struct {
 bool http_fetch(const char *url, const char *post_body, const char *accept, HttpResult *res,
                 const HttpHooks *hooks);
 void http_close_idle(void);
+/* Identify as this user agent (index into user_agent_strings) instead of the
+ * one in Settings, until set back to -1. For "try text mode" on one page. */
+void http_set_user_agent_override(int ua);
 /* Saves page.log (timings of recent requests) to the data folder if it changed. */
 void http_log_flush(void);
 /* Adds a free-form line to page.log (e.g. a picture that couldn't be decoded). */

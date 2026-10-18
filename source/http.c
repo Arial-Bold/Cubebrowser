@@ -29,6 +29,13 @@ typedef struct {
 } Reader;
 
 /* one cached connection */
+static volatile int ua_override = -1;
+void http_set_user_agent_override(int ua) { ua_override = ua; }
+static int current_ua(void) {
+    int o = ua_override;
+    return (o >= 0 && o <= 2) ? o : g_set.user_agent;
+}
+
 static Conn kconn;
 static bool kopen;
 static char kkey[300];
@@ -345,7 +352,7 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
     int n = snprintf(req, sizeof(req),
                      "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: %s\r\n"
                      "Accept-Language: en\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\n%s",
-                     post ? "POST" : "GET", u.path, hosthdr, user_agent_strings[g_set.user_agent],
+                     post ? "POST" : "GET", u.path, hosthdr, user_agent_strings[current_ua()],
                      accept ? accept : DEFAULT_ACCEPT, extra);
     if (post && n < (int)sizeof(req))
         n += snprintf(req + n, sizeof(req) - n,
@@ -594,7 +601,7 @@ HttpStream *http_stream_open(const char *url, long long range_from, const HttpHo
         int n = snprintf(req, sizeof(req),
                          "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\n"
                          "Accept-Encoding: identity\r\n%s%sConnection: close\r\n\r\n",
-                         u.path, hosthdr, user_agent_strings[g_set.user_agent], range, extra);
+                         u.path, hosthdr, user_agent_strings[current_ua()], range, extra);
         if (n >= (int)sizeof(req) || !conn_write_all(&st->conn, req, (size_t)n)) {
             snprintf(err, errlen, "Couldn't send the request.");
             conn_close(&st->conn);
@@ -745,7 +752,7 @@ long long http_range_get(HttpKeep *k, const char *url, long long first, long lon
         int n = snprintf(req, sizeof(req),
                          "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\nAccept-Encoding: identity\r\n"
                          "Range: bytes=%lld-%lld\r\n%sConnection: keep-alive\r\n\r\n",
-                         u.path, hosthdr, user_agent_strings[g_set.user_agent], first, last, extra);
+                         u.path, hosthdr, user_agent_strings[current_ua()], first, last, extra);
         if (n >= (int)sizeof(req)) { snprintf(err, errlen, "Address too long."); return -1; }
         memset(&k->rd, 0, sizeof(k->rd));
         k->rd.c = &k->conn;
