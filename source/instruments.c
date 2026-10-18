@@ -521,7 +521,7 @@ bool instruments_need_load(char *msg, size_t msglen) {
     }
     fclose(f);
     if (skipped)
-        snprintf(msg, msglen, "This song needs more instrument sounds than fit in memory; %d use the built-in sounds.", skipped);
+        snprintf(msg, msglen, "Low memory: %d sounds use built-in instruments", skipped);
     return skipped == 0;
 }
 

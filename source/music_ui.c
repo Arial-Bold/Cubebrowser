@@ -32,11 +32,22 @@ static void fmt_time(char *out, size_t cap, float s) {
 }
 
 /* An icon button that shows a highlight ring when its option is on. */
+/* Shuffle / repeat: when on, the button lights up in the accent colour like
+ * the toolbar's note button does while music plays, but steady (no pulse). */
 static bool toggle_button(const char *id, float cx, float cy, int icon, bool on) {
     const Theme *t = theme();
-    bool hit = ui_icon_button(ui_id(id, 0), cx, cy, 15, icon, true);
-    if (on) gfx_ring(cx, cy, 20, 2.5f, 0, 2 * (float)M_PI, t->accent);
-    else gfx_ring(cx, cy, 20, 1, 0, 2 * (float)M_PI, color_alpha(t->text_dim, 0.4f));
+    const float r = 15;
+    if (on)   /* soft light around it */
+        for (int k = 3; k >= 1; k--)
+            gfx_circle(cx, cy, r + 2 + k * 2.5f, color_alpha(t->accent, 0.2f / k));
+    bool hit = ui_icon_button(ui_id(id, 0), cx, cy, r, icon, true);
+    if (on) {   /* the face itself lit, with a white symbol */
+        gfx_circle(cx, cy, r - 1, color_alpha(t->accent, 0.8f));
+        gfx_circle(cx, cy - r * 0.35f, r * 0.5f, rgba(255, 255, 255, 55));
+        ui_draw_icon(icon, cx, cy, r * 1.1f, rgba(255, 255, 255, 255));
+    } else {
+        gfx_ring(cx, cy, 20, 1, 0, 2 * (float)M_PI, color_alpha(t->text_dim, 0.4f));
+    }
     return hit;
 }
 
