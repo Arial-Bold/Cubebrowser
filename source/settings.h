@@ -19,6 +19,7 @@ typedef struct {
     int  key_repeat, osk_layout;
     /* Display */
     int  video_mode, widescreen, margin, text_size, theme, animations, sounds, volume, full_width;
+    int  load_screen;          /* the underwater scene while a page loads */
     /* Music */
     char music_sf2[256];   /* "" = first .sf2 in the midi folder, "builtin", or a file */
     int  music_volume, music_shuffle, music_repeat, music_glow;

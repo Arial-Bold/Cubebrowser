@@ -34,6 +34,7 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+#include "underwater.h"
 
 #define HIST_MAX 32
 #define BOOKMARK_MAX 64
@@ -73,6 +74,29 @@ static float last_layout_w, last_layout_scale;
 static bool queued;
 static char queued_url[URL_MAX];
 static char *queued_post;
+
+/* ---- the loading screen (underwater.c): covers the page area from when a
+ * page is asked for until it's ready to look at - its styles applied and the
+ * pictures on the first screen in - or for at most 8 seconds. */
+#define VEIL_MAX_MS 8000
+static struct { bool on, revealing; float a; int gen0; unsigned start; } veil;
+static bool veil_skip_next;   /* going back: no loading screen */
+
+static unsigned now_ms(void) { return (unsigned)ticks_to_millisecs(gettime()); }
+
+static void veil_begin(void) {
+    if (!g_set.load_screen) return;
+    if (!veil.on || veil.revealing) {
+        veil.start = now_ms();
+    }
+    if (!veil.on) veil.a = has_page ? 0 : 1;   /* fades in over the page you were on */
+    veil.on = true;
+    veil.revealing = false;
+    veil.gen0 = page_gen;
+}
+
+static void veil_end(void) { if (veil.on) veil.revealing = true; }
+static bool veil_covering(void) { return veil.on && !veil.revealing; }
 
 /* The start page is drawn by home.c; this only gives it a title (and is
  * what shows if something ever asks the page engine to draw it). */
@@ -322,11 +346,13 @@ static void restore_entry(HistEntry *e) {
         page_gen++;
         last_layout_w = 0;
         restore_scroll = e->scroll;
+        veil_end();
         return;
     }
     restore_scroll = e->scroll;
     char url[URL_MAX];
     snprintf(url, sizeof(url), "%s", e->url);
+    veil_skip_next = true;
     start_load(url, cur_post);
 }
 
@@ -336,6 +362,8 @@ static void start_load(const char *url, const char *post) {
     static char unwrapped[URL_MAX];
     if (!post && url != unwrapped && url_unwrap_redirect(url, unwrapped, sizeof(unwrapped))) url = unwrapped;
     if (!strncasecmp(url, "about:", 6)) {
+        veil_skip_next = false;
+        veil_end();
         if (loading) { queued = false; fetch_cancel(); loading = false; }
         free(cur_post);
         cur_post = NULL;
@@ -360,6 +388,8 @@ static void start_load(const char *url, const char *post) {
     }
     if (netio_state() == NET_FAILED) fetch_retry_network();
     loading = true;
+    if (veil_skip_next) veil_skip_next = false;
+    else veil_begin();
     snprintf(loading_url, sizeof(loading_url), "%s", url);
     if (post != pending_post) {
         free(pending_post);
@@ -1084,6 +1114,41 @@ static int images_pending(void) {
     return n;
 }
 
+/* Pictures on the first screen not in yet (the loading screen waits for them). */
+static int first_screen_pictures(float view_h) {
+    if (!g_set.load_images) return 0;
+    int n = 0;
+    const int *vis;
+    int nvis = page_visible(&page, page.scroll, view_h, &vis);
+    for (int vi = 0; vi < nvis; vi++) {
+        const Box *b = &page.boxes[vis[vi]];
+        if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages) continue;
+        int st = page.images[b->text].state;
+        if (st == IMG_NONE || st == IMG_LOADING) n++;
+    }
+    return n;
+}
+
+/* Decides when the loading screen lifts, and fades it in and out. */
+static void veil_update(float view_h) {
+    if (!veil.on) return;
+    if (!veil.revealing) {
+        bool done = !g_set.load_screen || now_ms() - veil.start > VEIL_MAX_MS;
+        if (!done && !loading && !queued) {
+            if (!has_page || page_gen == veil.gen0) done = true;   /* stopped, failed, or a download */
+            else if (last_layout_w != 0 && !page.restyle && !page.relayout && !sheets_pending() &&
+                     first_screen_pictures(view_h) == 0)
+                done = true;
+        }
+        if (done) veil.revealing = true;
+    }
+    float target = veil.revealing ? 0.0f : 1.0f;
+    float step = g_set.animations ? (veil.revealing ? 0.05f : 0.12f) : 1.0f;
+    if (veil.a < target) veil.a = fminf(target, veil.a + step);
+    else veil.a = fmaxf(target, veil.a - step);
+    if (veil.revealing && veil.a <= 0) veil.on = false;
+}
+
 static void handle_fetch_result(void) {
     if (fetch_state() != FETCH_DONE) return;
     if (fetch_job_is_update()) return;   /* update_poll() / swiss_poll() take these */
@@ -1555,7 +1620,8 @@ void browser_frame(bool interactive) {
         open_address_bar();
     }
 
-    /* ---- content area */
+    /* ---- content area (not while the loading screen covers it) */
+    bool content_ok = input_ok && !veil_covering();
     float cx = sx + 8, cy = sy + bar_h + 16, cw = sw - 16, ch = sh - bar_h - 16 - 34;
     gfx_shadow(cx + 2, cy + 4, cw, ch, 14, 6, t->shadow);
     gfx_rrect(cx, cy, cw, ch, 14, has_page && page.dom ? page.bg : t->page_bg);
@@ -1581,7 +1647,9 @@ void browser_frame(bool interactive) {
      * the pointer: doing it mid-scroll is what made long pages like Wikipedia
      * stutter, as pictures kept arriving while you scrolled */
     bool scrolling = ui_frame() - last_scroll_frame < 45;
-    bool image_relayout = page.relayout && since >= 90 && ((input_stick_idle(20) && !scrolling) || since >= 900);
+    bool image_relayout = page.relayout &&
+                          (veil_covering() ? since >= 20   /* nobody sees it under the loading screen */
+                                           : since >= 90 && ((input_stick_idle(20) && !scrolling) || since >= 900));
     if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout || (page.restyle && !waiting_sheets))) {
         last_layout_frame = ui_frame();
         diag_note(DIAG_MAIN, "laying out page (%d pictures ready)", page.nimages);
@@ -1613,7 +1681,7 @@ void browser_frame(bool interactive) {
         snprintf(done_text, sizeof(done_text), "Saved as %s. The old version was kept as a backup (.old).", tgt);
         UpdView v = { "Swiss Update", "Swiss", have, SWISS_REPO, swiss_latest(), swiss_notes(), swiss_error(),
                       avail, done_text, "START THE NEW SWISS", swiss_state(), swiss_step() };
-        HomeAction ua = home_update_draw(cx, cy, cw, ch, input_ok, &v);
+        HomeAction ua = home_update_draw(cx, cy, cw, ch, content_ok, &v);
         if (ua != HOME_NONE) sound_play(SFX_SELECT);
         if (ua == HOME_OPEN_URL) navigate("about:home", NULL, true);
         else if (ua == HOME_UPDATE_INSTALL) { midi_release_memory(); swiss_request_install(); }
@@ -1633,7 +1701,7 @@ void browser_frame(bool interactive) {
                       update_error(), avail,
                       "Exit to Swiss and start CubeBrowser again to use it. The old version was kept as a backup (.old).",
                       "EXIT TO SWISS", update_state(), update_step() };
-        HomeAction ua = home_update_draw(cx, cy, cw, ch, input_ok, &v);
+        HomeAction ua = home_update_draw(cx, cy, cw, ch, content_ok, &v);
         if (ua != HOME_NONE) sound_play(SFX_SELECT);
         if (ua == HOME_OPEN_URL) navigate("about:home", NULL, true);
         else if (ua == HOME_UPDATE_INSTALL) update_request_install();
@@ -1651,14 +1719,14 @@ void browser_frame(bool interactive) {
         }
     } else if (on_help) {
         /* Controls & Tips draws itself too (home.c) */
-        if (home_help_draw(cx, cy, cw, ch, input_ok) == HOME_OPEN_URL) {
+        if (home_help_draw(cx, cy, cw, ch, content_ok) == HOME_OPEN_URL) {
             sound_play(SFX_SELECT);
             navigate("about:home", NULL, true);
         }
     } else if (on_home) {
         /* the start page draws itself (home.c) */
         const char *go = NULL;
-        HomeAction ha = home_draw(cx, cy, cw, ch, input_ok, &go, &home_hover);
+        HomeAction ha = home_draw(cx, cy, cw, ch, content_ok, &go, &home_hover);
         if (ha != HOME_NONE) sound_play(ha == HOME_BOOKMARKS ? SFX_OPEN : SFX_SELECT);
         switch (ha) {
         case HOME_OPEN_URL: navigate(go, NULL, true); break;
@@ -1670,7 +1738,7 @@ void browser_frame(bool interactive) {
         }
     } else if (has_page) {
         /* scrolling */
-        if (input_ok) {
+        if (content_ok) {
             float before = page.scroll_target;
             page.scroll_target += input_scroll_delta();
             int d = ui_dpad_unhandled();
@@ -1736,7 +1804,7 @@ void browser_frame(bool interactive) {
             int nb = 1 + (can_text ? 1 : 0) + (nback > 0 ? 1 : 0), k = 0;
             float bw = (nw - 48 - (nb - 1) * 12) / nb, bh = 40, by = ny + nh - bh - 18;
             if (can_text) {
-                if (ui_button(ui_id("js-note", 0), nx + 24, by, bw, bh, "Try text mode", 17, UIB_ACCENT) && input_ok) {
+                if (ui_button(ui_id("js-note", 0), nx + 24, by, bw, bh, "Try text mode", 17, UIB_ACCENT) && content_ok) {
                     char u[URL_MAX];
                     snprintf(u, sizeof(u), "%s", page.url);
                     http_set_user_agent_override(1);   /* Lynx, for this page only */
@@ -1748,18 +1816,18 @@ void browser_frame(bool interactive) {
             }
             if (nback > 0) {
                 if (ui_button(ui_id("js-note", 1), nx + 24 + k * (bw + 12), by, bw, bh, "Go back", 17,
-                              can_text ? UIB_NORMAL : UIB_ACCENT) && input_ok) {
+                              can_text ? UIB_NORMAL : UIB_ACCENT) && content_ok) {
                     script_note_gen = -1;
                     go_back();
                 }
                 k++;
             }
-            if (ui_button(ui_id("js-note", 2), nx + 24 + k * (bw + 12), by, bw, bh, "Hide", 17, UIB_NORMAL) && input_ok) {
+            if (ui_button(ui_id("js-note", 2), nx + 24 + k * (bw + 12), by, bw, bh, "Hide", 17, UIB_NORMAL) && content_ok) {
                 script_note_gen = -1;
             }
         }
 
-        if (input_ok && input_pressed(ACT_CLICK) && (hover_link >= 0 || hover_field >= 0)) {
+        if (content_ok && input_pressed(ACT_CLICK) && (hover_link >= 0 || hover_field >= 0)) {
             input_consume(ACT_CLICK);
             input_rumble(3);
             sound_play(SFX_SELECT);
@@ -1782,6 +1850,9 @@ void browser_frame(bool interactive) {
         gfx_rect(cx + 10, cy + 2, cw - 20, 3, color_alpha(t->page_rule, 0.7f));
         gfx_rect(cx + 10 + (cw - 20) * fmaxf(0, k - 0.25f), cy + 2, (cw - 20) * fminf(0.25f, k), 3, t->accent);
     }
+    veil_update(ch);
+    if (veil.on)   /* over the page area only; the status bar below says what's loading */
+        underwater_draw(cx, cy, cw, ch, veil.a, ui_time());
 
     /* ---- status bar */
     float sbx = sx + 14, sby = sy + sh - 28;

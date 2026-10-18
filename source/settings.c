@@ -99,6 +99,8 @@ const SetDef g_setdefs[] = {
       "Colour scheme for menus." },
     { CAT_DISPLAY, "disp.anim", "Animations", ST_BOOL, O(animations), 0, 1, 1, NULL, NULL,
       "Menu motion and screen transitions." },
+    { CAT_DISPLAY, "disp.loadscreen", "Loading screen", ST_BOOL, O(load_screen), 0, 1, 1, NULL, NULL,
+      "An underwater scene covers a page while it loads, so it appears all at once." },
     { CAT_DISPLAY, "disp.sounds", "Sound effects", ST_BOOL, O(sounds), 0, 1, 1, NULL, NULL, NULL },
     { CAT_DISPLAY, "disp.volume", "Volume", ST_INT, O(volume), 0, 10, 1, NULL, NULL, NULL },
     /* Music player */
@@ -220,6 +222,7 @@ void settings_defaults(Settings *s) {
     s->text_size = 100;
     s->theme = THEME_INDIGO;
     s->animations = 1;
+    s->load_screen = 1;
     s->sounds = 1;
     s->volume = 7;
     s->music_sf2[0] = 0;

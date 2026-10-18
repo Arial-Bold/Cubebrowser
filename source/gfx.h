@@ -30,6 +30,9 @@ bool  gfx_has_component_cable(void);
 const char *gfx_mode_name(void);
 
 void gfx_begin_frame(void);
+/* Additive drawing (for light): colours add to what's underneath. Every
+ * frame starts with normal drawing. */
+void gfx_set_additive(bool on);
 void gfx_end_frame(void);
 
 /* Transform applied to everything drawn: x' = x*sx + tx, y' = y*sy + ty */
@@ -50,6 +53,7 @@ void gfx_circle(float cx, float cy, float r, Color c);
 void gfx_ring(float cx, float cy, float r, float thick, float a0, float a1, Color c);
 void gfx_tri(float x1, float y1, float x2, float y2, float x3, float y3, Color c);
 void gfx_quad(const float *xy8, Color c);   /* 4 points, clockwise */
+void gfx_quad_colors(const float *xy8, const Color *c4);   /* a colour per corner */
 void gfx_line(float x1, float y1, float x2, float y2, float thick, Color c);
 /* Shaded 3D cube, rx/ry rotation in radians. */
 void gfx_cube(float cx, float cy, float size, float rx, float ry, Color base);
@@ -63,6 +67,12 @@ typedef struct { GXTexObj obj; void *data; u16 w, h, tex_w, tex_h; } GfxImage;
 void  gfx_image_init(GfxImage *img, void *data, int w, int h, int tex_w, int tex_h);
 void  gfx_image_free(GfxImage *img);
 void  gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color tint);
+
+/* Repeating greyscale patterns (the loading screen's rippling light). */
+typedef struct { GXTexObj obj; void *data; u16 w, h; } GfxPattern;
+bool  gfx_pattern_init(GfxPattern *pt, const unsigned char *data, int w, int h);
+void  gfx_pattern_free(GfxPattern *pt);
+void  gfx_pattern_grid(GfxPattern *pt, int cols, int rows, const float *xy, const float *uv, const Color *c);
 
 /* Index of the character boundary closest to x (for caret placement). */
 int   gfx_text_fit(FontId f, float size, const char *s, int len, float maxw);

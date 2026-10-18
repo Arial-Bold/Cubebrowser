@@ -204,7 +204,15 @@ void gfx_begin_frame(void) {
     gfx_clear_clip();
     cur_mode = -1;
     cur_font = -1;
+    gfx_set_additive(false);
     if (tex_invalidate) { GX_InvalidateTexAll(); tex_invalidate = false; }
+}
+
+/* Light-like drawing: what's drawn is added to what's already there, so
+ * overlapping shapes brighten instead of covering each other. */
+void gfx_set_additive(bool on) {
+
+    GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, on ? GX_BL_ONE : GX_BL_INVSRCALPHA, GX_LO_CLEAR);
 }
 
 /* Waits for the GPU to finish, but never forever: true if it finished. */
@@ -522,6 +530,14 @@ void gfx_quad(const float *p, Color c) {
     GX_End();
 }
 
+void gfx_quad_colors(const float *p, const Color *c) {
+    for (int i = 0; i < 8; i++) if (!sane(p[i])) return;
+    mode_color();
+    BEGIN(GX_QUADS, 4);
+    for (int i = 0; i < 4; i++) vtx(p[i * 2], p[i * 2 + 1], c[i]);
+    GX_End();
+}
+
 void gfx_line(float x1, float y1, float x2, float y2, float t, Color c) {
     if (!sane(x1) || !sane(y1) || !sane(x2) || !sane(y2) || !sane(t)) return;
     float dx = x2 - x1, dy = y2 - y1;
@@ -685,9 +701,8 @@ void gfx_image_free(GfxImage *img) {
     img->data = NULL;
 }
 
-void gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color c) {
-    if (!img->data || !img->tex_w || !img->tex_h) return;
-    if (!isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || w <= 0 || h <= 0) return;
+/* colour = texture x vertex colour */
+static void mode_image(void) {
     if (cur_mode != 2) {
         cur_mode = 2;
         GX_ClearVtxDesc();
@@ -700,6 +715,12 @@ void gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color c) 
         GX_SetTevOp(GX_TEVSTAGE0, GX_MODULATE);
     }
     cur_font = -1;
+}
+
+void gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color c) {
+    if (!img->data || !img->tex_w || !img->tex_h) return;
+    if (!isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || w <= 0 || h <= 0) return;
+    mode_image();
     frame_images++;
     GX_LoadTexObj(&img->obj, GX_TEXMAP0);
     float u1 = (float)img->w / img->tex_w, v1 = (float)img->h / img->tex_h;
@@ -709,4 +730,54 @@ void gfx_image_draw(GfxImage *img, float x, float y, float w, float h, Color c) 
     GX_Position2f32(x + w, y + h); GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(u1, v1);
     GX_Position2f32(x, y + h);     GX_Color4u8(c.r, c.g, c.b, c.a); GX_TexCoord2f32(0, v1);
     GX_End();
+}
+
+/* --------------------------------------------------------------- patterns */
+
+/* A small greyscale texture that repeats in both directions; `data` is
+ * w x h bytes, one per pixel, row by row (it's rearranged into the GPU's
+ * 8x4 tiles here). w and h are powers of two, 8 to 256. */
+bool gfx_pattern_init(GfxPattern *pt, const unsigned char *data, int w, int h) {
+    pt->data = NULL;
+    if (w < 8 || h < 4 || w > 256 || h > 256 || (w & (w - 1)) || (h & (h - 1))) return false;
+    unsigned char *t = memalign(32, (size_t)w * h);
+    if (!t) return false;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+            t[((y >> 2) * (w >> 3) + (x >> 3)) * 32 + (y & 3) * 8 + (x & 7)] = data[y * w + x];
+    DCFlushRange(t, (u32)(w * h));
+    pt->data = t;
+    pt->w = (u16)w;
+    pt->h = (u16)h;
+    GX_InitTexObj(&pt->obj, t, (u16)w, (u16)h, GX_TF_I8, GX_REPEAT, GX_REPEAT, GX_FALSE);
+    GX_InitTexObjLOD(&pt->obj, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+    tex_invalidate = true;
+    return true;
+}
+
+void gfx_pattern_free(GfxPattern *pt) {
+    free(pt->data);
+    pt->data = NULL;
+}
+
+/* A grid of (cols+1) x (rows+1) points, each with its own place, texture
+ * position (1.0 = once across the pattern) and colour. */
+void gfx_pattern_grid(GfxPattern *pt, int cols, int rows, const float *xy, const float *uv, const Color *c) {
+    if (!pt->data || cols < 1 || rows < 1) return;
+    int n = (cols + 1) * (rows + 1);
+    for (int i = 0; i < n * 2; i++) if (!sane(xy[i]) || !isfinite(uv[i])) return;
+    mode_image();
+    GX_LoadTexObj(&pt->obj, GX_TEXMAP0);
+    for (int r = 0; r < rows; r++) {
+        BEGIN(GX_TRIANGLESTRIP, (cols + 1) * 2);
+        for (int k = 0; k <= cols; k++) {
+            for (int d = 0; d < 2; d++) {
+                int i = (r + d) * (cols + 1) + k;
+                GX_Position2f32(xy[i * 2], xy[i * 2 + 1]);
+                GX_Color4u8(c[i].r, c[i].g, c[i].b, c[i].a);
+                GX_TexCoord2f32(uv[i * 2], uv[i * 2 + 1]);
+            }
+        }
+        GX_End();
+    }
 }
