@@ -97,9 +97,12 @@ void underwater_draw(float x, float y, float w, float h, float alpha, float t) {
     if (alpha <= 0.003f || w < 20 || h < 20) return;
     if (!pattern_tried) make_pattern();
 
-    /* the water */
+    /* the water, which also marks its rounded shape: everything else is
+     * drawn only inside it, right up to the edges and around the corners */
+    gfx_mask_begin();
     gfx_rrect_vgrad(x, y, w, h, 14, fade(rgba(38, 112, 190, 255), alpha), fade(rgba(3, 20, 58, 255), alpha));
-    gfx_set_clip(x + 4, y + 4, w - 8, h - 8);   /* inside the rounded corners */
+    gfx_mask_use();
+    gfx_set_clip(x, y, w, h);
     gfx_rect_vgrad(x, y + h * 0.35f, w, h * 0.65f, fade(rgba(10, 50, 110, 0), alpha), fade(rgba(2, 12, 40, 150), alpha));
 
     gfx_set_additive(true);
@@ -166,4 +169,5 @@ void underwater_draw(float x, float y, float w, float h, float alpha, float t) {
     int dots = (int)fmodf(t * 2.5f, 4.0f);
     gfx_text(FONT_UI, 30, lx + lw, ty, fade(rgba(255, 255, 255, 235), alpha), "...", dots);
     gfx_clear_clip();
+    gfx_mask_end();
 }

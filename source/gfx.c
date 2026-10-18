@@ -205,8 +205,17 @@ void gfx_begin_frame(void) {
     cur_mode = -1;
     cur_font = -1;
     gfx_set_additive(false);
+    GX_SetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
     if (tex_invalidate) { GX_InvalidateTexAll(); tex_invalidate = false; }
 }
+
+/* Shape masks, using the depth buffer (otherwise unused: it's cleared to
+ * "far" every frame and nothing else writes to it). Shapes drawn between
+ * begin and use mark their pixels; after use, drawing only lands on marked
+ * pixels, so effects can follow a rounded shape exactly. */
+void gfx_mask_begin(void) { GX_SetZMode(GX_TRUE, GX_ALWAYS, GX_TRUE); }
+void gfx_mask_use(void) { GX_SetZMode(GX_TRUE, GX_EQUAL, GX_FALSE); }
+void gfx_mask_end(void) { GX_SetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE); }
 
 /* Light-like drawing: what's drawn is added to what's already there, so
  * overlapping shapes brighten instead of covering each other. */

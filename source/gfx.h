@@ -33,6 +33,12 @@ void gfx_begin_frame(void);
 /* Additive drawing (for light): colours add to what's underneath. Every
  * frame starts with normal drawing. */
 void gfx_set_additive(bool on);
+/* Masks: what's drawn after gfx_mask_begin() marks the screen; after
+ * gfx_mask_use(), drawing only shows on marked pixels; gfx_mask_end() stops.
+ * For one effect at a time, within a frame. */
+void gfx_mask_begin(void);
+void gfx_mask_use(void);
+void gfx_mask_end(void);
 void gfx_end_frame(void);
 
 /* Transform applied to everything drawn: x' = x*sx + tx, y' = y*sy + ty */
