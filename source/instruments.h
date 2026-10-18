@@ -7,9 +7,16 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "packsamp.h"
+
+enum { SFMT_PCM16, SFMT_BLOCK8, SFMT_ADPCM };
 
 typedef struct {
-    const int16_t *data;      /* samples in the console's byte order */
+    const int16_t *data;      /* 16-bit samples in the console's byte order (SFMT_PCM16) */
+    uint8_t fmt;              /* or packed smaller (packsamp.h): */
+    const void *packed;       /*   BLOCK8: int8 samples; ADPCM: 4-bit codes */
+    const void *aux;          /*   BLOCK8: scales; ADPCM: checkpoints */
+    uint32_t first;           /*   where in them this zone's sample 0 is */
     uint32_t len;             /* playable length in samples */
     uint32_t loop_start, loop_end;
     bool loop;

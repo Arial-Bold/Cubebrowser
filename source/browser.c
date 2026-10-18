@@ -23,6 +23,7 @@
 #include "midi.h"
 #include "music_ui.h"
 #include "memstat.h"
+#include <ogc/lwp_watchdog.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <ctype.h>
@@ -400,6 +401,8 @@ static float note_wrap(FontId f, float size, float x, float y, float w, Color c,
     }
     return yy - y;
 }
+
+static int last_scroll_frame;   /* the page last moved under you (scroll stick, D-pad, glide) */
 
 /* <meta http-equiv="refresh"> forwarding: where to, and when */
 static char refresh_url[URL_MAX];
@@ -985,15 +988,16 @@ static void schedule_images(float view_top, float view_h, float max_w) {
         if (sheets_pending()) return;
     }
     if (!g_set.load_images) return;
-    if (cb_mem_free() < 2u * 1024u * 1024u) { stop_pictures_low_memory(); return; }
     if (page.image_bytes >= IMAGE_BUDGET) {
         /* the pictures around here alone fill the budget: skip the rest of
          * them (pictures further away still load once these are let go) */
         bool changed = false;
-        for (int i = 0; i < page.nboxes; i++) {
-            const Box *b = &page.boxes[i];
+        const int *vis;
+        int nvis = page_visible(&page, view_top - LOAD_ABOVE * view_h, view_h * (1 + LOAD_ABOVE + LOAD_BELOW), &vis);
+        for (int vi = 0; vi < nvis; vi++) {
+            const Box *b = &page.boxes[vis[vi]];
             if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages) continue;
-            if (page.images[b->text].state != IMG_NONE || !box_within(b, view_top, view_h, LOAD_ABOVE, LOAD_BELOW)) continue;
+            if (page.images[b->text].state != IMG_NONE) continue;
             page.images[b->text].state = IMG_SKIPPED;
             changed = true;
         }
@@ -1002,16 +1006,20 @@ static void schedule_images(float view_top, float view_h, float max_w) {
     }
     int pick = -1;
     for (int pass = 0; pass < 2 && pick < 0; pass++) {
-        for (int i = 0; i < page.nboxes; i++) {
-            Box *b = &page.boxes[i];
-            if (b->type != BOX_IMAGE || page.images[b->text].state != IMG_NONE) continue;
-            if (pass == 0 && (b->y + b->h < view_top - 100 || b->y > view_top + view_h + 400)) continue;
-            if (pass == 1 && !box_within(b, view_top, view_h, LOAD_ABOVE, LOAD_BELOW)) continue;
+        /* on screen first, then the rest of the loading window */
+        const int *vis;
+        int nvis = pass == 0 ? page_visible(&page, view_top - 100, view_h + 500, &vis)
+                             : page_visible(&page, view_top - LOAD_ABOVE * view_h, view_h * (1 + LOAD_ABOVE + LOAD_BELOW), &vis);
+        for (int vi = 0; vi < nvis; vi++) {
+            Box *b = &page.boxes[vis[vi]];
+            if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages || page.images[b->text].state != IMG_NONE) continue;
             pick = b->text;
             break;
         }
     }
     if (pick < 0) return;
+    /* checking free memory walks the whole heap, so only when about to load one */
+    if (cb_mem_free() < 2u * 1024u * 1024u) { stop_pictures_low_memory(); return; }
     PageImage *im = &page.images[pick];
     for (int k = 0; k < page.nimages; k++) {   /* the same picture already loaded or loading? */
         PageImage *o = &page.images[k];
@@ -1044,11 +1052,12 @@ static int images_pending(void) {
         seen_cap = page.nimages;
     }
     if (page.nimages > 0) memset(seen, 0, (size_t)page.nimages);
-    for (int i = 0; i < page.nboxes; i++) {
-        const Box *b = &page.boxes[i];
+    const int *vis;   /* only near where you're reading: further ones load when you get near */
+    int nvis = page_visible(&page, page.scroll - LOAD_ABOVE * last_view_h, last_view_h * (1 + LOAD_ABOVE + LOAD_BELOW), &vis);
+    for (int vi = 0; vi < nvis; vi++) {
+        const Box *b = &page.boxes[vis[vi]];
         if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages) continue;
         if (page.images[b->text].state != IMG_NONE || seen[b->text]) continue;
-        if (!box_within(b, page.scroll, last_view_h, LOAD_ABOVE, LOAD_BELOW)) continue;   /* loads when you get near */
         seen[b->text] = 1;   /* once, even if it has several boxes */
         n++;
     }
@@ -1547,11 +1556,19 @@ void browser_frame(bool interactive) {
     int since = ui_frame() - last_layout_frame;
     bool waiting_sheets = page.restyle && last_layout_w != 0 && page.styled_author == (g_set.page_styles != 0) &&
                           sheets_pending() && since < 600;
-    bool image_relayout = page.relayout && since >= 90 && (input_stick_idle(20) || since >= 300);
+    /* Laying out a long page again (when pictures arrive) can take a good
+     * fraction of a second, so wait until you've stopped scrolling and moving
+     * the pointer: doing it mid-scroll is what made long pages like Wikipedia
+     * stutter, as pictures kept arriving while you scrolled */
+    bool scrolling = ui_frame() - last_scroll_frame < 45;
+    bool image_relayout = page.relayout && since >= 90 && ((input_stick_idle(20) && !scrolling) || since >= 900);
     if (has_page && (last_layout_w != cw || last_layout_scale != scale || image_relayout || (page.restyle && !waiting_sheets))) {
         last_layout_frame = ui_frame();
         diag_note(DIAG_MAIN, "laying out page (%d pictures ready)", page.nimages);
+        u64 t0 = gettime();
         page_layout(&page, cw, scale);
+        unsigned ms = (unsigned)ticks_to_millisecs(gettime() - t0);
+        if (ms > 100) http_log_note("layout  | %u ms for %d boxes | %.70s", ms, page.nboxes, page.url);
         last_layout_w = cw;
         last_layout_scale = scale;
         if (restore_scroll >= 0) { page.scroll = page.scroll_target = restore_scroll; restore_scroll = -1; }
@@ -1632,11 +1649,14 @@ void browser_frame(bool interactive) {
     } else if (has_page) {
         /* scrolling */
         if (input_ok) {
+            float before = page.scroll_target;
             page.scroll_target += input_scroll_delta();
             int d = ui_dpad_unhandled();
             if (d == DIR_DOWN) page.scroll_target += 120;
             if (d == DIR_UP) page.scroll_target -= 120;
+            if (page.scroll_target != before) last_scroll_frame = ui_frame();
         }
+        if (fabsf(page.scroll_target - page.scroll) > 2) last_scroll_frame = ui_frame();   /* still gliding */
         float max_scroll = page.content_h - ch;
         if (max_scroll < 0) max_scroll = 0;
         if (page.scroll_target > max_scroll) page.scroll_target = max_scroll;
@@ -1657,7 +1677,10 @@ void browser_frame(bool interactive) {
 
         /* register visible links/fields as targets and find the hovered one */
         float px = input_cursor_x(), py = input_cursor_y();
-        for (int i = 0; i < page.nboxes; i++) {
+        const int *vis;
+        int nvis = page_visible(&page, page.scroll, ch, &vis);
+        for (int vi = 0; vi < nvis; vi++) {
+            int i = vis[vi];
             Box *b = &page.boxes[i];
             if (b->link < 0 && b->field < 0) continue;
             float yy = cy + b->y - page.scroll;

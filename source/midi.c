@@ -154,6 +154,9 @@ typedef struct {
     AESNDPB *pb;
     /* a new note for a running voice, published by bumping gen */
     const int16_t *data;
+    uint8_t fmt;                   /* or packed (packsamp.h): */
+    const void *packed, *aux;
+    uint32_t first;
     uint32_t len, loop_start, loop_end;
     bool loop;
     volatile uint32_t gen;
@@ -165,6 +168,10 @@ typedef struct {
     /* the note being played, owned by the callback while the voice runs */
     uint32_t applied;
     const int16_t *c_data;
+    uint8_t c_fmt;
+    const void *c_packed, *c_aux;
+    uint32_t c_first;
+    AdpcmDec dec;                  /* where the ADPCM decoding has got to */
     uint32_t c_len, c_ls, c_le, pos;
     bool c_loop, done;
     int16_t staging[STAGE_SAMPLES] __attribute__((aligned(32)));
@@ -180,16 +187,22 @@ static void audio_block(void *buf, u32 len) { (void)buf; (void)len; frame_no++; 
 /* Copies the next n samples of the note into dst, wrapping at the loop. */
 static void hw_fill(HwVoice *h, int16_t *dst, int n) {
     while (n > 0) {
-        if (!h->c_data || h->done) { memset(dst, 0, (size_t)n * 2); return; }
+        if ((!h->c_data && !h->c_packed) || h->done) { memset(dst, 0, (size_t)n * 2); return; }
         uint32_t end = h->c_loop ? h->c_le : h->c_len;
         if (h->pos >= end) {
-            if (h->c_loop) { h->pos = h->c_ls; continue; }
+            if (h->c_loop) {
+                h->pos = h->c_ls;
+                if (h->c_fmt == SFMT_ADPCM) adpcm_seek(&h->dec, h->c_first + h->pos);
+                continue;
+            }
             h->done = true;
             continue;
         }
         uint32_t k = end - h->pos;
         if (k > (uint32_t)n) k = (uint32_t)n;
-        memcpy(dst, h->c_data + h->pos, k * 2);
+        if (h->c_fmt == SFMT_ADPCM) adpcm_read(&h->dec, dst, k);
+        else if (h->c_fmt == SFMT_BLOCK8) blk8_read(h->c_packed, h->c_aux, h->c_first + h->pos, dst, k);
+        else memcpy(dst, h->c_data + h->pos, k * 2);
         dst += k;
         n -= (int)k;
         h->pos += k;
@@ -199,6 +212,15 @@ static void hw_fill(HwVoice *h, int16_t *dst, int n) {
 static void hw_take_note(HwVoice *h) {
     h->applied = h->gen;
     h->c_data = h->data;
+    h->c_fmt = h->fmt;
+    h->c_packed = h->packed;
+    h->c_aux = h->aux;
+    h->c_first = h->first;
+    if (h->c_fmt == SFMT_ADPCM) {
+        h->dec.data = h->c_packed;
+        h->dec.ck = h->c_aux;
+        adpcm_seek(&h->dec, h->c_first);
+    }
     h->c_len = h->len;
     h->c_ls = h->loop_start;
     h->c_le = h->loop_end;
@@ -281,6 +303,10 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
     if (h->state == HV_RUNNING) {
         /* still running: hand the note to its callback */
         h->data = z->data;
+        h->fmt = z->fmt;
+        h->packed = z->packed;
+        h->aux = z->aux;
+        h->first = z->first;
         h->len = z->len;
         h->loop_start = z->loop_start;
         h->loop_end = z->loop_end;
@@ -298,6 +324,10 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
     for (int k = 0; k < 10 && !hw_settled(h); k++) thr_sleep_ms(1);
     if (!hw_settled(h)) return;
     h->data = z->data;
+    h->fmt = z->fmt;
+    h->packed = z->packed;
+    h->aux = z->aux;
+    h->first = z->first;
     h->len = z->len;
     h->loop_start = z->loop_start;
     h->loop_end = z->loop_end;

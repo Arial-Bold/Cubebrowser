@@ -1791,6 +1791,72 @@ void page_set_source(Page *p, char *src, size_t len, bool plain, const char *url
     p->restyle = true;
 }
 
+/* ------------------------------------------------------- on-screen boxes */
+
+#define TALL_BOX 400.0f
+
+static const Box *sort_boxes;
+static int cmp_top(const void *a, const void *b) {
+    float ya = sort_boxes[*(const int *)a].y, yb = sort_boxes[*(const int *)b].y;
+    return (ya > yb) - (ya < yb);
+}
+static int cmp_int(const void *a, const void *b) { return *(const int *)a - *(const int *)b; }
+
+static void build_box_index(Page *p) {
+    p->nby_top = p->ntall = 0;
+    if (p->nboxes > p->cap_index) {
+        int nc = p->nboxes + 1024;
+        int *a = realloc(p->by_top, sizeof(int) * (size_t)nc), *b = a ? realloc(p->tall, sizeof(int) * (size_t)nc) : NULL;
+        if (a) p->by_top = a;
+        if (b) p->tall = b;
+        if (!a || !b) { p->cap_index = 0; return; }   /* page_visible falls back to every box */
+        p->cap_index = nc;
+    }
+    for (int i = 0; i < p->nboxes; i++) {
+        if (p->boxes[i].h > TALL_BOX || !isfinite(p->boxes[i].y)) p->tall[p->ntall++] = i;
+        else p->by_top[p->nby_top++] = i;
+    }
+    sort_boxes = p->boxes;
+    qsort(p->by_top, (size_t)p->nby_top, sizeof(int), cmp_top);
+}
+
+int page_visible(Page *p, float top, float h, const int **idx) {
+    if (p->cap_vis < p->nboxes) {
+        int nc = p->nboxes + 256;
+        int *v = realloc(p->vis, sizeof(int) * (size_t)nc);
+        if (!v) { *idx = NULL; return 0; }
+        p->vis = v;
+        p->cap_vis = nc;
+    }
+    int n = 0;
+    if (!p->cap_index || p->nby_top + p->ntall != p->nboxes) {   /* no index: check them all */
+        for (int i = 0; i < p->nboxes; i++)
+            if (p->boxes[i].y + p->boxes[i].h >= top && p->boxes[i].y <= top + h) p->vis[n++] = i;
+        *idx = p->vis;
+        return n;
+    }
+    /* short boxes: from the first whose top is within TALL_BOX above the view */
+    int lo = 0, hi = p->nby_top;
+    float from = top - TALL_BOX;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (p->boxes[p->by_top[mid]].y < from) lo = mid + 1;
+        else hi = mid;
+    }
+    for (int k = lo; k < p->nby_top; k++) {
+        const Box *b = &p->boxes[p->by_top[k]];
+        if (b->y > top + h) break;
+        if (b->y + b->h >= top) p->vis[n++] = p->by_top[k];
+    }
+    for (int k = 0; k < p->ntall; k++) {
+        const Box *b = &p->boxes[p->tall[k]];
+        if (b->y + b->h >= top && b->y <= top + h) p->vis[n++] = p->tall[k];
+    }
+    qsort(p->vis, (size_t)n, sizeof(int), cmp_int);   /* back to drawing order */
+    *idx = p->vis;
+    return n;
+}
+
 static void layout_job(void *arg);
 
 void page_layout(Page *p, float width, float text_scale) {
@@ -1826,6 +1892,7 @@ static void layout_job(void *arg) {
     float fb = floats_bottom(p, 0, 0, width, CL_BOTH);
     if (fb > bottom) bottom = fb;
     p->content_h = bottom + 12;
+    build_box_index(p);
 }
 
 void page_free(Page *p) {
@@ -1836,6 +1903,11 @@ void page_free(Page *p) {
     arena_free(&p->style_arena);
     free(p->src);
     free(p->boxes);
+    free(p->by_top);
+    free(p->tall);
+    free(p->vis);
+    p->by_top = p->tall = p->vis = NULL;
+    p->cap_index = p->cap_vis = p->nby_top = p->ntall = 0;
     free(p->arena);
     free(p->links);
     free(p->link_dl);
@@ -1854,8 +1926,10 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
     const Theme *t = theme();
     float top = p->scroll;
     gfx_set_clip(x, y, w, h);
-    for (int i = 0; i < p->nboxes; i++) {
-        Box *b = &p->boxes[i];
+    const int *vis;
+    int nvis = page_visible(p, top, h, &vis);
+    for (int vi = 0; vi < nvis; vi++) {
+        Box *b = &p->boxes[vis[vi]];
         if (!isfinite(b->x) || !isfinite(b->y) || !isfinite(b->w) || !isfinite(b->h) || b->w > 8192 || b->h > 8192 ||
             b->w < 0 || b->h < 0 || b->x < -8192 || b->x > 8192)
             continue;   /* never hand the GPU nonsense */
@@ -1981,8 +2055,8 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
      * modes for every link, which made scrolling through link-heavy text
      * (like Wikipedia) slow. */
     for (int pass = -1; pass < FONT_COUNT; pass++) {
-        for (int i = 0; i < p->nboxes; i++) {
-            Box *b = &p->boxes[i];
+        for (int vi = 0; vi < nvis; vi++) {
+            Box *b = &p->boxes[vis[vi]];
             if (b->type != BOX_TEXT || b->y + b->h < top || b->y > top + h) continue;
             if (!isfinite(b->x) || !isfinite(b->y) || !isfinite(b->w) || !isfinite(b->h) || b->w > 8192 ||
                 b->h > 8192 || b->w < 0 || b->h < 0 || b->x < -8192 || b->x > 8192)

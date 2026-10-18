@@ -86,6 +86,11 @@ typedef struct {
     /* layout output */
     Box *boxes;
     int nboxes, capboxes;
+    /* finding the boxes on screen without looking at all of them (a long
+     * article has tens of thousands): short boxes sorted by top edge, plus
+     * the few tall ones (backgrounds, big pictures) */
+    int *by_top, *tall, *vis;
+    int nby_top, ntall, cap_index, cap_vis;
     char *arena;
     int arena_len, arena_cap;
     char **links;
@@ -114,6 +119,9 @@ void page_set_source(Page *p, char *src, size_t len, bool plain, const char *url
 void page_layout(Page *p, float width, float text_scale);
 void page_free(Page *p);
 void page_free_images(Page *p);
+/* The boxes that overlap [top, top + h], in their original (drawing) order.
+ * The list stays valid until the next layout or call. */
+int page_visible(Page *p, float top, float h, const int **idx);
 void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int hover_field);
 int  page_hit(Page *p, float px, float py, int *field_out);
 const char *page_link_url(Page *p, int link);

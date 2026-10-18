@@ -4,6 +4,7 @@
  * the volume envelope. Modulators, filters and LFOs are not used. */
 #include "instruments.h"
 #include "memstat.h"
+#include "settings.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,14 +33,39 @@
 #define SAMPLE_RESERVE (8u * 1024u * 1024u)   /* ...but always leave this much for web pages (long ones like Wikipedia need it) */
 #define META_MAX (4u * 1024u * 1024u)
 
+/* How SoundFont samples are kept (Settings > Music > Instrument memory):
+ * 16-bit, 8-bit with block scales (half), or 4-bit ADPCM (a quarter). Test
+ * programs on a PC always keep 16-bit (their mixer reads samples directly). */
+static int wanted_fmt(void) {
+#if defined(GEKKO) || defined(SF2_PACK_TEST)
+    int m = g_set.music_mem;
+    return m == 0 ? SFMT_PCM16 : m == 2 ? SFMT_ADPCM : SFMT_BLOCK8;
+#else
+    return SFMT_PCM16;
+#endif
+}
+
+static size_t fmt_bytes(int fmt, uint32_t frames) {
+    switch (fmt) {
+    case SFMT_BLOCK8: return frames + blk8_scale_count(frames);
+    case SFMT_ADPCM: return adpcm_ck_count(frames) * sizeof(AdpcmCk) + adpcm_data_bytes(frames);
+    default: return (size_t)frames * 2;
+    }
+}
+
 typedef struct {
-    int16_t *data;        /* loaded frames, from the sample's start */
+    int16_t *data;        /* SFMT_PCM16: loaded frames, from the sample's start */
+    void *block;          /* packed formats: one allocation holding aux then packed */
+    const void *packed, *aux;
+    uint8_t fmt;
     uint32_t raw_end;     /* how far into the sample (in file frames) is loaded */
     uint32_t need_end;    /* how far the coming song needs */
     uint8_t div;          /* 1, or 2 when stored at half rate */
     bool needed;
     uint32_t bytes;
 } SampleSlot;
+
+static bool slot_loaded(const SampleSlot *sl) { return sl->data || sl->block; }
 
 typedef struct {
     char path[256];
@@ -68,7 +94,7 @@ static void *alloc_samples(size_t n);
 
 void instruments_unload_sf2(void) {
     if (sf_loaded) {
-        for (uint32_t i = 0; i < sf.nshdr; i++) free(sf.slots[i].data);
+        for (uint32_t i = 0; i < sf.nshdr; i++) { free(sf.slots[i].data); free(sf.slots[i].block); }
         free(sf.slots);
         free(sf.meta);
     }
@@ -382,12 +408,21 @@ static uint32_t spec_need(const ZoneSpec *sp) {
 static bool spec_zone(const ZoneSpec *sp, Zone *z) {
     const SampleSlot *sl = &sf.slots[sp->sid];
     uint32_t need = spec_need(sp);
-    if (!sl->data || sl->raw_end < need) return false;
+    if (!slot_loaded(sl) || sl->raw_end < need) return false;
     *z = sp->z;
     uint32_t d = sl->div;
     uint32_t off = (uint32_t)(sp->start - sp->base) / d;
     uint32_t avail = sl->raw_end / d;
-    z->data = sl->data + off;
+    z->fmt = sl->fmt;
+    z->first = off;
+    if (sl->fmt == SFMT_PCM16) {
+        z->data = sl->data + off;
+        z->packed = z->aux = NULL;
+    } else {
+        z->data = NULL;
+        z->packed = sl->packed;
+        z->aux = sl->aux;
+    }
     uint32_t end = (uint32_t)(sp->end - sp->base) / d;
     if (end > avail) end = avail;
     if (z->loop) {
@@ -434,10 +469,13 @@ void instruments_need(int bank, int program, bool drums, int key, int vel) {
 }
 
 static void slot_free(SampleSlot *sl) {
-    if (!sl->data) return;
+    if (!slot_loaded(sl)) return;
     free(sl->data);
+    free(sl->block);
     sf.loaded_bytes -= sl->bytes;
     sl->data = NULL;
+    sl->block = NULL;
+    sl->packed = sl->aux = NULL;
     sl->bytes = 0;
     sl->raw_end = 0;
 }
@@ -452,43 +490,74 @@ static bool load_slot(FILE *f, int sid, uint32_t need) {
     uint8_t div = sample_div(sid);
     uint32_t frames = need / div;
     if (frames < 4) return false;
-    int16_t *dst = alloc_samples(frames);
-    if (!dst) return false;
+    int fmt = wanted_fmt();
+    int16_t *dst = NULL;
+    void *block = NULL;
+    size_t bytes = fmt_bytes(fmt, frames);
+    AdpcmEnc enc = { 0 };
+    int8_t *b8 = NULL;
+    uint8_t *b8s = NULL;
+    int16_t pend[BLK8_N];   /* BLOCK8 packs 16 samples at a time */
+    uint32_t npend = 0;
+    if (fmt == SFMT_PCM16) {
+        dst = alloc_samples(frames);
+        if (!dst) return false;
+    } else {
+        block = malloc(bytes);
+        if (!block) return false;
+        if (fmt == SFMT_ADPCM) {
+            enc.ck = block;
+            enc.data = (uint8_t *)block + adpcm_ck_count(frames) * sizeof(AdpcmCk);
+        } else {
+            b8s = block;
+            b8 = (int8_t *)((uint8_t *)block + blk8_scale_count(frames));
+        }
+    }
+#define PUT(v) do { int16_t pv_ = (v); \
+        if (dst) dst[out] = pv_; \
+        else if (enc.data) adpcm_put(&enc, pv_); \
+        else { pend[npend++] = pv_; if (npend == BLK8_N) { blk8_pack(pend, BLK8_N, b8 + out + 1 - BLK8_N, b8s + ((out + 1 - BLK8_N) >> BLK8_SHIFT)); npend = 0; } } \
+        out++; } while (0)
     static int16_t chunk[16384];
     bool swap = host_big_endian();
     uint32_t got = 0, out = 0;
     int16_t prev = 0;
-    if (fseek(f, sf.smpl_off + (long)base * 2, SEEK_SET) != 0) { free(dst); return false; }
+    if (fseek(f, sf.smpl_off + (long)base * 2, SEEK_SET) != 0) { free(dst); free(block); return false; }
     while (got < need) {
         uint32_t n = need - got;
         if (n > 16384) n = 16384;
-        if (fread(chunk, 2, n, f) != n) { free(dst); return false; }
+        if (fread(chunk, 2, n, f) != n) { free(dst); free(block); return false; }
         for (uint32_t i = 0; i < n; i++) {
             int16_t v = chunk[i];
             if (swap) v = (int16_t)(uint16_t)(((uint16_t)v >> 8) | ((uint16_t)v << 8));
             chunk[i] = v;
         }
         if (div == 1) {
-            memcpy(dst + out, chunk, n * 2);
-            out += n;
+            for (uint32_t i = 0; i < n && out < frames; i++) PUT(chunk[i]);
         } else {
             /* gentle low-pass, then every second frame */
             for (uint32_t i = 0; i < n; i++) {
                 uint32_t abs_i = got + i;
                 if ((abs_i & 1) == 0 && out < frames) {
                     int32_t nx = (i + 1 < n) ? chunk[i + 1] : chunk[i];
-                    dst[out++] = (int16_t)((prev + 2 * (int32_t)chunk[i] + nx) / 4);
+                    PUT((int16_t)((prev + 2 * (int32_t)chunk[i] + nx) / 4));
                 }
                 prev = chunk[i];
             }
         }
         got += n;
     }
+#undef PUT
+    if (npend) blk8_pack(pend, npend, b8 + out - npend, b8s + ((out - npend) >> BLK8_SHIFT));   /* the last few */
     slot_free(sl);
     sl->data = dst;
+    sl->block = block;
+    sl->fmt = (uint8_t)fmt;
+    sl->packed = fmt == SFMT_ADPCM ? (const void *)enc.data : (const void *)b8;
+    sl->aux = fmt == SFMT_ADPCM ? (const void *)enc.ck : (const void *)b8s;
     sl->div = div;
     sl->raw_end = (uint32_t)out * div;
-    sl->bytes = (uint32_t)frames * 2;
+    sl->bytes = (uint32_t)bytes;
     sf.loaded_bytes += sl->bytes;
     return true;
 }
@@ -496,27 +565,23 @@ static bool load_slot(FILE *f, int sid, uint32_t need) {
 bool instruments_need_load(char *msg, size_t msglen) {
     msg[0] = 0;
     if (!sf_loaded) return true;
-    /* drop what the coming song doesn't use */
-    size_t want = 0;
-    for (uint32_t i = 0; i < sf.nshdr; i++) {
-        SampleSlot *sl = &sf.slots[i];
-        if (sl->needed && (!sl->data || sl->raw_end < sl->need_end)) want += (size_t)sl->need_end / sample_div((int)i) * 2;
-    }
-    /* web pages need memory too: never leave less than SAMPLE_RESERVE free */
+    /* drop what the coming song doesn't use, and anything kept in another
+     * format than the Instrument memory setting now asks for */
+    int fmt = wanted_fmt();
     for (uint32_t i = 0; i < sf.nshdr; i++)
-        if (!sf.slots[i].needed) slot_free(&sf.slots[i]);
+        if (!sf.slots[i].needed || (slot_loaded(&sf.slots[i]) && sf.slots[i].fmt != fmt)) slot_free(&sf.slots[i]);
+    /* web pages need memory too: never leave less than SAMPLE_RESERVE free */
     size_t free_now = cb_mem_free();
     size_t budget = sf.loaded_bytes + (free_now > SAMPLE_RESERVE ? free_now - SAMPLE_RESERVE : 0);
     if (budget > SAMPLE_BUDGET) budget = SAMPLE_BUDGET;
-    (void)want;
     FILE *f = fopen(sf.path, "rb");
     if (!f) { snprintf(msg, msglen, "Couldn't open the SoundFont"); return false; }
     int skipped = 0;
     /* in file order, so the card reads mostly forwards */
     for (uint32_t i = 0; i < sf.nshdr; i++) {
         SampleSlot *sl = &sf.slots[i];
-        if (!sl->needed || (sl->data && sl->raw_end >= sl->need_end)) continue;
-        size_t bytes = (size_t)sl->need_end / sample_div((int)i) * 2;
+        if (!sl->needed || (slot_loaded(sl) && sl->raw_end >= sl->need_end)) continue;
+        size_t bytes = fmt_bytes(fmt, sl->need_end / sample_div((int)i));
         if (sf.loaded_bytes - sl->bytes + bytes > budget || !load_slot(f, (int)i, sl->need_end)) skipped++;
     }
     fclose(f);
