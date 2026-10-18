@@ -3,6 +3,7 @@
  * samples, and generators at both levels set ranges, tuning, loudness and
  * the volume envelope. Modulators, filters and LFOs are not used. */
 #include "instruments.h"
+#include "memstat.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +28,8 @@
  * loop, which the player never reaches. Samples stay cached for the next
  * song while there's room. */
 
-#define SAMPLE_BUDGET (10u * 1024u * 1024u)   /* memory for loaded samples */
+#define SAMPLE_BUDGET (8u * 1024u * 1024u)    /* most memory for loaded samples */
+#define SAMPLE_RESERVE (7u * 1024u * 1024u)   /* ...but always leave this much for web pages */
 #define META_MAX (4u * 1024u * 1024u)
 
 typedef struct {
@@ -494,15 +496,19 @@ static bool load_slot(FILE *f, int sid, uint32_t need) {
 bool instruments_need_load(char *msg, size_t msglen) {
     msg[0] = 0;
     if (!sf_loaded) return true;
-    /* drop what the coming song doesn't use only if room is needed */
+    /* drop what the coming song doesn't use */
     size_t want = 0;
     for (uint32_t i = 0; i < sf.nshdr; i++) {
         SampleSlot *sl = &sf.slots[i];
         if (sl->needed && (!sl->data || sl->raw_end < sl->need_end)) want += (size_t)sl->need_end / sample_div((int)i) * 2;
     }
-    if (sf.loaded_bytes + want > SAMPLE_BUDGET)
-        for (uint32_t i = 0; i < sf.nshdr; i++)
-            if (!sf.slots[i].needed) slot_free(&sf.slots[i]);
+    /* web pages need memory too: never leave less than SAMPLE_RESERVE free */
+    for (uint32_t i = 0; i < sf.nshdr; i++)
+        if (!sf.slots[i].needed) slot_free(&sf.slots[i]);
+    size_t free_now = mem_free();
+    size_t budget = sf.loaded_bytes + (free_now > SAMPLE_RESERVE ? free_now - SAMPLE_RESERVE : 0);
+    if (budget > SAMPLE_BUDGET) budget = SAMPLE_BUDGET;
+    (void)want;
     FILE *f = fopen(sf.path, "rb");
     if (!f) { snprintf(msg, msglen, "Couldn't open the SoundFont"); return false; }
     int skipped = 0;
@@ -511,7 +517,7 @@ bool instruments_need_load(char *msg, size_t msglen) {
         SampleSlot *sl = &sf.slots[i];
         if (!sl->needed || (sl->data && sl->raw_end >= sl->need_end)) continue;
         size_t bytes = (size_t)sl->need_end / sample_div((int)i) * 2;
-        if (sf.loaded_bytes - sl->bytes + bytes > SAMPLE_BUDGET || !load_slot(f, (int)i, sl->need_end)) skipped++;
+        if (sf.loaded_bytes - sl->bytes + bytes > budget || !load_slot(f, (int)i, sl->need_end)) skipped++;
     }
     fclose(f);
     if (skipped)

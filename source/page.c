@@ -348,11 +348,40 @@ int page_next_sheet(Page *p) {
     return -1;
 }
 
+/* Removes the contents of url(data:...) values (fonts and pictures packed
+ * into the style sheet, often hundreds of KB, which this browser doesn't
+ * use), so the rules after them still fit in SHEET_MAX_BYTES. In place;
+ * returns the new length. */
+static size_t strip_data_urls(char *t, size_t len) {
+    size_t o = 0, i = 0;
+    while (i < len) {
+        if ((t[i] == 'u' || t[i] == 'U') && i + 4 < len && !strncasecmp(t + i, "url(", 4)) {
+            size_t j = i + 4;
+            while (j < len && isspace((unsigned char)t[j])) j++;
+            char q = (j < len && (t[j] == '"' || t[j] == '\'')) ? t[j] : 0;
+            size_t k = q ? j + 1 : j;
+            if (k + 5 <= len && !strncasecmp(t + k, "data:", 5)) {
+                if (q) { k++; while (k < len && t[k] != q) k++; if (k < len) k++; }
+                while (k < len && t[k] != ')') k++;
+                if (k < len) k++;
+                memcpy(t + o, "url()", 5);
+                o += 5;
+                i = k;
+                continue;
+            }
+        }
+        t[o++] = t[i++];
+    }
+    if (o < len) t[o] = 0;
+    return o;
+}
+
 void page_sheet_loaded(Page *p, int idx, char *text, size_t len) {
     if (idx < 0 || idx >= p->nsheets) { free(text); return; }
     PageSheet *ps = &p->sheets[idx];
     ps->state = SHEET_DONE;
     if (!text) return;
+    len = strip_data_urls(text, len);
     if (len > SHEET_MAX_BYTES) len = SHEET_MAX_BYTES;
     ps->text = text;
     ps->css = css_parse(text, (int)len);

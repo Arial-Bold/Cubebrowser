@@ -22,6 +22,7 @@
 #include "cookies.h"
 #include "midi.h"
 #include "music_ui.h"
+#include "memstat.h"
 #include <sys/stat.h>
 #include <ctype.h>
 #include <math.h>
@@ -761,12 +762,35 @@ static void share_image_result(int idx) {
  * rest go straight to the site. Reset when a new page loads. */
 static int helper_failures;
 
+/* Marks every picture not loaded yet as skipped, once per page. */
+static int low_memory_gen = -1;
+static void stop_pictures_low_memory(void) {
+    bool changed = false;
+    for (int i = 0; i < page.nimages; i++)
+        if (page.images[i].state == IMG_NONE) { page.images[i].state = IMG_SKIPPED; changed = true; }
+    if (changed) page.relayout = true;
+    if (low_memory_gen != page_gen) {
+        low_memory_gen = page_gen;
+        ui_toast(midi_state() == MIDI_PLAYING || midi_state() == MIDI_PAUSED
+                     ? "Low on memory: some pictures were skipped (stopping the music frees some)"
+                     : "Low on memory: some pictures were skipped");
+    }
+}
+
 static void apply_image(ImageResult *ir) {
     int idx = TAG_IDX(ir->tag);
     diag_note(DIAG_MAIN, "picture %d arrived: %s %dx%d", idx, ir->ok ? "ok" : ir->error, ir->img.w, ir->img.h);
     if (!TAG_CURRENT(ir->tag) || idx >= page.nimages) { image_free(&ir->img); return; }
     PageImage *im = &page.images[idx];
     bool moved = true;
+    if (!ir->ok && ir->low_memory) {
+        /* the console is out of memory: stop loading this page's pictures
+         * (retrying them, or fetching the full-size originals, only makes it worse) */
+        image_free(&ir->img);
+        im->state = IMG_FAILED;
+        stop_pictures_low_memory();
+        return;
+    }
     if (!ir->ok && !im->direct && g_set.image_proxy && im->url) {
         /* the image helper couldn't get it (archive.org often refuses it):
          * try the site directly before giving up */
@@ -846,6 +870,7 @@ static void schedule_images(float view_top, float view_h, float max_w) {
         if (sheets_pending()) return;
     }
     if (!g_set.load_images) return;
+    if (mem_free() < 2u * 1024u * 1024u) { stop_pictures_low_memory(); return; }
     if (page.image_bytes >= IMAGE_BUDGET) {
         bool changed = false;
         for (int i = 0; i < page.nimages; i++)

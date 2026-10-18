@@ -17,6 +17,7 @@ typedef struct {
     bool ok;
     DecodedImage img;
     char error[96];
+    bool low_memory;      /* failed because the console ran out of memory */
 } ImageResult;
 
 void        fetch_init(void);

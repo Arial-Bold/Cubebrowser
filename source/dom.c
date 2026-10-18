@@ -401,6 +401,16 @@ static Attr *parse_attrs(Arena *a, const char *s, int len) {
         if (!at) break;
         char *k = arena_strndup(a, s + ks, (size_t)klen);
         for (char *c = k; c && *c; c++) *c = (char)tolower((unsigned char)*c);
+        /* long values the browser never reads (tracking data, script
+         * handlers) are dropped to save memory on big pages; the names stay
+         * so [data-x] style selectors still match */
+        if (k && vlen > 48 &&
+            ((!strncmp(k, "data-", 5) && strcmp(k, "data-src") && strcmp(k, "data-srcset") && strcmp(k, "data-original")) ||
+             (!strncmp(k, "on", 2) && strcmp(k, "onchange")) ||
+             (!strncmp(k, "aria-", 5) && strcmp(k, "aria-label")))) {
+            v = "";
+            vlen = 0;
+        }
         char small[512];
         size_t cap = (size_t)vlen * 3 + 8;
         char *tmp = cap <= sizeof(small) ? small : malloc(cap);
