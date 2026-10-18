@@ -133,11 +133,11 @@ static bool spacer_name(const char *src) {
     name = name ? name + 1 : src;
     static const char *const pats[] = { "pixel_trans", "spacer", "blank.gif", "clear.gif", "clearpixel", "trans.gif",
                                         "transparent.gif", "shim.gif", "1x1.gif", "dot_clear", "pix.gif", NULL };
-    for (int i = 0; pats[i]; i++) {
-        size_t l = strlen(pats[i]);
-        for (const char *q = name; *q && *q != '?'; q++)
-            if (!strncasecmp(q, pats[i], l)) return true;
-    }
+    /* only at the start of the file name: "spacer.gif", "spacer_10.gif", but
+     * not "topnav_spacer.gif", which on old sites is often a visible slice of
+     * a navigation bar */
+    for (int i = 0; pats[i]; i++)
+        if (!strncasecmp(name, pats[i], strlen(pats[i]))) return true;
     return false;
 }
 
