@@ -33,10 +33,13 @@ SOURCES		:=	source $(MBEDTLS)/library
 DATA		:=
 INCLUDES	:=	source
 
-CFLAGS	=	-g -O2 -Wall -std=gnu11 $(MACHDEP) $(INCLUDE) \
+# -ffunction-sections/-fdata-sections + --gc-sections: code and data nothing
+# calls are left out of the program (it's loaded whole into the GameCube's
+# 24 MB, so unused code costs memory)
+CFLAGS	=	-g -O2 -Wall -std=gnu11 -ffunction-sections -fdata-sections $(MACHDEP) $(INCLUDE) \
 		-DMBEDTLS_USER_CONFIG_FILE='"gc_mbedtls_config.h"'
 CXXFLAGS	=	$(CFLAGS)
-LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map
+LDFLAGS	=	-g $(MACHDEP) -Wl,--gc-sections -Wl,-Map,$(notdir $@).map
 
 # libfat and libbba (GameCube network stack) must come before libogc
 LIBS	:=	-lfat -laesnd -lbba -logc -lm
