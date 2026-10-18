@@ -411,7 +411,9 @@ static uint32_t spec_need(const ZoneSpec *sp) {
 static bool spec_zone(const ZoneSpec *sp, Zone *z) {
     const SampleSlot *sl = &sf.slots[sp->sid];
     uint32_t need = spec_need(sp);
-    if (!slot_loaded(sl) || sl->raw_end < need) return false;
+    /* raw_end counts whole stored frames: at half rate an odd length ends one
+     * file frame short, which is still the complete sample */
+    if (!slot_loaded(sl) || sl->raw_end + sl->div - 1 < need) return false;
     *z = sp->z;
     uint32_t d = sl->div;
     uint32_t off = (uint32_t)(sp->start - sp->base) / d;
@@ -593,7 +595,7 @@ bool instruments_need_load(char *msg, size_t msglen) {
     /* in file order, so the card reads mostly forwards */
     for (uint32_t i = 0; i < sf.nshdr; i++) {
         SampleSlot *sl = &sf.slots[i];
-        if (!sl->needed || (slot_loaded(sl) && sl->raw_end >= sl->need_end)) continue;
+        if (!sl->needed || (slot_loaded(sl) && sl->raw_end + sl->div - 1 >= sl->need_end)) continue;
         size_t bytes = fmt_bytes(fmt, sl->need_end / sample_div((int)i));
         if (sf.loaded_bytes - sl->bytes + bytes > budget) { skipped++; over_budget++; }
         else if (!load_slot(f, (int)i, sl->need_end)) { skipped++; failed++; }
