@@ -164,6 +164,7 @@ static void run_action(int idx) {
         char old[300], msg[300];
         snprintf(old, sizeof(old), "%s/", storage_dir());
         bool to_root = !storage_dir_is_root();
+        picache_clear();   /* saved pictures aren't worth moving; they come back as you browse */
         if (storage_move_data(to_root, msg, sizeof(msg))) {
             /* a certificate file inside the old folder moved with it */
             if (!strncmp(g_set.ca_path, old, strlen(old))) {

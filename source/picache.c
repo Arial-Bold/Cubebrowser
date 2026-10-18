@@ -1,13 +1,13 @@
 /* picache.c - see picache.h.
  *
- * Layout: sd:/webcache/<0-f>/<16 hex digits>.pic, the name being a
+ * Layout: <data folder>/webcache/<0-f>/<16 hex digits>.pic, the name being a
  * hash of the picture's address (16 sub-folders keep each folder small, which
  * keeps FAT lookups quick). A file holds:
  *     "CBPC" | address length (4 bytes, big-endian) | address | picture
  * The address is checked on reading, so two addresses with the same hash
  * can't mix up pictures.
  *
- * sd:/webcache/size holds the running total, so the cache doesn't
+ * <data folder>/webcache/size holds the running total, so the cache doesn't
  * have to be measured at every start. Only when the total passes the limit is
  * the whole cache listed and the oldest files removed (down to 80%). */
 #include "picache.h"
@@ -56,7 +56,7 @@ static uint64_t hash64(const char *s) {   /* FNV-1a */
     return h;
 }
 
-static void cache_dir(char *out, size_t cap) { snprintf(out, cap, "%s", PICACHE_DIR); }
+static void cache_dir(char *out, size_t cap) { storage_path(out, cap, PICACHE_DIR); }
 
 static void file_for(const char *url, char *out, size_t cap, char *sub, size_t subcap) {
     char dir[400];
@@ -250,9 +250,13 @@ unsigned long long picache_clear(void) {
         }
         rmdir(sub);
     }
+    /* and the folder itself, so nothing is left if the data folder moves */
+    char path[420];
+    snprintf(path, sizeof(path), "%s/size", dir);
+    remove(path);
+    rmdir(dir);
     total = 0;
     total_known = true;
-    save_total();
     give();
     return freed;
 }

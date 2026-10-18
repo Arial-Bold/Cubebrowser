@@ -131,7 +131,7 @@ const SetDef g_setdefs[] = {
     { CAT_BROWSING, "web.imgproxy", "Image helper", ST_BOOL, O(image_proxy), 0, 1, 1, NULL, NULL,
       "Shrinks pictures on images.weserv.nl. Faster, but that site sees image addresses." },
     { CAT_BROWSING, "web.piccache", "Picture cache", ST_CHOICE, O(pic_cache), 0, 4, 1, pic_cache_names, NULL,
-      "Keeps pictures in sd:/webcache so pages you've seen before load faster. The oldest go when it's full." },
+      "Keeps pictures in gcbrowser/webcache so pages you've seen before load faster. The oldest go when it's full." },
     { CAT_BROWSING, "web.alt", "Show image labels", ST_BOOL, O(show_alt), 0, 1, 1, NULL, NULL,
       "Show descriptions for pictures that can't be shown." },
     { CAT_BROWSING, "web.maxkb", "Max page size", ST_INT, O(max_page_kb), 256, 4096, 256, NULL, "KB",

@@ -117,7 +117,7 @@ static void scan(const char *dir, int depth, char (*out)[256], int *n, int max) 
         struct stat st;
         if (stat(path, &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
-            if (depth < 2 && strcasecmp(e->d_name, "gcbrowser") != 0 && strcasecmp(e->d_name, "webcache") != 0) scan(path, depth + 1, out, n, max);
+            if (depth < 2 && strcasecmp(e->d_name, "gcbrowser") != 0) scan(path, depth + 1, out, n, max);
         } else if (ends_dol(e->d_name) && strlen(path) < 256) {
             snprintf(out[(*n)++], 256, "%s", path);
         }

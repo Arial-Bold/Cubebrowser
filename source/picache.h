@@ -1,6 +1,6 @@
-/* picache.h - keeps downloaded pictures on the SD card (in its own folder,
- * sd:/webcache, like the music player's sd:/midi), so a page seen before shows its pictures without
- * downloading them again.
+/* picache.h - keeps downloaded pictures on the SD card (the "webcache"
+ * folder inside the gcbrowser data folder), so a page seen before shows its
+ * pictures without downloading them again.
  *
  * What's saved is the picture file exactly as it was downloaded (usually a
  * small JPEG or PNG from the image helper), filed under the address it was
@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define PICACHE_DIR "sd:/webcache"
+#define PICACHE_DIR "webcache"   /* inside the data folder */
 
 /* Worker thread. get: a malloc'd copy of the saved picture, or NULL. */
 void *picache_get(const char *url, size_t *len);
