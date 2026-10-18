@@ -225,10 +225,10 @@ defaults.
 | **Controls** | Stick dead zone, pointer speed and acceleration, scroll speed, pointer snapping, rumble, the button for each action, on-screen key layout (QWERTY or ABC) and key repeat speed. |
 | **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), picture width (Full 704 or Standard 640), screen margin, page text size, theme, animations, sound effects and volume. |
 | **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle and repeat. |
-| **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture labels, maximum page size. |
+| **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture cache, picture labels, maximum page size. |
 | **Security** | Cookies on/off, keep logins after restart, certificate checking and the certificate file. |
 | **Updates** | Check for CubeBrowser updates (now, and automatically at start), check for Swiss updates, and the name to save a new Swiss as (keep its name, numbered, swiss.dol, boot.dol or ipl.dol). |
-| **Data** | Exit button action and Swiss `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear history, delete bookmarks, reset all settings. |
+| **Data** | Exit button action and Swiss `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear picture cache, clear history, delete bookmarks, reset all settings. |
 
 A few worth knowing about:
 
@@ -241,6 +241,13 @@ A few worth knowing about:
   images.weserv.nl service, which shrinks them for your screen and converts
   formats the GameCube can't read. It makes pictures much faster and work on
   more sites, but that service sees the addresses of pictures you view.
+- **Picture cache** (100 MB by default) keeps the pictures you've seen in a
+  `webcache` folder inside the `gcbrowser` folder on the SD card, so going back to a page or
+  reloading it shows its pictures straight away instead of downloading them
+  again. Pictures older than a week are downloaded fresh, and the oldest are
+  removed when the folder reaches its size. Choose Off, 25, 50, 100 or 250 MB,
+  or empty it with Settings > Data > Clear picture cache. Deleting the `webcache`
+  folder on a PC is fine too. Moving the data folder empties it.
 - **Identify as: Lynx (text mode)** makes some sites send very simple pages
   that load faster.
 
