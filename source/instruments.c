@@ -15,7 +15,7 @@
 #ifdef GEKKO
 #include <gccore.h>
 #include <ogc/aram.h>
-#include <ogc/arqueue.h>
+#include <ogc/machine/processor.h>
 #endif
 #endif
 
@@ -616,6 +616,48 @@ static uint32_t aram_find(uint32_t len) {
     return at + len <= top ? at : 0;
 }
 
+/* Copies between main memory and audio memory, in small pieces, each with
+ * interrupts off. The copy engine is shared with the sound library, which
+ * starts its own copies from the audio interrupt: if one started in the
+ * middle of ours, ours would be cut short, leaving part of an instrument as
+ * garbage in audio memory (heard as a loud buzz). With interrupts off, it
+ * can't. All addresses and lengths are multiples of 32. */
+#define ARAM_PIECE 4096u
+static bool aram_wait_idle(void) {
+    for (int k = 0; k < 400000; k++) if (!AR_GetDMAStatus()) return true;
+    return false;
+}
+static bool aram_dma(u32 dir, void *mram, uint32_t aram, uint32_t len) {
+    for (uint32_t off = 0; off < len; off += ARAM_PIECE) {
+        uint32_t n = len - off < ARAM_PIECE ? len - off : ARAM_PIECE;
+        u32 level;
+        _CPU_ISR_Disable(level);
+        bool ok = aram_wait_idle();
+        if (ok) {
+            AR_StartDMA(dir, (u32)MEM_VIRTUAL_TO_PHYSICAL((char *)mram + off), aram + off, n);
+            ok = aram_wait_idle();
+        }
+        _CPU_ISR_Restore(level);
+        if (!ok) return false;
+    }
+    return true;
+}
+
+/* Writes len bytes to audio memory and reads them back to check; a few
+ * tries, then gives up (the sample is then kept in main memory instead). */
+static bool aram_write_checked(void *src, uint32_t aram, uint32_t len) {
+    static unsigned char check[16384] __attribute__((aligned(32)));
+    if (len > sizeof(check)) return false;
+    DCFlushRange(src, len);
+    for (int tries = 0; tries < 3; tries++) {
+        if (!aram_dma(AR_MRAMTOARAM, src, aram, len)) continue;
+        DCInvalidateRange(check, len);
+        if (!aram_dma(AR_ARAMTOMRAM, check, aram, len)) continue;
+        if (memcmp(check, src, len) == 0) return true;
+    }
+    return false;
+}
+
 /* Reads frames [0, need) of sample sid into audio memory. */
 static bool load_slot_aram(FILE *f, int sid, uint32_t need) {
     SampleSlot *sl = &sf.slots[sid];
@@ -639,9 +681,7 @@ static bool load_slot_aram(FILE *f, int sid, uint32_t need) {
     #define AFLUSH() do { \
         uint32_t len_ = ((nbuf * 2) + 31) & ~31u; \
         if (len_ > nbuf * 2) memset((char *)abuf + nbuf * 2, 0, len_ - nbuf * 2); \
-        DCFlushRange(abuf, len_); \
-        ARQRequest req_; \
-        ARQ_PostRequest(&req_, 0xCB, ARQ_MRAMTOARAM, ARQ_PRIO_LO, at + written, (u32)MEM_VIRTUAL_TO_PHYSICAL(abuf), len_); \
+        if (!aram_write_checked(abuf, at + written, len_)) return false; \
         written += len_; nbuf = 0; } while (0)
     #define APUT(v) do { abuf[nbuf++] = (v); out++; if (nbuf == ABUF) AFLUSH(); } while (0)
     while (got < need) {
