@@ -27,6 +27,72 @@
 #undef MBEDTLS_AESCE_C
 #undef MBEDTLS_PADLOCK_C
 
-/* Not needed in the shipped program. Server-side features are left at their
- * defaults to avoid config dependency errors; trim them later if size matters. */
+/* Not needed in the shipped program. */
 #undef MBEDTLS_SELF_TEST
+
+/* ---- trimmed to what a web browser (a TLS client) uses, to save memory ---- */
+/* client only: no server, no DTLS */
+#undef MBEDTLS_SSL_SRV_C
+#undef MBEDTLS_SSL_PROTO_DTLS
+#undef MBEDTLS_SSL_DTLS_ANTI_REPLAY
+#undef MBEDTLS_SSL_DTLS_HELLO_VERIFY
+#undef MBEDTLS_SSL_DTLS_CLIENT_PORT_REUSE
+#undef MBEDTLS_SSL_DTLS_CONNECTION_ID
+#undef MBEDTLS_SSL_DTLS_SRTP
+#undef MBEDTLS_SSL_COOKIE_C
+#undef MBEDTLS_SSL_CACHE_C
+#undef MBEDTLS_SSL_TICKET_C
+#undef MBEDTLS_SSL_CONTEXT_SERIALIZATION
+/* ciphers and modes web servers don't offer to a modern client */
+#undef MBEDTLS_ARIA_C
+#undef MBEDTLS_CAMELLIA_C
+#undef MBEDTLS_DES_C
+#undef MBEDTLS_CCM_C
+#undef MBEDTLS_CMAC_C
+#undef MBEDTLS_NIST_KW_C
+#undef MBEDTLS_CIPHER_MODE_CFB
+#undef MBEDTLS_CIPHER_MODE_OFB
+#undef MBEDTLS_CIPHER_MODE_XTS
+#undef MBEDTLS_KEY_EXCHANGE_PSK_ENABLED
+#undef MBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED
+#undef MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED
+#undef MBEDTLS_KEY_EXCHANGE_RSA_PSK_ENABLED
+#undef MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED
+#undef MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED
+#undef MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED
+#undef MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ENABLED
+#undef MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED
+#undef MBEDTLS_SSL_EARLY_DATA
+#undef MBEDTLS_ECJPAKE_C
+/* unusual curves (servers use P-256/P-384 and X25519) */
+#undef MBEDTLS_ECP_DP_SECP192R1_ENABLED
+#undef MBEDTLS_ECP_DP_SECP224R1_ENABLED
+#undef MBEDTLS_ECP_DP_SECP192K1_ENABLED
+#undef MBEDTLS_ECP_DP_SECP224K1_ENABLED
+#undef MBEDTLS_ECP_DP_SECP256K1_ENABLED
+#undef MBEDTLS_ECP_DP_BP256R1_ENABLED
+#undef MBEDTLS_ECP_DP_BP384R1_ENABLED
+#undef MBEDTLS_ECP_DP_BP512R1_ENABLED
+#undef MBEDTLS_ECP_DP_CURVE448_ENABLED
+/* certificate/key file formats and writers the browser never uses */
+#undef MBEDTLS_PKCS7_C
+#undef MBEDTLS_PKCS12_C
+#undef MBEDTLS_PKCS5_C
+#undef MBEDTLS_X509_CRL_PARSE_C
+#undef MBEDTLS_X509_CSR_PARSE_C
+#undef MBEDTLS_X509_CREATE_C
+#undef MBEDTLS_X509_CRT_WRITE_C
+#undef MBEDTLS_X509_CSR_WRITE_C
+#undef MBEDTLS_PK_WRITE_C
+#undef MBEDTLS_PEM_WRITE_C
+#undef MBEDTLS_LMS_C
+#undef MBEDTLS_RIPEMD160_C
+#undef MBEDTLS_SHA3_C
+#undef MBEDTLS_GENPRIME
+#undef MBEDTLS_DEBUG_C
+/* requests are small: a 4 KB send buffer instead of 16 KB per connection
+ * (received records can still be the full 16 KB) */
+#define MBEDTLS_SSL_OUT_CONTENT_LEN 4096
+/* trusted roots are looked up when needed (castore.c) instead of all being
+ * parsed into memory at start-up */
+#define MBEDTLS_X509_TRUSTED_CERTIFICATE_CALLBACK

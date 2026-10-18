@@ -10,6 +10,7 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/x509_crt.h>
+#include "castore.h"
 #include <mbedtls/error.h>
 #include <mbedtls/platform_time.h>
 #include <mbedtls/net_sockets.h>
@@ -23,7 +24,6 @@
 
 static mbedtls_entropy_context ent;
 static mbedtls_ctr_drbg_context drbg;
-static mbedtls_x509_crt ca;
 static mbedtls_ssl_config conf;
 static bool inited, ca_ok;
 
@@ -83,7 +83,6 @@ bool tls_global_init(char *err, size_t errlen) {
     unsigned char seed[32];
     if (mbedtls_ctr_drbg_random(&drbg, seed, sizeof(seed)) == 0) entropy_save_seed(seed);
 
-    mbedtls_x509_crt_init(&ca);
     size_t len = 0;
     char *pem = storage_read(g_set.ca_path, &len);
     if (!pem) {   /* fall back to the copy in the data folder */
@@ -92,12 +91,10 @@ bool tls_global_init(char *err, size_t errlen) {
         pem = storage_read(def, &len);
     }
     if (pem) {
-        r = mbedtls_x509_crt_parse(&ca, (const unsigned char *)pem, len + 1);  /* PEM needs the NUL */
+        /* kept compactly; each site's root is parsed only when it's needed */
+        ca_count = castore_load(pem, len);
         free(pem);
-        if (r >= 0) {
-            for (mbedtls_x509_crt *c = &ca; c && c->raw.len; c = c->next) ca_count++;
-            ca_ok = ca_count > 0;
-        }
+        ca_ok = ca_count > 0;
     }
 
     mbedtls_ssl_config_init(&conf);
@@ -111,7 +108,7 @@ bool tls_global_init(char *err, size_t errlen) {
     rng_lock_ok = LWP_MutexInit(&rng_lock, false) >= 0;
 #endif
     mbedtls_ssl_conf_rng(&conf, rng_locked, &drbg);
-    mbedtls_ssl_conf_ca_chain(&conf, &ca, NULL);
+    mbedtls_ssl_conf_ca_cb(&conf, castore_ca_cb, NULL);
     mbedtls_ssl_conf_min_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_2);
     inited = true;
     return true;

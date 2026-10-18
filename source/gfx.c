@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define FIFO_SIZE (1024 * 1024)   /* roomy, so even text-heavy frames never fill it */
+#define FIFO_SIZE (256 * 1024)    /* a ring the graphics chip reads while we write: it never needs a whole frame */
 #define XFB_BYTES (640 * 576 * VI_DISPLAY_PIX_SZ)  /* big enough for any mode */
 
 static void *fifo;
