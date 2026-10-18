@@ -30,7 +30,9 @@
  * song while there's room. */
 
 #define SAMPLE_BUDGET (10u * 1024u * 1024u)   /* most memory for loaded samples */
-#define SAMPLE_RESERVE (8u * 1024u * 1024u)   /* ...but always leave this much for web pages (long ones like Wikipedia need it) */
+#define SAMPLE_RESERVE (8u * 1024u * 1024u)   /* ...leaving this much for web pages (long ones like Wikipedia need it) */
+#define SAMPLE_MIN (3u * 1024u * 1024u)       /* ...yet music always gets at least this much */
+#define SAMPLE_SAFETY (1536u * 1024u)         /* ...as long as this much stays free */
 #define META_MAX (4u * 1024u * 1024u)
 
 /* How SoundFont samples are kept (Settings > Music > Instrument memory):
@@ -570,9 +572,16 @@ bool instruments_need_load(char *msg, size_t msglen) {
     int fmt = wanted_fmt();
     for (uint32_t i = 0; i < sf.nshdr; i++)
         if (!sf.slots[i].needed || (slot_loaded(&sf.slots[i]) && sf.slots[i].fmt != fmt)) slot_free(&sf.slots[i]);
-    /* web pages need memory too: never leave less than SAMPLE_RESERVE free */
+    /* web pages need memory too: leave SAMPLE_RESERVE free when possible */
     size_t free_now = cb_mem_free();
     size_t budget = sf.loaded_bytes + (free_now > SAMPLE_RESERVE ? free_now - SAMPLE_RESERVE : 0);
+    /* ...but music always gets a little room, even next to a huge page (the
+     * page then skips some pictures until the music stops); this is where the
+     * 8-bit and 4-bit settings make the difference: 4-bit fits four times as
+     * many sounds in it */
+    size_t most = sf.loaded_bytes + (free_now > SAMPLE_SAFETY ? free_now - SAMPLE_SAFETY : 0);
+    size_t floor_bytes = SAMPLE_MIN < most ? SAMPLE_MIN : most;
+    if (budget < floor_bytes) budget = floor_bytes;
     if (budget > SAMPLE_BUDGET) budget = SAMPLE_BUDGET;
     FILE *f = fopen(sf.path, "rb");
     if (!f) { snprintf(msg, msglen, "Couldn't open the SoundFont"); return false; }

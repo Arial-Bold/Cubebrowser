@@ -817,7 +817,7 @@ static void advance(double dt) {
         if (tail_until == 0) tail_until = song_pos + 4;
         if (voices_active() == 0 || song_pos > tail_until) {
             int n = neighbour(+1);
-            if (n < 0) stop_song();
+            if (n < 0) { stop_song(); instruments_free_samples(); }
             else if (req == REQ_NONE) {   /* the next song starts on the next pass */
                 all_voices_off();
                 req = REQ_PLAY;
@@ -865,7 +865,7 @@ static void process_request(void) {
         if (was && cur >= 0 && req == REQ_NONE) start_song(cur);
         break;
     }
-    case REQ_STOP: stop_song(); break;
+    case REQ_STOP: stop_song(); instruments_free_samples(); break;   /* music off: its memory goes back to web pages */
     case REQ_PAUSE:
         if (state == MIDI_PLAYING) { state = MIDI_PAUSED; voices_update(0, true); }
         break;

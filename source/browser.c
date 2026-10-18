@@ -828,7 +828,7 @@ static int low_memory_gen = -1;
 static void stop_pictures_low_memory(void) {
     bool changed = false;
     for (int i = 0; i < page.nimages; i++)
-        if (page.images[i].state == IMG_NONE) { page.images[i].state = IMG_SKIPPED; changed = true; }
+        if (page.images[i].state == IMG_NONE) { page.images[i].state = IMG_SKIPPED; page.images[i].lowmem = 1; changed = true; }
     if (changed) page.relayout = true;
     if (low_memory_gen != page_gen) {
         low_memory_gen = page_gen;
@@ -848,7 +848,8 @@ static void apply_image(ImageResult *ir) {
         /* the console is out of memory: stop loading this page's pictures
          * (retrying them, or fetching the full-size originals, only makes it worse) */
         image_free(&ir->img);
-        im->state = IMG_FAILED;
+        im->state = IMG_SKIPPED;
+        im->lowmem = 1;
         stop_pictures_low_memory();
         return;
     }
@@ -936,9 +937,25 @@ static bool box_within(const Box *b, float view_top, float view_h, float above, 
     return b->y + b->h >= view_top - above * view_h && b->y <= view_top + view_h + below * view_h;
 }
 
+/* Pictures skipped for lack of memory get another chance once there's room
+ * again (the music stopped, or far-away pictures were let go). */
+static void retry_low_memory_pictures(void) {
+    bool any = false;
+    for (int i = 0; i < page.nimages && !any; i++) any = page.images[i].lowmem;
+    if (!any || cb_mem_free() < 3u * 1024u * 1024u) return;
+    for (int i = 0; i < page.nimages; i++)
+        if (page.images[i].lowmem) {
+            page.images[i].lowmem = 0;
+            if (page.images[i].state == IMG_SKIPPED) page.images[i].state = IMG_NONE;
+        }
+    page.relayout = true;   /* pictures without a set size get their space back */
+    low_memory_gen = -1;    /* and may say so again if memory runs out again */
+}
+
 static void release_far_pictures(float view_top, float view_h) {
     static int tick;
     if (++tick % 30) return;   /* twice a second is plenty */
+    if (tick % 120 == 0) retry_low_memory_pictures();   /* every 2 seconds */
     static unsigned char *near;
     static int near_cap;
     if (page.nimages > near_cap) {
@@ -999,6 +1016,7 @@ static void schedule_images(float view_top, float view_h, float max_w) {
             if (b->type != BOX_IMAGE || b->text < 0 || b->text >= page.nimages) continue;
             if (page.images[b->text].state != IMG_NONE) continue;
             page.images[b->text].state = IMG_SKIPPED;
+            page.images[b->text].lowmem = 1;
             changed = true;
         }
         if (changed) page.relayout = true;
