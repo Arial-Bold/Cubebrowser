@@ -10,7 +10,6 @@
 #include <gba_base.h>
 #include <gba_interrupt.h>
 #include <gba_systemcalls.h>
-#include <string.h>
 #include "player.h"
 #include "link.h"
 #include "gfx.h"
@@ -24,6 +23,9 @@
 #define REG_JOY_TRANS (*(vu32 *)0x04000154)
 #define REG_JOYSTAT   (*(vu16 *)0x04000158)
 #define VRAM16        ((u16 *)0x06000000)
+#define REG_DMA3SAD   (*(vu32 *)0x040000D4)
+#define REG_DMA3DAD   (*(vu32 *)0x040000D8)
+#define REG_DMA3CNT   (*(vu32 *)0x040000DC)
 
 #define JOY_RESET 1       /* JOYCNT: the GameCube sent "reset" */
 #define JOY_RECV  2       /* JOYCNT: the GameCube wrote a word */
@@ -37,6 +39,18 @@ static void joy_irq(void) {
     if (c & JOY_RECV) link_irq_received(REG_JOY_RECV);
     if (c & JOY_SENT) REG_JOY_TRANS = link_irq_next();
     REG_JOYCNT = (u16)((c & (JOY_RESET | JOY_RECV | JOY_SENT)) | JOY_IRQ);   /* acknowledge */
+}
+
+/* Copies the finished picture to the screen with the DMA hardware, 8 rows at
+ * a time: much quicker than a copy loop, and the CPU (and so the link
+ * interrupt) only waits about half a millisecond for each piece. */
+static void present(void) {
+    const u32 words = SCR_W * 8 / 2;
+    for (int y = 0; y < SCR_H; y += 8) {
+        REG_DMA3SAD = (u32)(back + y * SCR_W);
+        REG_DMA3DAD = (u32)(VRAM16 + y * SCR_W);
+        REG_DMA3CNT = words | 0x84000000u;   /* start now, 32-bit units */
+    }
 }
 
 void player_send(int cmd, int arg) { link_send_cmd(cmd, arg); }
@@ -55,7 +69,7 @@ int main(void) {
     fb = back;
     player_init();
     player_draw();
-    memcpy(VRAM16, back, sizeof(back));
+    present();
 
     /* the link: JOY BUS mode, "player running" in the status bits, interrupts on */
     link_init();
@@ -75,7 +89,7 @@ int main(void) {
         for (int i = 4; i < 8; i++) {
             if (keys & (1 << i)) {
                 hold[i]++;
-                if (hold[i] > 18 && (hold[i] - 18) % 5 == 0) repeat |= (u16)(1 << i);
+                if (hold[i] > 14 && (hold[i] - 14) % 4 == 0) repeat |= (u16)(1 << i);
             } else hold[i] = 0;
         }
 
@@ -84,7 +98,7 @@ int main(void) {
         player_frame();
         if (player_needs_draw()) {
             player_draw();
-            memcpy(VRAM16, back, sizeof(back));   /* a plain copy, so link interrupts keep running */
+            present();
         }
     }
 }
