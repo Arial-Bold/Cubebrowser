@@ -17,6 +17,7 @@
 #include "midi.h"
 #include "settings.h"
 #include "storage.h"
+#include "theme.h"
 #include "thr.h"
 #include "ui.h"
 #include <dirent.h>
@@ -425,6 +426,76 @@ static void run_command(const uint8_t *c) {
     }
 }
 
+/* ---- the browser's theme, as the GBA's colours (GBP_THEME) ---- */
+static const Theme *sent_theme;
+
+static Color tmix(Color a, Color b, int pct) {   /* pct of the way from a to b */
+    Color c = a;
+    c.r = (uint8_t)(a.r + (b.r - a.r) * pct / 100);
+    c.g = (uint8_t)(a.g + (b.g - a.g) * pct / 100);
+    c.b = (uint8_t)(a.b + (b.b - a.b) * pct / 100);
+    return c;
+}
+static float lum(Color c) {   /* relative brightness, 0..1 (sRGB, roughly) */
+    float r = c.r / 255.0f, g = c.g / 255.0f, b = c.b / 255.0f;
+    r *= r; g *= g; b *= b;
+    return 0.2126f * r + 0.7152f * g + 0.0722f * b;
+}
+static float contrast(Color a, Color b) {
+    float x = lum(a) + 0.05f, y = lum(b) + 0.05f;
+    return x > y ? x / y : y / x;
+}
+/* the theme's colour if it reads well on bg, otherwise light or dark text,
+ * whichever reads better */
+static Color readable(Color want, Color bg, Color light, Color dark) {
+    if (contrast(want, bg) >= 3.5f) return want;
+    return contrast(light, bg) >= contrast(dark, bg) ? light : dark;
+}
+static unsigned rgb15(Color c) { return (c.r >> 3) | ((c.g >> 3) << 5) | ((unsigned)(c.b >> 3) << 10); }
+
+static void send_theme(void) {
+    const Theme *t = theme();
+    if (t == sent_theme || gbp_tx_free(&tx) < 2 * GBT_COUNT + 20) return;
+    Color c[GBT_COUNT];
+    Color black = t->bg_bottom; black.r = black.g = black.b = 0;
+    Color light = t->field_bg, dark = t->field_text;
+    if (lum(light) < lum(dark)) { Color x = light; light = dark; dark = x; }
+    c[GBT_BG0] = t->bg_bottom;
+    c[GBT_BG1] = t->bg_top;
+    c[GBT_BAR] = tmix(t->panel_bottom, t->bg_bottom, 50);
+    c[GBT_BARL] = t->button_bottom;
+    c[GBT_EDGE] = t->panel_edge;
+    c[GBT_ACC] = t->accent;
+    c[GBT_TXT] = readable(t->text, t->panel_bottom, light, dark);
+    c[GBT_DIM] = readable(t->text_dim, t->panel_bottom, light, dark);
+    c[GBT_ONACC] = readable(t->text_on_accent, t->accent, light, dark);
+    c[GBT_FIELD] = t->field_bg;
+    c[GBT_FTXT] = t->field_text;
+    c[GBT_FDIM] = t->page_dim;
+    c[GBT_ROW] = t->panel_bottom;
+    c[GBT_ROWL] = t->panel_top;
+    c[GBT_BTN] = t->button_bottom;
+    c[GBT_TRACK] = t->page_rule;
+    c[GBT_VOLOFF] = t->panel_bottom;
+    c[GBT_HINT] = tmix(t->bg_bottom, black, 35);
+    c[GBT_GOOD] = t->good;
+    c[GBT_BAD] = t->bad;
+    c[GBT_DECO] = tmix(t->bg_bottom, t->bg_cube, 30);
+    Color mid = tmix(t->bg_top, t->bg_bottom, 50);   /* text on the background: check against its middle */
+    c[GBT_BGTXT] = readable(t->text, mid, light, dark);
+    c[GBT_BGDIM] = readable(t->text_dim, mid, light, dark);
+    c[GBT_BGDIM2] = tmix(c[GBT_BGDIM], mid, 30);
+    c[GBT_BGACC] = readable(t->accent, mid, light, dark);
+    c[GBT_HINTTXT] = readable(t->text_dim, c[GBT_HINT], light, dark);
+    c[GBT_BARTXT] = readable(t->text_dim, c[GBT_BAR], light, dark);
+    c[GBT_CUBE1] = t->button_top;
+    c[GBT_CUBE2] = t->panel_bottom;
+    uint8_t d[2 * GBT_COUNT];
+    for (int i = 0; i < GBT_COUNT; i++) gbp_put16(d + 2 * i, rgb15(c[i]));
+    gbp_tx_put(&tx, GBP_THEME, d, sizeof(d));
+    sent_theme = t;
+}
+
 /* (lock held) sends what changed */
 static void send_updates(void) {
     unsigned now = ms_now();
@@ -441,6 +512,7 @@ static void send_updates(void) {
         sf_scan_at = now + 30000;
         resync = false;
         want_from = -1;
+        sent_theme = NULL;
     }
     if (resync) {   /* the GBA lost track: the state, texts and instruments again */
         resync = false;
@@ -448,7 +520,9 @@ static void send_updates(void) {
         sent_title[0] = sent_instr[0] = sent_msg[0] = 1;
         sent_title[1] = sent_instr[1] = sent_msg[1] = 0;
         sfs_sent = 0;
+        sent_theme = NULL;
     }
+    send_theme();
     if (want_from >= 0) {
         if (want_from < songs_sent) songs_sent = want_from;
         want_from = -1;

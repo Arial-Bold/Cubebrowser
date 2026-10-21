@@ -31,6 +31,7 @@ enum {
     GBP_SF,             /* u8 index, u16 size in 100 KB units, text: one Instruments choice */
     GBP_MSG,            /* text: a problem to show, or empty */
     GBP_ACK,            /* u8 id: that command arrived */
+    GBP_THEME,          /* GBT_COUNT colours (u16 each, the GBA's 15-bit format): the browser's theme */
 };
 /* both ways: passed to the handler when the other side asks for a sync word */
 #define GBP_REQ_SYNC 0x30
@@ -49,6 +50,23 @@ enum {
     GBC_VOLUME,         /* arg: 0..10 */
     GBC_INSTR,          /* arg: Instruments choice index */
     GBC_RESEND,         /* send the lists again */
+};
+
+/* The colours the player draws with (GBP_THEME), worked out from the
+ * browser's theme so the GBA matches the TV. The ...ON_BG / ..._TXT ones are
+ * text colours already checked to be readable on what they're drawn over. */
+enum {
+    GBT_BG0, GBT_BG1,           /* background gradient, top to bottom */
+    GBT_BAR, GBT_BARL,          /* tab bar and boxes, and their outline */
+    GBT_EDGE, GBT_ACC,          /* light outline, highlight */
+    GBT_TXT, GBT_DIM, GBT_ONACC,/* text on boxes and rows, softer text, text on the highlight */
+    GBT_FIELD, GBT_FTXT, GBT_FDIM,   /* the white "now playing" card and its text */
+    GBT_ROW, GBT_ROWL, GBT_BTN, GBT_TRACK, GBT_VOLOFF,
+    GBT_HINT, GBT_GOOD, GBT_BAD, GBT_DECO,
+    GBT_BGTXT, GBT_BGDIM, GBT_BGDIM2, GBT_BGACC,   /* text drawn straight on the background */
+    GBT_HINTTXT, GBT_BARTXT,    /* text on the hint bar, and on the tab bar */
+    GBT_CUBE1, GBT_CUBE2,       /* the cube's lit and shaded faces */
+    GBT_COUNT
 };
 
 /* player states, as in midi.h */
