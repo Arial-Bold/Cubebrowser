@@ -168,6 +168,7 @@ typedef struct {
     volatile bool want_stop;      /* the note ended: switch the voice off */
     volatile int state;
     volatile uint32_t stop_frame;
+    volatile uint32_t lease;       /* the audio block when the sequencer last looked after this note */
     /* the note being played, owned by the callback while the voice runs */
     uint32_t applied;
     const int16_t *c_data;
@@ -189,6 +190,7 @@ static HwVoice hw[NVOICES] __attribute__((aligned(32)));
 static volatile bool hw_stop_req;
 static volatile uint32_t frame_no;   /* counts the 2 ms audio blocks */
 static volatile uint32_t stalls;     /* voices found stuck and restarted (see hw_callback) */
+static volatile uint32_t orphans;    /* voices found playing with no note behind them (see hw_callback) */
 static bool hw_ok;
 
 static void audio_block(void *buf, u32 len) { (void)buf; (void)len; frame_no++; }
@@ -313,7 +315,12 @@ static void hw_callback(AESNDPB *pb, u32 st) {
          * would overwrite it (heard as clicks and stray noises), so wait
          * for it here; it takes a few microseconds at most. */
         for (int k = 0; k < 20000 && AR_GetDMAStatus(); k++) {}
-        if (hw_stop_req || h->want_stop) {
+        /* The sequencer renews every playing note's lease each few ms. A
+         * voice whose lease has run out (1.5 s) is playing with no
+         * note behind it any more - heard as a hung note - so it stops. */
+        bool orphan = frame_no - h->lease > 750;
+        if (orphan && !hw_stop_req && !h->want_stop) orphans++;
+        if (hw_stop_req || h->want_stop || orphan) {
             AESND_SetVoiceStop(pb, true);
             h->state = HV_STOPPING;
             h->stop_frame = frame_no;
@@ -403,6 +410,7 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
         h->vl = vl;
         h->vr = vr;
         h->want_stop = false;
+        h->lease = frame_no;
         h->gen++;
         _CPU_ISR_Restore(level);
         return;
@@ -425,6 +433,7 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
     h->vl = vl;
     h->vr = vr;
     h->want_stop = false;
+    h->lease = frame_no;
     hw_take_note(h);
     h->since_stream = 0;
     h->state = HV_RUNNING;
@@ -434,6 +443,7 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
 }
 
 static void hw_set(int i, uint32_t freq, uint16_t vl, uint16_t vr) {
+    hw[i].lease = frame_no;
     hw[i].freq = freq;
     hw[i].vl = vl;
     hw[i].vr = vr;
@@ -911,7 +921,21 @@ static void advance(double dt) {
     while (ev_next < song.count && song.ev[ev_next].t_us <= pos_us) handle_event(&song.ev[ev_next++]);
     voices_update((float)dt, false);
     if (ev_next >= song.count) {
-        if (tail_until == 0) tail_until = song_pos + 4;
+        if (tail_until == 0) {
+            /* The song is over: everything stops here, even notes the file
+             * never switched off or that a sustain pedal still holds. A
+             * 30 ms fade rather than a hard cut, which would click. */
+            tail_until = song_pos + 0.06;
+            for (int c = 0; c < 16; c++) chans[c].sustain = false;
+            for (int i = 0; i < NVOICES; i++) {
+                Voice *v = &voices[i];
+                if (!v->active) continue;
+                v->released = true;
+                v->held = false;
+                v->stage = ENV_RELEASE;
+                v->z.release = 0.03f;
+            }
+        }
         if (voices_active() == 0 || song_pos > tail_until) {
             int n = neighbour(+1);
             if (n < 0) { stop_song(); instruments_free_samples(); }
@@ -987,6 +1011,12 @@ static void *seq_main(void *arg) {
         last = now;
         if (dt > 0.1) dt = 0.1;   /* after a long stall, don't rush through notes */
         if (state == MIDI_PLAYING && song_loaded) advance(dt);
+        else for (int i = 0; i < NVOICES; i++) if (voices[i].active) hw[i].lease = frame_no;   /* paused: notes kept */
+        static uint32_t logged_orphans;
+        if (orphans != logged_orphans) {
+            logged_orphans = orphans;
+            http_log_note("music   | a hung note was stopped (%u so far), in %s", (unsigned)logged_orphans, current >= 0 ? songs[current] : title);
+        }
         static uint32_t logged;
         if (stalls != logged) {   /* (in page.log, so it shows if the buzz guard ever had to act) */
             logged = stalls;
@@ -1114,7 +1144,10 @@ bool midi_repeat(void) { return g_set.music_repeat != 0; }
 
 MidiState midi_state(void) { return state; }
 const char *midi_title(void) { return state == MIDI_STOPPED && current < 0 ? "" : title; }
-float midi_position(void) { return (float)song_pos; }
+float midi_position(void) {   /* (not past the end while the last notes fade) */
+    float len = song_loaded ? song.length_us / 1e6f : 0;
+    return len > 0 && song_pos > len ? len : (float)song_pos;
+}
 float midi_length(void) { return song_loaded ? song.length_us / 1e6f : 0; }
 int midi_voices_in_use(void) { return voices_active(); }
 /* What's loaded; before the first song, what will be loaded. */
