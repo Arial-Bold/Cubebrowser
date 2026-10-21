@@ -990,7 +990,7 @@ static void *seq_main(void *arg) {
         static uint32_t logged;
         if (stalls != logged) {   /* (in page.log, so it shows if the buzz guard ever had to act) */
             logged = stalls;
-            http_log_note("music   | a stuck voice was restarted (%u so far), in %s", (unsigned)logged, title);
+            http_log_note("music   | a stuck voice was restarted (%u so far), in %s", (unsigned)logged, current >= 0 ? songs[current] : title);
         }
         bool busy = (state == MIDI_PLAYING);
         /* How hard the sound chip works. If mixing a 2 ms block ever takes
@@ -1006,24 +1006,31 @@ static void *seq_main(void *arg) {
             /* Close to running out of time: let the quietest fading note go
              * and allow fewer notes at once; when it's been calm for a
              * second, allow one more again. */
-            if (u >= 92) {
+            if (u >= 85) {
                 int n = voices_active(), best = -1;
                 float lowest = 2;
                 for (int i = 0; i < NVOICES; i++)
                     if (voices[i].active && voices[i].released && voices[i].level < lowest) { lowest = voices[i].level; best = i; }
+                if (best < 0 && u >= 100) {   /* over time and nothing fading: the quietest note goes */
+                    for (int i = 0; i < NVOICES; i++) {
+                        float l = voices[i].level * voices[i].vel_gain;
+                        if (voices[i].active && l < lowest) { lowest = l; best = i; }
+                    }
+                }
                 if (best >= 0) { voice_free(best); load_cut++; n--; }
-                if (n < voice_cap) voice_cap = n < 12 ? 12 : n;
+                int cap = u >= 100 ? n - 1 : n;   /* no more notes than now (fewer if over time) */
+                if (cap < voice_cap) voice_cap = cap < 12 ? 12 : cap;
                 if (voice_cap < cap_low) cap_low = voice_cap;
                 calm_since = now;
-            } else if (u < 75 && voice_cap < NVOICES && now - calm_since > 1.0) {
+            } else if (u < 70 && voice_cap < NVOICES && now - calm_since > 2.0) {
                 voice_cap++;
                 calm_since = now;
             }
             if (now - load_from >= 10) {
                 if (load_peak >= 85)
-                    http_log_note("music   | sound chip load peak %d%% (%d notes), %d blocks over time, %d fading notes let go, "
+                    http_log_note("music   | sound chip load peak %d%% (%d notes), %d blocks over time, %d notes let go, "
                                   "lowest note limit %d, in 10 s of %s",
-                                  (int)load_peak, load_notes, load_over, load_cut, cap_low, title);
+                                  (int)load_peak, load_notes, load_over, load_cut, cap_low, current >= 0 ? songs[current] : title);
                 load_peak = 0;
                 load_over = load_cut = 0;
                 cap_low = NVOICES;
