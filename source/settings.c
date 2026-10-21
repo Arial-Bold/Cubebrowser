@@ -115,6 +115,8 @@ const SetDef g_setdefs[] = {
       "Starts the list again after the last song." },
     { CAT_MUSIC, "music.glow", "Glowing note button", ST_BOOL, O(music_glow), 0, 1, 1, NULL, NULL,
       "The toolbar's note button lights up and pulses while music plays." },
+    { CAT_MUSIC, "music.gba", "Game Boy Advance player", ST_BOOL, O(music_gba), 0, 1, 1, NULL, NULL,
+      "A Game Boy Advance on controller port 2 (on, no game in it) becomes the music player's screen and remote." },
     /* Browsing */
     { CAT_BROWSING, "web.home", "Home page", ST_STR, O(home), OSK_TEXTMODE_URL, 256, 0, NULL, NULL,
       "Use about:home for the built-in start page." },
@@ -230,6 +232,7 @@ void settings_defaults(Settings *s) {
     s->music_shuffle = 0;
     s->music_repeat = 1;
     s->music_glow = 1;
+    s->music_gba = 1;
     strcpy(s->home, "about:home");
     s->search_engine = 0;
     strcpy(s->search_custom, "https://html.duckduckgo.com/html/?q=");

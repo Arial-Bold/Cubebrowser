@@ -23,6 +23,7 @@ typedef struct {
     /* Music */
     char music_sf2[256];   /* "" = first .sf2 in the midi folder, "builtin", or a file */
     int  music_volume, music_shuffle, music_repeat, music_glow;
+    int  music_gba;            /* a Game Boy Advance on port 2 as the player's screen (gbalink.c) */
     /* Browsing */
     char home[256];
     int  search_engine;

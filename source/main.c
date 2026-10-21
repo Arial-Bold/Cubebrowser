@@ -17,6 +17,7 @@
 #include "osk.h"
 #include "browser.h"
 #include "diag.h"
+#include "gbalink.h"
 
 enum { SCREEN_BROWSER, SCREEN_SETTINGS };
 
@@ -80,6 +81,7 @@ int main(int argc, char **argv) {
     entropy_init();
     sound_init();
     midi_init();
+    gbalink_init();
     fetch_init();
     browser_init();
 
@@ -95,6 +97,7 @@ int main(int argc, char **argv) {
         diag_frame();
         diag_note(DIAG_MAIN, "reading controller");
         input_update();
+        gbalink_frame();
         ui_begin_frame();
         gfx_begin_frame();
         ui_draw_background();
