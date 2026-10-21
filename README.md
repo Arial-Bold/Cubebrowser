@@ -4,9 +4,11 @@
 
 CubeBrowser loads websites over a wired network connection, including secure
 (HTTPS) sites, with pictures, page styles, tables and forms. You can download
-files straight to your SD card, and control everything with a GameCube
-controller. It runs as a `.dol` program launched from Swiss,
-with menus designed to feel like they belong on the console.
+files straight to your SD card, play MIDI music in the background, and
+control everything with a GameCube controller. A Game Boy Advance on the
+link cable can even be the music player's own screen and remote. It runs as a
+`.dol` program launched from Swiss, with menus designed to feel like they
+belong on the console.
 
 ---
 
@@ -343,6 +345,7 @@ Older and hobbyist sites from the 1990s and 2000s usually display very well.
 | **A login doesn't stick** | Make sure Settings > Security > Cookies is on. Sites that sign in with JavaScript can't be logged into. |
 | **A download stopped partway** | Choose Retry, or open the same link again; it continues where it stopped. |
 | **"Not enough space on the SD card"** | Free up space. FAT32 cards can't hold single files over 4 GB. |
+| **The Game Boy Advance doesn't get the music player** | Switch it on with no game inserted and plug it into port 2 (the TV says when it's sending the player). Check Settings > Music > Game Boy Advance player is on. If it was running something else, switch it off and on again with no game. |
 | **Exit doesn't find Swiss** | Use Settings > Data > Find .dol files on SD card and pick your Swiss `.dol`. |
 | **Settings or bookmarks aren't saved** | The SD card wasn't found. Check it's in the SD2SP2 and formatted FAT32. |
 | **The pointer drifts on its own** | Raise Settings > Controls > Stick dead zone. |
