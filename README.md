@@ -2,6 +2,9 @@
 
 **A real web browser for the Nintendo GameCube.**
 
+<img width="1280" height="960" alt="01_start_page" src="https://github.com/user-attachments/assets/bac4efbf-47a4-47f6-bde5-a382602e21bf" />
+
+
 CubeBrowser loads websites over a wired network connection, including secure
 (HTTPS) sites, with pictures, page styles, tables and forms. You can download
 files straight to your SD card, play MIDI music in the background, and
@@ -146,6 +149,10 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 ---
 
 ## Music player
+
+
+<img width="1280" height="960" alt="04_music_player" src="https://github.com/user-attachments/assets/cbb262da-953a-4bb7-a9db-fa6a36e014c5" />
+
 
 CubeBrowser can play MIDI music in the background while you browse.
 
