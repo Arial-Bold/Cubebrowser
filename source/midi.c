@@ -520,13 +520,20 @@ static void voice_volume(Voice *v, bool paused, uint16_t *vl, uint16_t *vr) {
     *vr = (uint16_t)(r * 256);
 }
 
+/* How many notes may sound at once: all the voices, unless the sound chip
+ * is running short of time (see seq_main), when it's lowered for a while. */
+static int voice_cap = NVOICES;
+
 static int voice_pick(void) {
-    int best = -1;
+    int best = -1, active = 0;
+    for (int i = 0; i < NVOICES; i++) active += voices[i].active;
     /* a free voice the DSP has finished with, else any free voice */
-    for (int i = 0; i < NVOICES; i++)
-        if (!voices[i].active && hw_ready(i)) return i;
-    for (int i = 0; i < NVOICES; i++)
-        if (!voices[i].active) return i;
+    if (active < voice_cap) {
+        for (int i = 0; i < NVOICES; i++)
+            if (!voices[i].active && hw_ready(i)) return i;
+        for (int i = 0; i < NVOICES; i++)
+            if (!voices[i].active) return i;
+    }
     /* all busy: take the quietest released note, else the oldest note */
     float lowest = 2;
     for (int i = 0; i < NVOICES; i++)
@@ -986,6 +993,43 @@ static void *seq_main(void *arg) {
             http_log_note("music   | a stuck voice was restarted (%u so far), in %s", (unsigned)logged, title);
         }
         bool busy = (state == MIDI_PLAYING);
+        /* How hard the sound chip works. If mixing a 2 ms block ever takes
+         * longer than 2 ms, the last block is played again (heard as a
+         * buzz), so peaks are noted in page.log every 10 s while high. */
+        static float load_peak;
+        static int load_over, load_notes, load_cut, cap_low = NVOICES;
+        static double load_from, calm_since;
+        if (busy) {
+            float u = AESND_GetDSPProcessUsage();
+            if (u > load_peak) { load_peak = u; load_notes = voices_active(); }
+            if (u >= 100) load_over++;
+            /* Close to running out of time: let the quietest fading note go
+             * and allow fewer notes at once; when it's been calm for a
+             * second, allow one more again. */
+            if (u >= 92) {
+                int n = voices_active(), best = -1;
+                float lowest = 2;
+                for (int i = 0; i < NVOICES; i++)
+                    if (voices[i].active && voices[i].released && voices[i].level < lowest) { lowest = voices[i].level; best = i; }
+                if (best >= 0) { voice_free(best); load_cut++; n--; }
+                if (n < voice_cap) voice_cap = n < 12 ? 12 : n;
+                if (voice_cap < cap_low) cap_low = voice_cap;
+                calm_since = now;
+            } else if (u < 75 && voice_cap < NVOICES && now - calm_since > 1.0) {
+                voice_cap++;
+                calm_since = now;
+            }
+            if (now - load_from >= 10) {
+                if (load_peak >= 85)
+                    http_log_note("music   | sound chip load peak %d%% (%d notes), %d blocks over time, %d fading notes let go, "
+                                  "lowest note limit %d, in 10 s of %s",
+                                  (int)load_peak, load_notes, load_over, load_cut, cap_low, title);
+                load_peak = 0;
+                load_over = load_cut = 0;
+                cap_low = NVOICES;
+                load_from = now;
+            }
+        }
         thr_unlock(&lock);
         thr_sleep_ms(busy ? 4 : 20);
     }

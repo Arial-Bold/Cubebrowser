@@ -141,8 +141,10 @@ static void *worker_main(void *arg) {
     int idle_ticks = 0;
     for (;;) {
         if (retry_net && netio_state() == NET_FAILED) { retry_net = 0; bring_up(); }
-        /* save page.log once loading has been quiet for 2 seconds */
-        if (!job_pending && ++idle_ticks == 200) http_log_flush();
+        /* save page.log once loading has been quiet for 2 seconds, and
+         * every 10 seconds after that if something new was noted (such as
+         * the music's notes); it's only written when there's something new */
+        if (!job_pending && ++idle_ticks >= 200 && idle_ticks % 1000 == 200) http_log_flush();
         if (job_pending) {
             idle_ticks = 0;
             job_pending = 0;
