@@ -600,6 +600,22 @@ static void offer_download(const HttpResult *r) {
     sound_play(SFX_OPEN);
 }
 
+/* Downloads and music don't mix well on the GameCube (every network packet
+ * holds up the sound hardware a little, and the music skips), so playing
+ * music is paused for a download and started again when it's finished
+ * (after unzipping, if that was asked for). */
+static bool dl_paused_music;
+
+static void dl_pause_music(void) {
+    if (midi_state() == MIDI_PLAYING) { midi_toggle_pause(); dl_paused_music = true; }
+}
+
+static void dl_resume_music(void) {
+    if (!dl_paused_music) return;
+    dl_paused_music = false;
+    if (midi_state() == MIDI_PAUSED) midi_toggle_pause();
+}
+
 static void start_download(void) {
     if (!storage_ok()) { snprintf(dl_msg, sizeof(dl_msg), "No SD card was found."); dl_state = DL_FAILED; return; }
     make_dirs(download_dir(dl_name));
@@ -610,6 +626,7 @@ static void start_download(void) {
     }
     dl_confirm_cancel = false;
     dl_state = DL_RUNNING;
+    dl_pause_music();
 }
 
 static void start_unzip(void) {
@@ -635,15 +652,19 @@ static void handle_task_result(void) {
             sound_play(SFX_LOADED);
             if (dl_unzip_after) start_unzip();
             else dl_state = DL_DONE;
+            if (dl_state != DL_UNZIPPING) dl_resume_music();
         } else if (!strcmp(err, "Stopped.")) {
             dl_state = DL_IDLE;
             ui_toast("Download cancelled");
+            dl_resume_music();
         } else {
             snprintf(dl_msg, sizeof(dl_msg), "%s", err);
             dl_state = DL_FAILED;
             sound_play(SFX_ERROR);
+            dl_resume_music();
         }
     } else if (dl_state == DL_UNZIPPING) {
+        dl_resume_music();
         if (ok) {
             dl_files = fetch_unzip_progress()->files_done;
             if (g_set.dl_delete_zip) remove(dl_path);
@@ -711,8 +732,14 @@ static void draw_download(bool interactive) {
         gfx_text(FONT_BODY, 17, tx, ty, t->text_dim, line, -1);
         snprintf(line, sizeof(line), "Saves to: %s", download_dir(dl_name));
         gfx_text(FONT_BODY, 17, tx, ty + 26, t->text_dim, line, gfx_text_fit(FONT_BODY, 17, line, -1, tw));
-        if (dl_size > 200LL * 1024 * 1024)
-            wrap_text(FONT_BODY, 16, tx, ty + 58, tw, t->text_dim, "This is a big file, so it may take a while. Keep the GameCube on until it finishes.", 2);
+        float ny = ty + 58;
+        if (dl_size > 200LL * 1024 * 1024) {
+            wrap_text(FONT_BODY, 16, tx, ny, tw, t->text_dim, "This is a big file, so it may take a while. Keep the GameCube on until it finishes.", 2);
+            ny += 46;
+        }
+        if (midi_state() == MIDI_PLAYING)
+            gfx_text(FONT_BODY, 16, tx, ny, t->text_dim, "The music will pause during the download and resume after.",
+                     gfx_text_fit(FONT_BODY, 16, "The music will pause during the download and resume after.", -1, tw));
         int nb = dl_is_zip ? 3 : 2;
         float bw = (tw - 12 * (nb - 1)) / nb, bx = tx;
         if (ui_button(ui_id("dl-go", 0), bx, by, bw, bh, "Download", 17, UIB_ACCENT)) { dl_unzip_after = false; start_download(); }
