@@ -178,6 +178,9 @@ CubeBrowser can play MIDI music in the background while you browse.
 
 ### Game Boy Advance player
 
+<img width="4096" height="3072" alt="IMG_20261020_213718719" src="https://github.com/user-attachments/assets/69c429e1-2776-4ff5-8516-034e78883614" />
+
+
 A Game Boy Advance can be the music player's own screen and remote, so you can
 see what's playing and change songs without leaving the page you're on.
 
