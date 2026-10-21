@@ -8,29 +8,51 @@
 #define MAX_SONGS 400
 #define NAME_MAX 40
 
-/* colours (from the browser's purple theme) */
-#define BG0   RGB8(28, 18, 74)
-#define BG1   RGB8(70, 48, 150)
-#define BAR   RGB8(60, 44, 138)
-#define BARL  RGB8(120, 104, 220)
-#define EDGE  RGB8(220, 212, 255)
-#define ACC   RGB8(255, 214, 92)
-#define TXT   RGB8(255, 255, 255)
-#define DIM   RGB8(214, 206, 250)
-#define DIM2  RGB8(170, 160, 230)
-#define ONACC RGB8(60, 36, 120)
-#define FIELD RGB8(246, 244, 255)
-#define FTXT  RGB8(40, 30, 90)
-#define FDIM  RGB8(110, 104, 140)
-#define ROW   RGB8(110, 94, 205)
-#define ROWL  RGB8(150, 136, 235)
-#define BTN   RGB8(120, 104, 220)
-#define TRACK RGB8(225, 220, 245)
-#define VOLOFF RGB8(110, 94, 200)
-#define HINT  RGB8(22, 14, 58)
-#define GOOD  RGB8(90, 210, 120)
-#define BAD   RGB8(255, 130, 130)
-#define DECO  RGB8(72, 54, 155)
+/* colours: the browser's theme, sent by the GameCube (GBP_THEME); until
+ * then, its original purple one */
+static Col pal[GBT_COUNT] = {
+    [GBT_BG0] = RGB8(28, 18, 74), [GBT_BG1] = RGB8(70, 48, 150),
+    [GBT_BAR] = RGB8(60, 44, 138), [GBT_BARL] = RGB8(120, 104, 220),
+    [GBT_EDGE] = RGB8(220, 212, 255), [GBT_ACC] = RGB8(255, 214, 92),
+    [GBT_TXT] = RGB8(255, 255, 255), [GBT_DIM] = RGB8(214, 206, 250), [GBT_ONACC] = RGB8(60, 36, 120),
+    [GBT_FIELD] = RGB8(246, 244, 255), [GBT_FTXT] = RGB8(40, 30, 90), [GBT_FDIM] = RGB8(110, 104, 140),
+    [GBT_ROW] = RGB8(110, 94, 205), [GBT_ROWL] = RGB8(150, 136, 235), [GBT_BTN] = RGB8(120, 104, 220),
+    [GBT_TRACK] = RGB8(225, 220, 245), [GBT_VOLOFF] = RGB8(110, 94, 200),
+    [GBT_HINT] = RGB8(22, 14, 58), [GBT_GOOD] = RGB8(90, 210, 120), [GBT_BAD] = RGB8(255, 130, 130),
+    [GBT_DECO] = RGB8(72, 54, 155),
+    [GBT_BGTXT] = RGB8(255, 255, 255), [GBT_BGDIM] = RGB8(214, 206, 250), [GBT_BGDIM2] = RGB8(170, 160, 230),
+    [GBT_BGACC] = RGB8(255, 214, 92), [GBT_HINTTXT] = RGB8(214, 206, 250), [GBT_BARTXT] = RGB8(214, 206, 250),
+    [GBT_CUBE1] = RGB8(190, 176, 255), [GBT_CUBE2] = RGB8(90, 74, 190),
+};
+#define BG0    pal[GBT_BG0]
+#define BG1    pal[GBT_BG1]
+#define BAR    pal[GBT_BAR]
+#define BARL   pal[GBT_BARL]
+#define EDGE   pal[GBT_EDGE]
+#define ACC    pal[GBT_ACC]
+#define TXT    pal[GBT_TXT]
+#define DIM    pal[GBT_DIM]
+#define ONACC  pal[GBT_ONACC]
+#define FIELD  pal[GBT_FIELD]
+#define FTXT   pal[GBT_FTXT]
+#define FDIM   pal[GBT_FDIM]
+#define ROW    pal[GBT_ROW]
+#define ROWL   pal[GBT_ROWL]
+#define BTN    pal[GBT_BTN]
+#define TRACK  pal[GBT_TRACK]
+#define VOLOFF pal[GBT_VOLOFF]
+#define HINT   pal[GBT_HINT]
+#define GOOD   pal[GBT_GOOD]
+#define BAD    pal[GBT_BAD]
+#define DECO   pal[GBT_DECO]
+#define BGTXT  pal[GBT_BGTXT]
+#define BGDIM  pal[GBT_BGDIM]
+#define BGDIM2 pal[GBT_BGDIM2]
+#define BGACC  pal[GBT_BGACC]
+#define HINTTXT pal[GBT_HINTTXT]
+#define BARTXT pal[GBT_BARTXT]
+#define CUBE1  pal[GBT_CUBE1]
+#define CUBE2  pal[GBT_CUBE2]
 
 /* what the GameCube told us */
 static GbpState st;
@@ -83,6 +105,9 @@ void player_message(int type, const uint8_t *d, int len) {
     case GBP_TITLE: copy_text(title, d, len); break;
     case GBP_INSTR: copy_text(instr, d, len); break;
     case GBP_MSG: copy_text(msg, d, len); break;
+    case GBP_THEME:
+        for (int i = 0; i < GBT_COUNT && 2 * i + 1 < len; i++) pal[i] = (Col)gbp_get16(d + 2 * i);
+        break;
     case GBP_SONG:
         if (len >= 2) {
             int i = (int)gbp_get16(d);
@@ -217,15 +242,15 @@ static void tabs(void) {
     for (int i = 0; i < 3; i++) {
         int x0 = 18 + i * 69;
         if (i == tab) gfx_rrect(x0, 4, 67, 14, 6, ACC);
-        gfx_text_c(&font9b, x0 + 33, 5, i == tab ? ONACC : DIM, names[i]);
+        gfx_text_c(&font9b, x0 + 33, 5, i == tab ? ONACC : BARTXT, names[i]);
     }
-    gfx_text(&font8b, 8, 5, ROWL, "L", 0);
-    gfx_text(&font8b, 226, 5, ROWL, "R", 0);
+    gfx_text(&font8b, 8, 5, BARTXT, "L", 0);
+    gfx_text(&font8b, 226, 5, BARTXT, "R", 0);
 }
 
 static void hints(const char *t) {
     gfx_fill(0, SCR_H - 13, SCR_W, 13, HINT);
-    gfx_text_c(&font8b, SCR_W / 2, SCR_H - 12, DIM, t);
+    gfx_text_c(&font8b, SCR_W / 2, SCR_H - 12, HINTTXT, t);
 }
 
 /* tiny text helpers (no printf, to keep the program small to send) */
@@ -291,25 +316,25 @@ static void draw_playing(void) {
         if (i == 1 && (st.flags & GBF_REPEAT)) ic = ACC;
         button(xs[i], 88, i == 4, i == sel, icons[i], ic);
     }
-    gfx_text(&font8b, 204, 77, DIM, "VOL", 0);
+    gfx_text(&font8b, 204, 77, BGDIM, "VOL", 0);
     for (int i = 0; i < 10; i++) {
         int h = 3 + i, x = 202 + i * 3;
         gfx_fill(x, 104 - h, 2, h + 1, i < st.volume ? ACC : VOLOFF);
     }
     gfx_mask(8, 119, &m_dot5, GOOD);
-    gfx_text(&font8, 17, 116, DIM, "Linked to CubeBrowser", 0);
+    gfx_text(&font8, 17, 116, BGDIM, "Linked to CubeBrowser", 0);
     if (st.count) {
         if (st.cur < st.count) put_u(put_s(put_u(put_s(line, "Song "), st.cur + 1u), " of "), st.count);
         else put_s(put_u(line, st.count), " songs");
-        gfx_text(&font8, 232 - gfx_text_w(&font8, line), 116, DIM, line, 0);
+        gfx_text(&font8, 232 - gfx_text_w(&font8, line), 116, BGDIM, line, 0);
     }
     if (msg[0]) gfx_text(&font8, 8, 130, BAD, msg, 224);
-    else if (st.flags & GBF_SHUFFLE) gfx_text(&font8, 8, 130, DIM2, "Shuffle is on", 0);
+    else if (st.flags & GBF_SHUFFLE) gfx_text(&font8, 8, 130, BGDIM2, "Shuffle is on", 0);
     else if (st.cur < st.count && st.count > 1) {
         int n = st.cur + 1 < st.count ? st.cur + 1 : ((st.flags & GBF_REPEAT) ? 0 : -1);
         if (n >= 0) {
             put_s(put_s(line, "Next: "), song_name(n));
-            gfx_text(&font8, 8, 130, DIM2, line, 224);
+            gfx_text(&font8, 8, 130, BGDIM2, line, 224);
         }
     }
     hints("\x7f\x80 pick   A press   \x81\x82 volume   START play");
@@ -318,9 +343,9 @@ static void draw_playing(void) {
 static void draw_songs(void) {
     tabs();
     if (!st.count) {
-        gfx_text_c(&font9b, 120, 62, TXT, "No songs yet");
-        gfx_text_c(&font8, 120, 80, DIM, "Put .mid files in the midi folder");
-        gfx_text_c(&font8, 120, 92, DIM, "on your SD card.");
+        gfx_text_c(&font9b, 120, 62, BGTXT, "No songs yet");
+        gfx_text_c(&font8, 120, 80, BGDIM, "Put .mid files in the midi folder");
+        gfx_text_c(&font8, 120, 92, BGDIM, "on your SD card.");
         hints("L/R tabs");
         return;
     }
@@ -342,14 +367,14 @@ static void draw_songs(void) {
         int th = 117 * vis / st.count;
         if (th < 10) th = 10;
         int ty = 24 + (117 - th) * song_top / (st.count - vis);
-        gfx_rrect(231, ty, 5, th, 3, DIM);
+        gfx_rrect(231, ty, 5, th, 3, BARTXT);
     }
     hints("\x81\x82 move   \x7f\x80 page   A play   B back");
 }
 
 static void draw_sounds(void) {
     tabs();
-    gfx_text(&font8, 8, 22, DIM, "Choose the instruments for your music", 0);
+    gfx_text(&font8, 8, 22, BGDIM, "Choose the instruments for your music", 0);
     const int vis = 4;
     int n = st.sf_count;
     if (sf_cur_row < sf_top) sf_top = sf_cur_row;
@@ -385,12 +410,12 @@ static void draw_loading(void) {
 
 static void draw_connecting(void) {
     background(true);
-    gfx_mask(98, 26, &m_cube_top, RGB8(190, 176, 255));
+    gfx_mask(98, 26, &m_cube_top, CUBE1);
     gfx_mask(98, 26, &m_cube_left, BTN);
-    gfx_mask(98, 26, &m_cube_right, RGB8(90, 74, 190));
-    gfx_text_c(&font14b, 120, 80, ACC, "CubeBrowser");
-    gfx_text_c(&font9b, 120, 99, TXT, "Music Player");
-    gfx_text_c(&font8, 120, 120, DIM, "Talking to the GameCube...");
+    gfx_mask(98, 26, &m_cube_right, CUBE2);
+    gfx_text_c(&font14b, 120, 80, BGACC, "CubeBrowser");
+    gfx_text_c(&font9b, 120, 99, BGTXT, "Music Player");
+    gfx_text_c(&font8, 120, 120, BGDIM, "Talking to the GameCube...");
     for (int i = 0; i < 3; i++)
         gfx_mask(110 + i * 8, 137, &m_dot5, (int)(frames / 15 % 3) == i ? ACC : ROW);
 }
