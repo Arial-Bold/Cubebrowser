@@ -154,8 +154,6 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 
 CubeBrowser can play MIDI music in the background while you browse.
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/4b507b46-7a34-4c0c-90de-a70d859909a7" />
-
 
 - Put `.mid` files (also `.midi`, `.kar` and `.rmi`) in a folder called `midi`
   at the root of your SD card. The folder is created for you the first time
