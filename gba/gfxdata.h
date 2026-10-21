@@ -1,0 +1,35 @@
+/* gfxdata.h - made by tools/gba_gfxgen.py; do not edit. */
+#pragma once
+typedef struct { unsigned char adv; signed char x, y; unsigned char w, h; unsigned short off; } Glyph;
+typedef struct { unsigned char height, ascent; const Glyph *g; } Font;
+typedef struct { unsigned char w, h; unsigned short off; } Mask;
+extern const unsigned char gfx_pool[];
+extern const Font font8;
+extern const Font font8b;
+extern const Font font9b;
+extern const Font font12b;
+extern const Font font14b;
+extern const Mask m_circle9;
+extern const Mask m_circle10;
+extern const Mask m_circle12;
+extern const Mask m_circle13;
+extern const Mask m_circle15;
+extern const Mask m_dot5;
+extern const Mask m_ring9;
+extern const Mask m_dot5r;
+extern const Mask m_corner3;
+extern const Mask m_corner5;
+extern const Mask m_corner6;
+extern const Mask m_corner8;
+extern const Mask m_corner10;
+extern const Mask m_play;
+extern const Mask m_pause;
+extern const Mask m_next;
+extern const Mask m_prev;
+extern const Mask m_stop;
+extern const Mask m_shuffle;
+extern const Mask m_repeat;
+extern const Mask m_note;
+extern const Mask m_cube_top;
+extern const Mask m_cube_left;
+extern const Mask m_cube_right;

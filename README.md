@@ -8,10 +8,6 @@ files straight to your SD card, and control everything with a GameCube
 controller. It runs as a `.dol` program launched from Swiss,
 with menus designed to feel like they belong on the console.
 
-
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/8effcf94-d77b-44d6-b720-f05436d28679" />
-
-
 ---
 
 ## What you need
@@ -22,6 +18,7 @@ with menus designed to feel like they belong on the console.
 | A **network adapter** | The official Nintendo Broadband Adapter, or a WIZnet-based adapter such as the ETH2GC, connected to your router with an Ethernet cable. |
 | An **SD card adapter** | SD2SP2 (recommended) or SD Gecko, with a FAT32 card. |
 | A **controller** | Any port. Bluetooth controllers through BlueRetro work too. |
+| A **Game Boy Advance** and link cable (optional) | For the music player on a second screen: see [Game Boy Advance player](#game-boy-advance-player). |
 
 Component cables are optional and unlock 480p video.
 
@@ -103,10 +100,6 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 
 ## Browsing
 
-
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/a211904f-7e8e-4d70-84e2-d2c23e3bee9e" />
-
-
 - **Go anywhere:** press X, type an address like `text.npr.org`, or type any
   words to search. Addresses open securely (HTTPS) automatically.
 - **Toolbar:** Back, Forward, Home, Exit (door), the address bar (with a stop
@@ -154,7 +147,6 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 
 CubeBrowser can play MIDI music in the background while you browse.
 
-
 - Put `.mid` files (also `.midi`, `.kar` and `.rmi`) in a folder called `midi`
   at the root of your SD card. The folder is created for you the first time
   you open the player.
@@ -179,6 +171,41 @@ CubeBrowser can play MIDI music in the background while you browse.
   so the next song often starts sooner. In the rare case a song needs more
   than fits, the rest is kept in main memory at 8-bit, which sounds almost
   the same.
+- **Downloads:** music pauses while a file downloads and starts again when it
+  finishes, because downloading at full speed makes the music skip.
+
+### Game Boy Advance player
+
+A Game Boy Advance can be the music player's own screen and remote, so you can
+see what's playing and change songs without leaving the page you're on.
+
+1. Connect the Game Boy Advance to **controller port 2** with a GameCube Game
+   Boy Advance link cable (your controller goes in another port).
+2. Switch the Game Boy Advance on with **no game inserted**. CubeBrowser sends
+   it the player over the cable, which takes a few seconds, and a message on
+   the TV says when it's ready.
+
+It works with the original Game Boy Advance and the SP (the Micro needs a
+different cable). You can plug it in and out at any time while browsing:
+unplugged, it shows "Link cable unplugged" and the music carries on; plugged
+back in, it picks up where it left off without sending the player again. If
+it was switched off, switch it on again with no game and the player is sent
+again by itself. The on-screen player keeps working too, and both always
+agree.
+
+| Button | Action |
+|---|---|
+| L / R | Switch tab: **Playing**, **Songs**, **Sounds** |
+| D-Pad | Playing: ←/→ pick a button, ↑/↓ volume. Songs and Sounds: ↑/↓ move, ←/→ a page at a time |
+| A | Press the picked button, play the song, or choose those instruments |
+| B | Back to the Playing tab (on Playing: stop) |
+| START | Play / pause, from any tab |
+| SELECT | Turn the screen off to save battery (any button turns it back on) |
+
+**Sounds** lists the same instrument choices as Settings > Music >
+Instruments. Changes made on the Game Boy Advance (volume, shuffle, repeat,
+instruments) are saved like the ones made on the TV. To free port 2, turn off
+**Settings > Music > Game Boy Advance player**.
 
 ## How pages look
 
@@ -251,7 +278,7 @@ defaults.
 | **Network** | Automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server, time zone and daylight saving. |
 | **Controls** | Stick dead zone, pointer speed and acceleration, scroll speed, pointer snapping, rumble, the button for each action, on-screen key layout (QWERTY or ABC) and key repeat speed. |
 | **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), picture width (Full 704 or Standard 640), screen margin, page text size, theme, animations, loading screen, sound effects and volume. |
-| **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle, repeat and the glowing note button. |
+| **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle, repeat, the glowing note button, and the Game Boy Advance player (on/off). |
 | **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture & style cache, picture labels, maximum page size. |
 | **Security** | Cookies on/off, keep logins after restart, certificate checking and the certificate file. |
 | **Updates** | Check for CubeBrowser updates (now, and automatically at start), check for Swiss updates, and the name to save a new Swiss as (keep its name, numbered, swiss.dol, boot.dol or ipl.dol). |
@@ -374,4 +401,7 @@ If you report a problem, please include these files and the page address.
 ## Credits
 
 Built with [libogc2](https://libogc2.org/), [mbedTLS](https://github.com/Mbed-TLS/mbedtls),
-[stb_image](https://github.com/nothings/stb) and the DejaVu fonts.
+[stb_image](https://github.com/nothings/stb) and the DejaVu fonts. The Game Boy
+Advance player is built with devkitARM and [libgba](https://github.com/devkitPro/libgba);
+the way it's sent over the link cable follows the method used by FIX94's
+[GBA Link Cable Dumper](https://github.com/FIX94/gba-link-cable-dumper).

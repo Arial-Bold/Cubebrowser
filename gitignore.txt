@@ -1,0 +1,7 @@
+build/
+third_party/
+*.elf
+*.dol
+*.map
+*.gba
+source/gbaplayer_rom.c
