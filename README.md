@@ -418,3 +418,6 @@ Built with [libogc2](https://libogc2.org/), [mbedTLS](https://github.com/Mbed-TL
 Advance player is built with devkitARM and [libgba](https://github.com/devkitPro/libgba);
 the way it's sent over the link cable follows the method used by FIX94's
 [GBA Link Cable Dumper](https://github.com/FIX94/gba-link-cable-dumper).
+CubeBrowser was built with Claude (by Anthropic), working with Arial-Bold.
+
+
