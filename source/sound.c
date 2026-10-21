@@ -6,6 +6,7 @@
 #include <gccore.h>
 #include <aesndlib.h>
 #include <ogc/lwp_watchdog.h>
+#include <ogc/aram.h>
 #include <malloc.h>
 #include <math.h>
 #include <string.h>
@@ -75,10 +76,21 @@ static AESNDPB *sfx_voice[SFX_VOICES];
 static u64 sfx_busy_until[SFX_VOICES];
 static int sfx_next;
 
+/* Run by the sound library (in the audio interrupt) before each block of a
+ * playing sound. The library copies every voice's samples to audio memory
+ * through one shared buffer; if the music's copy is still going when ours
+ * starts, both get mixed up and the music plays garbage for a moment (a
+ * loud buzz). So wait for any copy in progress, as the music's voices do. */
+static void sfx_cb(AESNDPB *pb, u32 state) {
+    (void)pb;
+    if (state == VOICE_STATE_RUNNING)
+        for (int k = 0; k < 20000 && AR_GetDMAStatus(); k++) {}
+}
+
 void sound_init(void) {
     AESND_Init();
     AESND_Pause(false);
-    for (int i = 0; i < SFX_VOICES; i++) sfx_voice[i] = AESND_AllocateVoice(NULL);
+    for (int i = 0; i < SFX_VOICES; i++) sfx_voice[i] = AESND_AllocateVoice(sfx_cb);
     for (int i = 0; i < SFX_COUNT; i++) synth(i);
     ready = true;
 }

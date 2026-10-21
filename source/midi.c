@@ -294,7 +294,7 @@ static void hw_callback(AESNDPB *pb, u32 st) {
          * shared buffer. If the previous copy is still going, the next voice
          * would overwrite it (heard as clicks and stray noises), so wait
          * for it here; it takes a few microseconds at most. */
-        for (int k = 0; k < 4000 && AR_GetDMAStatus(); k++) {}
+        for (int k = 0; k < 20000 && AR_GetDMAStatus(); k++) {}
         if (hw_stop_req || h->want_stop) {
             AESND_SetVoiceStop(pb, true);
             h->state = HV_STOPPING;
