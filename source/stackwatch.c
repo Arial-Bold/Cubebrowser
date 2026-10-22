@@ -35,10 +35,12 @@ void *stack_new(size_t size, const char *name) {
 void stack_check(void) {
     for (int i = 0; i < nwatched; i++) {
         /* stacks grow down: the untouched part is at the bottom */
-        size_t free_words = 0;
+        /* (the system marks the very bottom word itself, and the hardware
+         * stops the console if anything writes there: start just above it) */
+        size_t free_words = 8;
         while (free_words < watched[i].words && watched[i].base[free_words] == FILL) free_words++;
         size_t used = (watched[i].words - free_words) * 4, total = watched[i].words * 4;
-        int level = free_words * 4 < 256 ? 2 : free_words * 4 < 1024 ? 1 : 0;
+        int level = free_words * 4 < 256 + 32 ? 2 : free_words * 4 < 1024 + 32 ? 1 : 0;
         if (level > watched[i].told) {
             watched[i].told = level;
             http_log_note("threads | the %s thread %s its stack: %u of %u KB used", watched[i].name,
