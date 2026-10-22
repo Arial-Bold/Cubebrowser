@@ -63,6 +63,7 @@ typedef struct {
     Zone z;
     int stage;
     float level, stage_t;
+    float rel_t;              /* seconds since it was let go */
     bool released, held;      /* held: note-off came while the sustain pedal was down */
     double started, ends;     /* seconds of song time; ends: one-shot sample runs out */
     uint32_t order;
@@ -169,6 +170,8 @@ typedef struct {
     volatile int state;
     volatile uint32_t stop_frame;
     volatile uint32_t lease;       /* the audio block when the sequencer last looked after this note */
+    volatile uint32_t first_stop;  /* the audio block it was first asked to stop (for the log) */
+    volatile bool kept_going;      /* still being played well after it was stopped (counted once) */
     /* the note being played, owned by the callback while the voice runs */
     uint32_t applied;
     const int16_t *c_data;
@@ -191,6 +194,7 @@ static volatile bool hw_stop_req;
 static volatile uint32_t frame_no;   /* counts the 2 ms audio blocks */
 static volatile uint32_t stalls;     /* voices found stuck and restarted (see hw_callback) */
 static volatile uint32_t orphans;    /* voices found playing with no note behind them (see hw_callback) */
+static volatile uint32_t unstoppable;   /* voices still being played well after being stopped (see hw_callback) */
 static bool hw_ok;
 
 static void audio_block(void *buf, u32 len) { (void)buf; (void)len; frame_no++; }
@@ -321,7 +325,12 @@ static void hw_callback(AESNDPB *pb, u32 st) {
         bool orphan = frame_no - h->lease > 750;
         if (orphan && !hw_stop_req && !h->want_stop) orphans++;
         if (hw_stop_req || h->want_stop || orphan) {
+            /* silent as well as stopped: if the stop were ever lost, the
+             * voice would carry on unheard instead of as a hung note */
             AESND_SetVoiceStop(pb, true);
+            AESND_SetVoiceVolume(pb, 0, 0);
+            if (h->state != HV_STOPPING) { h->first_stop = frame_no; h->kept_going = false; }
+            else if (!h->kept_going && frame_no - h->first_stop > 10) { h->kept_going = true; unstoppable++; }
             h->state = HV_STOPPING;
             h->stop_frame = frame_no;
             return;
@@ -436,10 +445,13 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
     h->lease = frame_no;
     hw_take_note(h);
     h->since_stream = 0;
+    /* all in one go, so the mixer never sees the voice half set up */
+    _CPU_ISR_Disable(level);
     h->state = HV_RUNNING;
     AESND_SetVoiceVolume(h->pb, vl, vr);
     AESND_PlayVoice(h->pb, VOICE_MONO16, h->staging, STAGE_SAMPLES * 2, freq, 0, true);
     AESND_SetVoiceStream(h->pb, true);
+    _CPU_ISR_Restore(level);
 }
 
 static void hw_set(int i, uint32_t freq, uint16_t vl, uint16_t vr) {
@@ -652,7 +664,11 @@ static void handle_event(const MidiEvent *e) {
 }
 
 /* Advances every playing note's envelope by dt and sends its pitch and volume. */
+static volatile uint32_t bad_levels;   /* notes found with an impossible loudness (see voices_update) */
+static char bad_level_note[200];
+
 static void voices_update(float dt, bool paused) {
+    if (!(dt >= 0.0f)) dt = 0.0f;   /* (never backwards, never NaN) */
     for (int i = 0; i < NVOICES; i++) {
         Voice *v = &voices[i];
         if (!v->active) continue;
@@ -679,7 +695,24 @@ static void voices_update(float dt, bool paused) {
             case ENV_RELEASE:
                 v->level *= expf(-dt * 6.9f / (z->release > 0.01f ? z->release : 0.01f));
                 if (v->level < 0.0007f) v->stage = ENV_DONE;
+                /* a let-go note always ends: its fade is over well within
+                 * twice its release time (at most 8 s), whatever its level says */
+                v->rel_t += dt;
+                if (v->rel_t > 2 * z->release + 0.5f) v->stage = ENV_DONE;
                 break;
+            }
+            /* The level can only be 0..1. A note was once found with an
+             * endless level ("inf"), which made it play on for ever: put it
+             * right, and note in the log what the note was. */
+            if (!isfinite(v->level) || v->level > 1.01f || v->level < 0.0f) {
+                bad_levels++;
+                if (!bad_level_note[0])
+                    snprintf(bad_level_note, sizeof(bad_level_note),
+                             "channel %d, key %d, instrument %d, stage %d, level %g, step %g s, attack %g, decay %g, sustain %g, release %g",
+                             v->ch + 1, v->key, chans[v->ch].program, v->stage, (double)v->level, (double)dt,
+                             (double)z->attack, (double)z->decay, (double)z->sustain, (double)z->release);
+                v->level = v->level > 0.0f ? 1.0f : 0.0f;   /* (inf counts as loud, NaN as silent) */
+                if (!isfinite(z->sustain) || z->sustain > 1) v->z.sustain = 1;
             }
             if (song_pos >= v->ends) v->stage = ENV_DONE;
             if (v->stage == ENV_DONE) { voice_free(i); continue; }
@@ -1010,12 +1043,44 @@ static void *seq_main(void *arg) {
         double now = now_seconds(), dt = now - last;
         last = now;
         if (dt > 0.1) dt = 0.1;   /* after a long stall, don't rush through notes */
+        if (dt < 0) dt = 0;
         if (state == MIDI_PLAYING && song_loaded) advance(dt);
         else for (int i = 0; i < NVOICES; i++) if (voices[i].active) hw[i].lease = frame_no;   /* paused: notes kept */
         static uint32_t logged_orphans;
         if (orphans != logged_orphans) {
             logged_orphans = orphans;
             http_log_note("music   | a hung note was stopped (%u so far), in %s", (unsigned)logged_orphans, current >= 0 ? songs[current] : title);
+        }
+        static uint32_t logged_bad;
+        if (bad_levels != logged_bad) {
+            logged_bad = bad_levels;
+            http_log_note("music   | a note's loudness went wrong and was put right (%u so far): %s, in %s",
+                          (unsigned)logged_bad, bad_level_note, current >= 0 ? songs[current] : title);
+            bad_level_note[0] = 0;
+        }
+        static uint32_t logged_unstoppable;
+        if (unstoppable != logged_unstoppable) {
+            logged_unstoppable = unstoppable;
+            http_log_note("music   | a voice kept playing after it was stopped (%u so far), in %s", (unsigned)logged_unstoppable, current >= 0 ? songs[current] : title);
+        }
+        /* A note held for a long time is normal for some songs (organs,
+         * pads), but it is also what a hung note looks like from here: the
+         * log says which, should one ever be heard again. */
+        static double long_check;
+        static uint32_t long_logged[NVOICES];
+        if (song_pos < long_check) long_check = 0;   /* a new song */
+        if (state == MIDI_PLAYING && song_pos - long_check >= 1.0) {
+            long_check = song_pos;
+            for (int i = 0; i < NVOICES; i++) {
+                Voice *v = &voices[i];
+                if (!v->active || song_pos - v->started < 20 || long_logged[i] == v->order) continue;
+                long_logged[i] = v->order;
+                http_log_note("music   | a note has played for %.0f s: channel %d, key %d, instrument %d, %s, %s%s, level %.2f, at %.0f s in %s",
+                              song_pos - v->started, v->ch + 1, v->key, chans[v->ch].program,
+                              v->z.loop ? "looping" : "one-shot", v->released ? "let go" : "still held",
+                              v->held ? " (by the sustain pedal)" : "", v->level, song_pos,
+                              current >= 0 ? songs[current] : title);
+            }
         }
         static uint32_t logged;
         if (stalls != logged) {   /* (in page.log, so it shows if the buzz guard ever had to act) */
