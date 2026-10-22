@@ -1,4 +1,5 @@
 /* diag.c - see diag.h */
+#include "stackwatch.h"
 #include "diag.h"
 #include "storage.h"
 #include <stdarg.h>
@@ -56,7 +57,7 @@ static void *watchdog_main(void *arg) {
 
 void diag_init(void) {
     /* above page layout (100), below the network stack's own thread */
-    LWP_CreateThread(&watchdog, watchdog_main, NULL, NULL, 16 * 1024, 120);
+    LWP_CreateThread(&watchdog, watchdog_main, NULL, stack_new(16 * 1024, "watchdog"), 16 * 1024, 120);
 }
 #else
 void diag_init(void) {}

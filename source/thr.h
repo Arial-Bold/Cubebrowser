@@ -8,10 +8,16 @@
 #ifdef GEKKO
 #include <gccore.h>
 #include <ogc/mutex.h>
+#include "stackwatch.h"
 typedef lwp_t thr_t;
 typedef mutex_t thr_mutex;
 static inline bool thr_create(thr_t *t, void *(*fn)(void *), void *arg, size_t stack, int prio) {
     return LWP_CreateThread(t, fn, arg, NULL, (u32)stack, (u8)prio) >= 0;
+}
+/* the same, with the stack watched (see stackwatch.h): for long-lived threads */
+static inline bool thr_create_watched(thr_t *t, void *(*fn)(void *), void *arg, size_t stack, int prio, const char *name) {
+    void *mem = stack_new(stack, name);
+    return LWP_CreateThread(t, fn, arg, mem, (u32)stack, (u8)prio) >= 0;
 }
 static inline void thr_join(thr_t t) { LWP_JoinThread(t, NULL); }
 static inline void thr_detach(thr_t t) { LWP_DetachThread(t); }
@@ -31,6 +37,10 @@ static inline bool thr_create(thr_t *t, void *(*fn)(void *), void *arg, size_t s
     bool ok = pthread_create(t, &a, fn, arg) == 0;
     pthread_attr_destroy(&a);
     return ok;
+}
+static inline bool thr_create_watched(thr_t *t, void *(*fn)(void *), void *arg, size_t stack, int prio, const char *name) {
+    (void)name;
+    return thr_create(t, fn, arg, stack, prio);
 }
 static inline void thr_join(thr_t t) { pthread_join(t, NULL); }
 static inline void thr_detach(thr_t t) { pthread_detach(t); }

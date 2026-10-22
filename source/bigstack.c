@@ -6,6 +6,7 @@
 #include <gccore.h>
 #include <ogc/semaphore.h>
 #include <malloc.h>
+#include "stackwatch.h"
 
 #define BIG_STACK_SIZE (1024 * 1024)
 #define BIG_STACK_PRIO 100
@@ -28,7 +29,8 @@ static void *helper_main(void *a) {
 
 void run_with_big_stack(void (*fn)(void *), void *arg) {
     if (state == 0) {
-        void *stack = memalign(32, BIG_STACK_SIZE);
+        void *stack = stack_new(BIG_STACK_SIZE, "page layout");
+        if (!stack) stack = memalign(32, BIG_STACK_SIZE);
         state = -1;
         if (stack && LWP_SemInit(&go, 0, 1) >= 0 && LWP_SemInit(&done, 0, 1) >= 0 &&
             LWP_CreateThread(&helper, helper_main, NULL, stack, BIG_STACK_SIZE, BIG_STACK_PRIO) >= 0)

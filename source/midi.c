@@ -669,6 +669,7 @@ static char bad_level_note[200];
 
 static void voices_update(float dt, bool paused) {
     if (!(dt >= 0.0f)) dt = 0.0f;   /* (never backwards, never NaN) */
+    if (dt > 0.1f) dt = 0.1f;       /* (the sequencer never steps further) */
     for (int i = 0; i < NVOICES; i++) {
         Voice *v = &voices[i];
         if (!v->active) continue;
@@ -1149,7 +1150,7 @@ void midi_init(void) {
     channels_reset();
     hw_init();
 #ifdef GEKKO
-    if (lock_ok) thr_create(&seq_thread, seq_main, NULL, 64 * 1024, 110);   /* above page layout (100) so music never stalls */
+    if (lock_ok) thr_create_watched(&seq_thread, seq_main, NULL, 64 * 1024, 110, "music");   /* above page layout (100) so music never stalls */
 #endif
 }
 

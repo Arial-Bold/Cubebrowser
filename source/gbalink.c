@@ -598,7 +598,7 @@ void gbalink_init(void) {
     gbp_tx_reset(&tx);
     gbp_rx_reset(&rx);
     enabled = g_set.music_gba != 0;
-    thr_create(&th, link_main, NULL, 32 * 1024, 70);
+    thr_create_watched(&th, link_main, NULL, 32 * 1024, 70, "Game Boy link");
 }
 
 bool gbalink_linked(void) { return link_st == L_LINKED; }
