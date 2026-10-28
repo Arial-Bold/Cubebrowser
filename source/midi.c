@@ -197,7 +197,20 @@ static volatile uint32_t orphans;    /* voices found playing with no note behind
 static volatile uint32_t unstoppable;   /* voices still being played well after being stopped (see hw_callback) */
 static bool hw_ok;
 
-static void audio_block(void *buf, u32 len) { (void)buf; (void)len; frame_no++; }
+/* How long the voices' callbacks keep the audio interrupt busy in a block
+ * (they run with other interrupts held off, so while they run the screen's
+ * interrupts wait too): the longest block and the longest single copy from
+ * audio memory, in microseconds, since the log last noted them. */
+static volatile uint32_t irq_block_us, irq_block_max_us, irq_copy_max_us;
+static volatile uint32_t irq_worst_us;   /* the longest ever (for gpu-reset.log) */
+
+static void audio_block(void *buf, u32 len) {
+    (void)buf; (void)len;
+    if (irq_block_us > irq_block_max_us) irq_block_max_us = irq_block_us;
+    if (irq_block_us > irq_worst_us) irq_worst_us = irq_block_us;
+    irq_block_us = 0;
+    frame_no++;
+}
 
 /* Copies n samples starting at sample `at` of the note's ARAM sample into
  * dst (n <= STAGE_SAMPLES), through the voice's bounce buffer. The copy engine
@@ -218,7 +231,16 @@ static inline void aram_irq_clear(void) {
     DSP_CSR = (u16)(c | 0x0020);
 }
 
+static bool aram_copy_(HwVoice *h, int16_t *dst, uint32_t at, uint32_t n, int16_t *bounce);
 static bool aram_copy(HwVoice *h, int16_t *dst, uint32_t at, uint32_t n, int16_t *bounce) {
+    u64 t0 = gettime();
+    bool ok = aram_copy_(h, dst, at, n, bounce);
+    uint32_t us = (uint32_t)ticks_to_microsecs(gettime() - t0);
+    if (us > irq_copy_max_us) irq_copy_max_us = us;
+    return ok;
+}
+
+static bool aram_copy_(HwVoice *h, int16_t *dst, uint32_t at, uint32_t n, int16_t *bounce) {
     uint32_t src = h->c_aram + at * 2;
     uint32_t a0 = src & ~31u, a1 = (src + n * 2 + 31) & ~31u, len = a1 - a0;
     u32 level;
@@ -310,7 +332,14 @@ static void hw_take_note(HwVoice *h) {
 /* Called by AESND (in the audio interrupt) at the start of each block for a
  * running voice (RUNNING), and when it has used up its samples (STREAM).
  * Integer work only. */
+static void hw_callback_(AESNDPB *pb, u32 st);
 static void hw_callback(AESNDPB *pb, u32 st) {
+    u64 t0 = gettime();
+    hw_callback_(pb, st);
+    irq_block_us += (uint32_t)ticks_to_microsecs(gettime() - t0);
+}
+
+static void hw_callback_(AESNDPB *pb, u32 st) {
     HwVoice *h = AESND_GetVoiceUserData(pb);
     if (!h) return;
     if (st == VOICE_STATE_RUNNING) {
@@ -466,6 +495,8 @@ static void hw_silence(int i) {
     hw[i].want_stop = true;
 }
 
+unsigned midi_audio_irq_worst_us(void) { return irq_worst_us; }
+
 float midi_dsp_load(void) { return AESND_GetDSPProcessUsage(); }
 
 #else   /* ------------------------------------------- PC software mixer */
@@ -489,6 +520,7 @@ static void hw_start(int i, const Zone *z, uint32_t freq, uint16_t vl, uint16_t 
 static void hw_set(int i, uint32_t freq, uint16_t vl, uint16_t vr) { sw[i].freq = freq; sw[i].vl = vl / 256.0f; sw[i].vr = vr / 256.0f; }
 static void hw_silence(int i) { sw[i].on = false; }
 float midi_dsp_load(void) { return 0; }
+unsigned midi_audio_irq_worst_us(void) { return 0; }
 
 #endif
 
@@ -545,12 +577,19 @@ static void voice_volume(Voice *v, bool paused, uint16_t *vl, uint16_t *vr) {
 /* How many notes may sound at once: all the voices, unless the sound chip
  * is running short of time (see seq_main), when it's lowered for a while. */
 static int voice_cap = NVOICES;
+/* The sound chip's load as last measured (%), and roughly what one more
+ * note adds to it: a new note that would take it near its limit takes the
+ * place of a quieter one instead of adding to the load, so the chip isn't
+ * pushed over (each time it is, a little of the music is skipped). */
+static float dsp_load_now, dsp_per_note = 3.5f;
+#define LOAD_ROOM 88.0f
 
 static int voice_pick(void) {
     int best = -1, active = 0;
     for (int i = 0; i < NVOICES; i++) active += voices[i].active;
+    bool room = dsp_load_now + dsp_per_note < LOAD_ROOM || active < 8;
     /* a free voice the DSP has finished with, else any free voice */
-    if (active < voice_cap) {
+    if (active < voice_cap && room) {
         for (int i = 0; i < NVOICES; i++)
             if (!voices[i].active && hw_ready(i)) return i;
         for (int i = 0; i < NVOICES; i++)
@@ -1095,10 +1134,26 @@ static void *seq_main(void *arg) {
         static float load_peak;
         static int load_over, load_notes, load_cut, cap_low = NVOICES;
         static double load_from, calm_since;
+        static int ceiling = NVOICES;      /* the most notes since the chip last ran over */
+        static int ceiling_song = -2;
+        if (current != ceiling_song) { ceiling_song = current; ceiling = NVOICES; voice_cap = NVOICES; }
         if (busy) {
             float u = AESND_GetDSPProcessUsage();
-            if (u > load_peak) { load_peak = u; load_notes = voices_active(); }
-            if (u >= 100) load_over++;
+            int act = voices_active();
+            dsp_load_now = u;
+            if (act >= 6 && u > 10) {   /* learn what a note costs (a little high, to be safe) */
+                float per = u / act;
+                dsp_per_note += (per - dsp_per_note) * 0.05f;
+            }
+            if (u > load_peak) { load_peak = u; load_notes = act; }
+            if (u >= 100) {
+                load_over++;
+                /* it ran over with this many: stay below it for this song,
+                 * creeping back up only after a long calm (below) */
+                int c = act - 2;
+                if (c < 12) c = 12;
+                if (c < ceiling) ceiling = c;
+            }
             /* Close to running out of time: let the quietest fading note go
              * and allow fewer notes at once; when it's been calm for a
              * second, allow one more again. */
@@ -1118,15 +1173,20 @@ static void *seq_main(void *arg) {
                 if (cap < voice_cap) voice_cap = cap < 12 ? 12 : cap;
                 if (voice_cap < cap_low) cap_low = voice_cap;
                 calm_since = now;
-            } else if (u < 70 && voice_cap < NVOICES && now - calm_since > 4.0) {
+            } else if (u < 70 && voice_cap < ceiling && now - calm_since > 4.0) {
                 voice_cap++;
                 calm_since = now;
             }
+            static double ceiling_calm;
+            if (u >= 95) ceiling_calm = now;
+            else if (ceiling < NVOICES && now - ceiling_calm > 30.0) { ceiling++; ceiling_calm = now; }
             if (now - load_from >= 10) {
-                if (load_peak >= 85)
+                if (load_peak >= 85 || irq_block_max_us > 400)
                     http_log_note("music   | sound chip load peak %d%% (%d notes), %d blocks over time, %d notes let go, "
-                                  "lowest note limit %d, in 10 s of %s",
-                                  (int)load_peak, load_notes, load_over, load_cut, cap_low, current >= 0 ? songs[current] : title);
+                                  "lowest note limit %d, about %.1f%% a note, audio interrupt longest %u us (copy %u us), in 10 s of %s",
+                                  (int)load_peak, load_notes, load_over, load_cut, cap_low, dsp_per_note,
+                                  (unsigned)irq_block_max_us, (unsigned)irq_copy_max_us, current >= 0 ? songs[current] : title);
+                irq_block_max_us = irq_copy_max_us = 0;
                 load_peak = 0;
                 load_over = load_cut = 0;
                 cap_low = NVOICES;

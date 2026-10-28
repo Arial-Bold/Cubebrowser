@@ -3,6 +3,7 @@
 #include "font_data.h"
 #include "diag.h"
 #include "storage.h"
+#include "midi.h"
 #include <stdio.h>
 #include <unistd.h>
 #include <malloc.h>
@@ -259,8 +260,9 @@ static void gpu_recover(void) {
     tex_invalidate = true;
     gpu_resets++;
     char line[400];
-    int n = snprintf(line, sizeof(line), "GPU reset %u: %u vertices, %u pictures this frame | %s | %s\n", gpu_resets,
-                     frame_verts, frame_images, diag_get(DIAG_PAGE), diag_get(DIAG_DRAW));
+    int n = snprintf(line, sizeof(line), "GPU reset %u: %u vertices, %u pictures this frame, music %s, audio interrupt longest %u us | %s | %s\n",
+                     gpu_resets, frame_verts, frame_images, midi_state() == MIDI_PLAYING ? "playing" : "off",
+                     midi_audio_irq_worst_us(), diag_get(DIAG_PAGE), diag_get(DIAG_DRAW));
     char path[400];
     storage_path(path, sizeof(path), "gpu-reset.log");
     FILE *f = fopen(path, "ab");

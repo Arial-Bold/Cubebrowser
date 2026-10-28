@@ -1651,7 +1651,12 @@ void browser_frame(bool interactive) {
     bool content_ok = input_ok && !veil_covering();
     float cx = sx + 8, cy = sy + bar_h + 16, cw = sw - 16, ch = sh - bar_h - 16 - 34;
     gfx_shadow(cx + 2, cy + 4, cw, ch, 14, 6, t->shadow);
+    /* the page's rounded panel, which also marks its shape: the page is
+     * drawn only inside it (below), so a site's full-width bars and
+     * backgrounds keep the rounded corners instead of squaring them off */
+    gfx_mask_begin();
     gfx_rrect(cx, cy, cw, ch, 14, has_page && page.dom ? page.bg : t->page_bg);
+    gfx_mask_end();
 
     float scale = g_set.text_size / 100.0f;
     static int last_layout_frame, last_load_images = -1, last_alt = -1, last_img_size = -1;
@@ -1812,7 +1817,9 @@ void browser_frame(bool interactive) {
         if (over_note) hover_link = hover_field = -1;
         diag_note(DIAG_MAIN, "drawing page at scroll %.0f of %.0f (%d boxes)", page.scroll, page.content_h, page.nboxes);
         diag_note(DIAG_DRAW, "page at scroll %.0f of %.0f, %d boxes, %d pictures", page.scroll, page.content_h, page.nboxes, page.nimages);
+        gfx_mask_use();
         page_draw(&page, cx, cy, cw, ch, hover_link, hover_field);
+        gfx_mask_end();
         diag_note(DIAG_MAIN, "drawing toolbar and status bar");
 
         /* scroll bar */

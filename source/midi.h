@@ -38,6 +38,7 @@ int   midi_voices_in_use(void);
 const char *midi_instruments(void);   /* "Built-in" or the SoundFont's name */
 const char *midi_message(void);   /* a problem to show, or "" */
 float midi_dsp_load(void);         /* % of the sound processor's time in use */
+unsigned midi_audio_irq_worst_us(void);   /* the longest the music's audio interrupt has run (us) */
 
 /* The Instruments setting changed: load the new SoundFont (in the background). */
 void midi_instruments_changed(void);
