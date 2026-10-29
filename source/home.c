@@ -309,7 +309,7 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
     char bubble[48];
     UpdateState us = update_state();
     bool upd = us == UPD_AVAILABLE || us == UPD_INSTALLING || us == UPD_INSTALLED;
-    if (us == UPD_INSTALLED) snprintf(bubble, sizeof(bubble), "EXIT TO SWISS FOR v%s", update_latest_version());
+    if (us == UPD_INSTALLED) snprintf(bubble, sizeof(bubble), "RESTART FOR v%s", update_latest_version());
     else if (upd) snprintf(bubble, sizeof(bubble), "UPDATE AVAILABLE: v%s", update_latest_version());
     else snprintf(bubble, sizeof(bubble), "WELCOME TO v%s", CB_VERSION);
     float bub_w = caps_width(9.5f, 1.1f, bubble) + 20, bub_h = 22;

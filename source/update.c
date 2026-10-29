@@ -446,5 +446,9 @@ bool update_restart(char *err, size_t errlen) {
     if (state != UPD_INSTALLED) { snprintf(err, errlen, "Nothing to restart into yet."); return false; }
     settings_save();
     cookies_save_if_needed();
-    return dol_launch(target, err, errlen);
+    FILE *f = fopen(RESTART_NOTE, "wb");   /* so the new version knows where it lives (storage.c) */
+    if (f) { fputs(target, f); fclose(f); }
+    bool ok = dol_launch(target, err, errlen);
+    remove(RESTART_NOTE);                  /* only reached if it couldn't start */
+    return ok;
 }

@@ -13,6 +13,7 @@
 #include <stddef.h>
 
 #define STORAGE_ROOT_DIR "sd:/gcbrowser"
+#define RESTART_NOTE "sd:/cubebrowser-restart.txt"   /* the .dol to treat as argv[0] on the next start */
 
 bool storage_init(const char *argv0);   /* argv[0] from main, may be NULL */
 bool storage_ok(void);

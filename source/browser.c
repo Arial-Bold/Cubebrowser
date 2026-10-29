@@ -1903,8 +1903,8 @@ kb_done:
         snprintf(avail, sizeof(avail), "You have v%s. Installing keeps your settings, bookmarks and logins.", CB_VERSION);
         UpdView v = { "Software Update", "CubeBrowser", have, UPDATE_REPO, update_latest_version(), update_notes(),
                       update_error(), avail,
-                      "Exit to Swiss and start CubeBrowser again to use it. The old version was kept as a backup (.old).",
-                      "EXIT TO SWISS", update_state(), update_step() };
+                      "Restart CubeBrowser to use it. The old version was kept as a backup (.old).",
+                      "RESTART CUBEBROWSER", update_state(), update_step() };
         HomeAction ua = home_update_draw(cx, cy, cw, ch, content_ok, &v);
         if (ua != HOME_NONE) sound_play(SFX_SELECT);
         if (ua == HOME_OPEN_URL) navigate("about:home", NULL, true);
@@ -1912,14 +1912,10 @@ kb_done:
         else if (ua == HOME_UPDATE_CHECK) update_request_check(false);
         else if (ua == HOME_UPDATE_STOP) fetch_cancel_update();
         else if (ua == HOME_UPDATE_RESTART) {
-            /* back to Swiss, where the new version can be started; if Swiss
-             * can't be found, start the new version directly */
-            settings_save();
-            cookies_save_if_needed();
-            if (!exit_to_swiss()) {
-                char err[256];
-                if (!update_restart(err, sizeof(err))) { ui_toast(err); sound_play(SFX_ERROR); }
-            }
+            /* start the new version straight away; if it can't be started
+             * from here, fall back to Swiss, where it can be */
+            char err[256];
+            if (!update_restart(err, sizeof(err)) && !exit_to_swiss()) { ui_toast(err); sound_play(SFX_ERROR); }
         }
     } else if (on_help) {
         /* Controls & Tips draws itself too (home.c) */

@@ -42,6 +42,20 @@ static bool has_settings(const char *dir) {
 static void find_program_dir(const char *argv0) {
     prog_dir[0] = 0;
     prog_file[0] = 0;
+    /* restarted by the browser itself after an update (dolload passes no
+     * arguments): it left the .dol's path in a note at the root of the card */
+    static char noted[300];
+    if (!argv0 || !*argv0) {
+        FILE *f = fopen(RESTART_NOTE, "rb");
+        if (f) {
+            size_t n = fread(noted, 1, sizeof(noted) - 1, f);
+            fclose(f);
+            noted[n] = 0;
+            while (n && (noted[n - 1] == '\n' || noted[n - 1] == '\r')) noted[--n] = 0;
+            argv0 = noted;
+        }
+    }
+    remove(RESTART_NOTE);   /* only good for the one start */
     if (!argv0 || !*argv0) return;
     const char *colon = strstr(argv0, ":/");
     const char *path = colon ? colon + 1 : argv0;
