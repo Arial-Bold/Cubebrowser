@@ -60,7 +60,7 @@ const SetDef g_setdefs[] = {
     /* Controls: controller */
     { CAT_CONTROLS, "pad.deadzone", "Stick dead zone", ST_INT, O(deadzone), 0, 40, 2, NULL, NULL,
       "Raise this if the pointer drifts on its own." },
-    { CAT_CONTROLS, "pad.speed", "Pointer speed", ST_INT, O(cursor_speed), 1, 10, 1, NULL, NULL,
+    { CAT_CONTROLS, "pad.pointer", "Pointer speed", ST_INT, O(cursor_speed), 1, 10, 1, NULL, NULL,
       "How fast the pointer moves at full tilt." },
     { CAT_CONTROLS, "pad.accel", "Acceleration", ST_INT, O(accel), 0, 10, 1, NULL, NULL,
       "Higher values give finer control on small stick movements." },
@@ -328,6 +328,8 @@ bool settings_load(void) {
     if (!data) data = storage_read(tmp, &len);  /* interrupted save */
     if (!data) return false;
     char *save = NULL;
+    int old_speed = -1;    /* "pad.speed": the pointer speed before 2.7's faster scale */
+    bool new_speed = false;
     for (char *line = strtok_r(data, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
         char *l = trim(line);
         if (!*l || *l == '#' || *l == ';' || *l == '[') continue;
@@ -335,6 +337,8 @@ bool settings_load(void) {
         if (!eq) continue;
         *eq = 0;
         char *key = trim(l), *val = trim(eq + 1);
+        if (!strcmp(key, "pad.speed")) { old_speed = atoi(val); continue; }
+        if (!strcmp(key, "pad.pointer")) new_speed = true;
         const SetDef *d = find_def(key);
         if (!d) continue;
         if (d->type == ST_STR) {
@@ -347,6 +351,14 @@ bool settings_load(void) {
         }
     }
     free(data);
+    /* Settings from before 2.7: the old scale ran from 3.1 to 13 (2 + 1.1 x
+     * the setting), the new one from 3.1 to 26. Pick the nearest new step to
+     * the speed you had, so the pointer feels the same after updating. */
+    if (old_speed >= 1 && old_speed <= 10 && !new_speed) {
+        float had = 2.0f + old_speed * 1.1f;
+        int n = (int)((had - 3.1f) / ((26.0f - 3.1f) / 9.0f) + 0.5f) + 1;
+        g_set.cursor_speed = n < 1 ? 1 : n > 10 ? 10 : n;
+    }
     /* the old fixed default follows the data folder if it has moved */
     if (!strcmp(g_set.ca_path, STORAGE_ROOT_DIR "/cacert.pem")) storage_path(g_set.ca_path, sizeof(g_set.ca_path), "cacert.pem");
     settings_validate(&g_set);

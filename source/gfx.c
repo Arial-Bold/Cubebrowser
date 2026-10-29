@@ -149,6 +149,7 @@ void gfx_init(int video_mode, bool widescreen, bool full_width) {
     GX_SetCopyClear(black, 0x00FFFFFF);
     setup_gx_for_mode();
     GX_SetCullMode(GX_CULL_NONE);
+    GX_SetZMode(GX_TRUE, GX_ALWAYS, GX_TRUE);   /* so the copy clears depth too (see gfx_end_frame) */
     GX_CopyDisp(xfb[0], GX_TRUE);
     apply_state();
     GX_SetDrawDoneCallback(drawdone_cb);
@@ -216,10 +217,8 @@ static void load_matrix(void) {
 
 void gfx_begin_frame(void) {
     /* Everything is drawn at depth 0, which this puts halfway between the
-     * near and far planes. Shape masks (below) rely on drawn shapes having a
-     * depth clearly different from the cleared "far" one; with the near
-     * plane at 0, shapes sat right on the near plane and the marks didn't
-     * hold on the console, so rounded corners came out square. */
+     * near and far planes, well clear of the cleared "far" depth that shape
+     * masks (below) compare against. */
     Mtx44 proj;
     guOrtho(proj, 0, 480, 0, vw, -300, 300);
     GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
@@ -283,7 +282,13 @@ void gfx_end_frame(void) {
     bool ok = gpu_wait(1500);
     if (ok) {
         GX_SetColorUpdate(GX_TRUE);
+        /* the depth buffer is only cleared by the copy while depth writing is
+         * on; without this, shape masks from earlier frames stayed behind
+         * (after the System theme's square page, the rounded themes' page
+         * and loading screen came out with square corners) */
+        GX_SetZMode(GX_TRUE, GX_ALWAYS, GX_TRUE);
         GX_CopyDisp(xfb[fb], GX_TRUE);
+        GX_SetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
         ok = gpu_wait(1500);
     }
     if (!ok) {
