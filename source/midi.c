@@ -13,6 +13,7 @@
  * On a PC (the test programs) the same sequencer drives a simple software
  * mixer instead, so songs can be rendered to a .wav file and listened to. */
 #include "midi.h"
+#include "diag.h"
 #include "midifile.h"
 #include "instruments.h"
 #include "settings.h"
@@ -496,6 +497,7 @@ static void hw_silence(int i) {
 }
 
 unsigned midi_audio_irq_worst_us(void) { return irq_worst_us; }
+unsigned midi_audio_blocks(void) { return frame_no; }
 
 float midi_dsp_load(void) { return AESND_GetDSPProcessUsage(); }
 
@@ -521,6 +523,7 @@ static void hw_set(int i, uint32_t freq, uint16_t vl, uint16_t vr) { sw[i].freq 
 static void hw_silence(int i) { sw[i].on = false; }
 float midi_dsp_load(void) { return 0; }
 unsigned midi_audio_irq_worst_us(void) { return 0; }
+unsigned midi_audio_blocks(void) { return 0; }
 
 #endif
 
@@ -952,11 +955,14 @@ static void load_song_instruments(void) {
     }
     state = MIDI_LOADING;
     thr_unlock(&lock);
+    diag_note(DIAG_MUSIC, "stopping voices before loading sounds for song %d", current);
     hw_end();   /* no voice may read a sample while samples are swapped */
     char msg[160];
     slow_work(true);
+    diag_note(DIAG_MUSIC, "loading sounds for song %d", current);
     bool ok = instruments_need_load(msg, sizeof(msg));
     slow_work(false);
+    diag_note(DIAG_MUSIC, "sounds loaded for song %d, waiting for the music lock", current);
     thr_lock(&lock);
     if (!ok) snprintf(message, sizeof(message), "%s", msg);
 }
@@ -968,10 +974,12 @@ static void start_song(int i) {
         current = i;
         message[0] = 0;
         shuffle_follow(i);
+        diag_note(DIAG_MUSIC, "reading song %d: %.60s", i, songs[i]);
         if (load_song(i)) {
             load_song_instruments();
             hw_begin();
             state = MIDI_PLAYING;
+            diag_note(DIAG_MUSIC, "playing song %d", i);
             return;
         }
         i = (i + 1 < nsongs) ? i + 1 : -1;
@@ -1011,6 +1019,7 @@ static void advance(double dt) {
         }
         if (voices_active() == 0 || song_pos > tail_until) {
             int n = neighbour(+1);
+            diag_note(DIAG_MUSIC, "song %d over, next %d", current, n);
             if (n < 0) { stop_song(); instruments_free_samples(); }
             else if (req == REQ_NONE) {   /* the next song starts on the next pass */
                 all_voices_off();
@@ -1038,8 +1047,10 @@ static void process_request(void) {
         state = MIDI_LOADING;
         thr_unlock(&lock);
         slow_work(true);
+        diag_note(DIAG_MUSIC, "checking the SoundFont before song %d", s);
         ensure_instruments();   /* may take a while for a big SoundFont */
         slow_work(false);
+        diag_note(DIAG_MUSIC, "SoundFont ready, waiting for the music lock");
         thr_lock(&lock);
         if (req != REQ_NONE) break;   /* something else was asked meanwhile */
         start_song(s);

@@ -1753,6 +1753,7 @@ void browser_frame(bool interactive) {
 kb_done:
 
     /* ---- toolbar */
+    diag_note(DIAG_MAIN, "drawing toolbar");
     float bar_h = 54;
     ui_panel(sx + 4, sy + 4, sw - 8, bar_h, 24);
     float by = sy + 4 + bar_h * 0.5f, r = 18;
@@ -1926,7 +1927,9 @@ kb_done:
     } else if (on_home) {
         /* the start page draws itself (home.c) */
         const char *go = NULL;
+        diag_note(DIAG_MAIN, "drawing start page");
         HomeAction ha = home_draw(cx, cy, cw, ch, content_ok, &go, &home_hover);
+        diag_note(DIAG_MAIN, "start page drawn");
         if (ha != HOME_NONE) sound_play(ha == HOME_BOOKMARKS ? SFX_OPEN : SFX_SELECT);
         switch (ha) {
         case HOME_OPEN_URL: navigate(go, NULL, true); break;
@@ -2059,6 +2062,7 @@ kb_done:
         underwater_draw(cx, cy, cw, ch, veil.a, ui_time());
 
     /* ---- status bar */
+    diag_note(DIAG_MAIN, "drawing status bar");
     float sbx = sx + 14, sby = sy + sh - 28;
     char status[300];
     int pics_left = 0;
@@ -2105,6 +2109,7 @@ kb_done:
     }
 
     /* ---- modal layers */
+    diag_note(DIAG_MAIN, "drawing dialogs");
     if (dl_state != DL_IDLE) draw_download(interactive && !osk_active());
     if (music_open) {
         bool mu_input = interactive && !osk_active() && !bm_open && dl_state == DL_IDLE && sel_field < 0;
