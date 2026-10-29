@@ -4,7 +4,7 @@
 #ifndef ZIP7_INC_PRECOMP_H
 #define ZIP7_INC_PRECOMP_H
 
-/* CubeBrowser: only LZMA/LZMA2 are needed (the Swiss .7z); no branch filters */
+/* CubeBrowser: LZMA and LZMA2 (.7z downloads, sevenz.c); no branch filters */
 #ifndef Z7_NO_METHODS_FILTERS
 #define Z7_NO_METHODS_FILTERS
 #endif

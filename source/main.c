@@ -16,6 +16,7 @@
 #include "ui.h"
 #include "osk.h"
 #include "gckbd.h"
+#include "update.h"
 #include "browser.h"
 #include "diag.h"
 #include "gbalink.h"
@@ -63,6 +64,7 @@ int main(int argc, char **argv) {
     bool sd = storage_init(argc > 0 && argv ? argv[0] : NULL);
     diag_init();
     settings_load();
+    if (sd) update_remove_old();   /* this version started: the one it replaced can go */
     gfx_init(g_set.video_mode, g_set.widescreen != 0, g_set.full_width != 0);
     input_init();
 

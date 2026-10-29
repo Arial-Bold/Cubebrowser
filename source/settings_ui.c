@@ -185,10 +185,6 @@ static void run_action(int idx) {
         browser_open_music();
         leave_now = true;
         break;
-    case SA_CHECK_SWISS:
-        browser_navigate("about:swiss");
-        leave_now = true;
-        break;
     case SA_CHECK_UPDATE:
         update_request_check(false);
         browser_navigate("about:update");

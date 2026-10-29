@@ -2,9 +2,10 @@
  *
  * Releases come from github.com/Arial-Bold/Cubebrowser. The latest release's
  * tag (e.g. "v1.9") is compared with CB_VERSION (version.h); its .zip asset
- * holds cubebrowser.dol and gcbrowser/cacert.pem. Installing replaces the
- * running .dol (the old one is kept as <name>.old) and cacert.pem; settings,
- * bookmarks and cookies are never touched.
+ * holds a cubebrowser folder: default.dol, opening.bnr and
+ * gcbrowser/cacert.pem. Installing replaces the running .dol (the old one
+ * stays as <name>.old only until the new one has started), the banner and
+ * cacert.pem; settings, bookmarks and cookies are never touched.
  *
  * The network work runs on the fetch worker thread (fetch.c); everything
  * else here is called from the UI thread. */
@@ -38,6 +39,9 @@ void update_request_check(bool quiet);     /* quiet: no message unless something
 void update_request_install(void);
 void update_poll(void);                    /* call every frame (UI thread): starts queued jobs, collects results */
 bool update_restart(char *err, size_t errlen);   /* starts the newly installed .dol */
+/* At start: deletes the previous version left by an update (<name>.old), now
+ * that this one has started, so old versions don't pile up on the card. */
+void update_remove_old(void);
 
 /* Helpers shared with the Swiss updater: "key": "value" in GitHub's JSON,
  * and Markdown release notes tidied for plain display. */

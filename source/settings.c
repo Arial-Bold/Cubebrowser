@@ -22,8 +22,6 @@ static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platin
 static const char *const osk_layout_names[] = { "QWERTY", "ABC", NULL };
 static const char *const img_size_names[] = { "Small", "Medium", "Large", NULL };
 static const char *const pic_cache_names[] = { "Off", "25 MB", "50 MB", "100 MB", "250 MB", NULL };
-static const char *const swiss_name_names[] = { "Keep its name", "swiss_r + number", "swiss.dol", "boot.dol (card root)",
-                                                  "ipl.dol (card root)", NULL };
 static const char *const exit_names[] = { "Load Swiss .dol", "Restart console", NULL };
 const char *const search_engine_names[] = { "DuckDuckGo Lite", "FrogFind", "Wiby", "Custom", NULL };
 static const char *const search_engine_prefixes[] = {
@@ -156,12 +154,6 @@ const SetDef g_setdefs[] = {
       "Looks for a newer CubeBrowser on GitHub and can install it for you." },
     { CAT_UPDATES, "upd.auto", "Check for CubeBrowser updates at start", ST_BOOL, O(update_auto), 0, 1, 1, NULL, NULL,
       "A quick check when the network connects. The start page says when there's a new version." },
-    { CAT_UPDATES, NULL, "Check for Swiss updates", ST_ACTION, 0, SA_CHECK_SWISS, 0, 0, NULL, NULL,
-      "Looks for a newer Swiss on GitHub and can replace the Swiss .dol the Exit button starts." },
-    { CAT_UPDATES, "swiss.name", "Save new Swiss as", ST_CHOICE, O(swiss_name), 0, 4, 1, swiss_name_names, NULL,
-      "Use boot.dol or ipl.dol if your console starts Swiss from that file. The file it replaces is kept as .old." },
-    { CAT_UPDATES, "swiss.rev", NULL, ST_INT, O(swiss_rev), 0, 999999, 1, NULL, NULL, NULL },
-    { CAT_UPDATES, "swiss.revpath", NULL, ST_STR, O(swiss_rev_path), OSK_TEXTMODE_URL, 256, 0, NULL, NULL, NULL },
     /* Data */
     { CAT_DATA, "exit.action", "Exit button", ST_CHOICE, O(exit_action), 0, 1, 1, exit_names, NULL,
       "Restart console suits setups where Swiss starts automatically at power-on." },

@@ -128,7 +128,7 @@ static void tidy_notes(char *s) {
     while (w > s && (w[-1] == '\n' || w[-1] == ' ')) *--w = 0;
 }
 
-/* Shared with the Swiss updater (swissupd.c). */
+/* Finds "key": "value" in the release JSON. */
 bool update_json_string(const char *json, const char *key, char *out, size_t cap, const char **after) {
     return json_find_string(json, key, out, cap, after);
 }
@@ -254,29 +254,61 @@ static void remove_tree(const char *path, int depth) {
     rmdir(path);
 }
 
-/* The .dol inside the unpacked update: cubebrowser.dol at the top, or any .dol. */
-static bool find_new_dol(const char *dir, char *out, size_t cap) {
-    snprintf(out, cap, "%s/cubebrowser.dol", dir);
-    if (is_file(out)) return true;
+/* Where launchers and Dolphin Depot install CubeBrowser on the card. The
+ * release zip holds that folder: cubebrowser/ with default.dol, opening.bnr
+ * and the gcbrowser folder (older releases: cubebrowser.dol and gcbrowser
+ * at the top of the zip). */
+#define APP_DIR "apps/cubebrowser"
+
+/* The folder in the unpacked update that holds the release's files. */
+static void release_dir(const char *dir, char *out, size_t cap) {
+    char p[400];
+    snprintf(p, sizeof(p), "%s/cubebrowser/default.dol", dir);
+    if (is_file(p)) snprintf(out, cap, "%s/cubebrowser", dir);
+    else snprintf(out, cap, "%s", dir);
+}
+
+/* Any .dol in dir or the folders below it (a few levels), preferring default.dol. */
+static bool find_any_dol(const char *dir, int depth, char *out, size_t cap) {
     char open_path[330];
     snprintf(open_path, sizeof(open_path), "%s/", dir);
     DIR *d = opendir(open_path);
     if (!d) return false;
     struct dirent *e;
     bool found = false;
+    char sub[8][330];
+    int nsub = 0;
     while (!found && (e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        char p[330];
+        snprintf(p, sizeof(p), "%s/%s", dir, e->d_name);
         size_t n = strlen(e->d_name);
-        if (n > 4 && !strcasecmp(e->d_name + n - 4, ".dol")) {
-            snprintf(out, cap, "%s/%s", dir, e->d_name);
-            found = is_file(out);
+        if (n > 4 && !strcasecmp(e->d_name + n - 4, ".dol") && is_file(p)) {
+            snprintf(out, cap, "%s", p);
+            found = true;
+        } else if (depth < 3 && nsub < 8 && !is_file(p)) {
+            snprintf(sub[nsub++], sizeof(sub[0]), "%s", p);
         }
     }
     closedir(d);
+    for (int i = 0; !found && i < nsub; i++) found = find_any_dol(sub[i], depth + 1, out, cap);
     return found;
 }
 
+/* The .dol inside the unpacked update: cubebrowser/default.dol, default.dol
+ * or cubebrowser.dol at the top, or failing those any .dol in it. */
+static bool find_new_dol(const char *dir, char *out, size_t cap) {
+    snprintf(out, cap, "%s/cubebrowser/default.dol", dir);
+    if (is_file(out)) return true;
+    snprintf(out, cap, "%s/default.dol", dir);
+    if (is_file(out)) return true;
+    snprintf(out, cap, "%s/cubebrowser.dol", dir);
+    if (is_file(out)) return true;
+    return find_any_dol(dir, 0, out, cap);
+}
+
 /* Which .dol to replace: the one we were started from, if Swiss said so;
- * otherwise the only cubebrowser*.dol (or default.dol beside gcbrowser) on the card. */
+ * otherwise the only cubebrowser*.dol on the card, or apps/cubebrowser/default.dol. */
 static bool find_target(char *out, size_t cap) {
     const char *pf = storage_program_file();
     if (pf) { snprintf(out, cap, "%s", pf); return true; }
@@ -288,7 +320,9 @@ static bool find_target(char *out, size_t cap) {
         if (!strncasecmp(name, "cubebrowser", 11) && !strstr(name, ".old") && !strstr(name, ".new")) { match = i; matches++; }
     }
     if (matches == 1) { snprintf(out, cap, "%s", found[match]); return true; }
-    return false;
+    /* the way launchers and Dolphin Depot install it */
+    snprintf(out, cap, "sd:/" APP_DIR "/default.dol");
+    return is_file(out);
 }
 
 static void install_failed(const char *msg) {
@@ -385,13 +419,27 @@ void update_worker_install(volatile int *cancel) {
         return;
     }
     /* certificates from the release (settings, bookmarks and cookies are left alone) */
+    char rel[420];
+    release_dir(dir, rel, sizeof(rel));
     char newca[600], ca[400], catmp[420];
-    snprintf(newca, sizeof(newca), "%s/gcbrowser/cacert.pem", dir);
+    snprintf(newca, sizeof(newca), "%s/gcbrowser/cacert.pem", rel);
     storage_path(ca, sizeof(ca), "cacert.pem");
     snprintf(catmp, sizeof(catmp), "%s.tmp", ca);
     if (!bare_dol && is_file(newca) && copy_file(newca, catmp)) {
         remove(ca);
         rename(catmp, ca);
+    }
+    /* the banner launchers show (opening.bnr), when CubeBrowser lives in a
+     * folder of its own; never at the root of the card, where it would be
+     * taken for everything's banner */
+    char newbnr[600], bnr[340];
+    snprintf(newbnr, sizeof(newbnr), "%s/opening.bnr", rel);
+    const char *slash = strrchr(target, '/');
+    if (!bare_dol && is_file(newbnr) && slash && slash - target > 3) {   /* not "sd:/x.dol" */
+        snprintf(bnr, sizeof(bnr), "%.*s/opening.bnr", (int)(slash - target), target);
+        char bnrtmp[350];
+        snprintf(bnrtmp, sizeof(bnrtmp), "%s.tmp", bnr);
+        if (copy_file(newbnr, bnrtmp)) { remove(bnr); rename(bnrtmp, bnr); }
     }
     remove(zip);
     remove_tree(dir, 0);
@@ -440,6 +488,21 @@ void update_poll(void) {
         if (want_install) { if (fetch_start_update(true)) want_install = false; }
         else if (fetch_start_update(false)) want_check = false;
     }
+}
+
+void update_remove_old(void) {
+    char p[340];
+    const char *pf = storage_program_file();
+    if (pf) {
+        snprintf(p, sizeof(p), "%s.old", pf);
+        remove(p);
+        snprintf(p, sizeof(p), "%s.new", pf);
+        remove(p);
+    }
+    /* the usual places, should the loader not have said where we are */
+    static const char *const known[] = { "sd:/" APP_DIR "/default.dol.old", "sd:/cubebrowser.dol.old" };
+    for (unsigned i = 0; i < sizeof(known) / sizeof(known[0]); i++)
+        if (is_file(known[i])) remove(known[i]);
 }
 
 bool update_restart(char *err, size_t errlen) {

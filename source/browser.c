@@ -12,7 +12,6 @@
 #include "home.h"
 #include "update.h"
 #include "version.h"
-#include "swissupd.h"
 #include "sound.h"
 #include "url.h"
 #include "image.h"
@@ -119,7 +118,7 @@ static const char help_html[] =
     "<h3>On-screen keyboard</h3><ul><li><b>B</b> delete, <b>Y</b> space, <b>X</b> shift</li>"
     "<li><b>L / R</b> move the text cursor, <b>START</b> accept</li></ul>"
     "<h3>Downloads</h3><p>Links to files (such as .dol, .iso or .zip) ask to save them to the SD card. "
-    "Zip files can be unzipped automatically. Interrupted downloads continue where they stopped.</p>"
+    "Zip and 7z files can be unpacked automatically. Interrupted downloads continue where they stopped.</p>"
     "<h3>What works</h3><p>Text, links, pictures, tables, lists, forms such as search boxes, and most "
     "page colours, fonts and spacing. JavaScript and modern multi-column layouts aren't supported, so "
     "sites are shown in a simpler, phone-style layout. Lightweight sites work best.</p>"
@@ -378,11 +377,6 @@ static void start_load(const char *url, const char *post) {
             home_update_reset();
             if (update_state() == UPD_NONE || update_state() == UPD_CHECK_FAILED) update_request_check(false);
         }
-        else if (!strcasecmp(url, "about:swiss")) {
-            show_html("<title>Swiss Update</title>", "about:swiss", false);
-            home_update_reset();
-            if (swiss_state() == UPD_NONE || swiss_state() == UPD_CHECK_FAILED || swiss_state() == UPD_LATEST) swiss_request_check();
-        }
         else
             show_error(url, "There's no built-in page with that name.");
         if (restore_scroll >= 0) { page.scroll = page.scroll_target = restore_scroll; restore_scroll = -1; }
@@ -503,7 +497,7 @@ enum { DL_IDLE, DL_OFFER, DL_RUNNING, DL_DONE, DL_FAILED, DL_UNZIPPING, DL_UNZIP
 static int dl_state;
 static char dl_url[URL_MAX], dl_name[128], dl_path[600], dl_msg[256], dl_unzip_dir[600];
 static long long dl_size;
-static bool dl_is_zip, dl_unzip_after, dl_confirm_cancel, dl_is_gci, dl_card_after;
+static bool dl_is_zip, dl_is_7z, dl_unzip_after, dl_confirm_cancel, dl_is_gci, dl_card_after;
 static int dl_card_slot;
 static float dl_card_check_at;
 static int dl_files;
@@ -592,7 +586,8 @@ static void offer_download(const HttpResult *r) {
     snprintf(dl_url, sizeof(dl_url), "%s", r->url);
     pick_download_name(r->url, r->filename);
     dl_size = r->length;
-    dl_is_zip = ends_with_ci(dl_name, ".zip");
+    dl_is_7z = ends_with_ci(dl_name, ".7z");
+    dl_is_zip = ends_with_ci(dl_name, ".zip") || dl_is_7z;   /* (both can be unpacked) */
     dl_is_gci = ends_with_ci(dl_name, ".gci");
     dl_unzip_after = dl_card_after = false;
     dl_confirm_cancel = false;
@@ -639,9 +634,10 @@ static void start_unzip(void) {
     char base[128];
     snprintf(base, sizeof(base), "%s", dl_name);
     if (ends_with_ci(base, ".zip")) base[strlen(base) - 4] = 0;
+    else if (ends_with_ci(base, ".7z")) base[strlen(base) - 3] = 0;
     snprintf(dl_unzip_dir, sizeof(dl_unzip_dir), "%s/%s", g_set.dl_folder, base);
     if (!fetch_start_unzip(dl_path, dl_unzip_dir)) {
-        snprintf(dl_msg, sizeof(dl_msg), "Couldn't start unzipping. Try again in a moment.");
+        snprintf(dl_msg, sizeof(dl_msg), "Couldn't start unpacking. Try again in a moment.");
         dl_state = DL_UNZIP_FAILED;
         return;
     }
@@ -694,7 +690,7 @@ static void handle_task_result(void) {
             sound_play(SFX_LOADED);
         } else if (!strcmp(err, "Stopped.")) {
             dl_state = DL_DONE;
-            ui_toast("Unzipping cancelled");
+            ui_toast(dl_is_7z ? "Unpacking cancelled" : "Unzipping cancelled");
         } else {
             snprintf(dl_msg, sizeof(dl_msg), "%s", err);
             dl_state = DL_UNZIP_FAILED;
@@ -737,9 +733,9 @@ static void draw_download(bool interactive) {
     case DL_RUNNING: title = "Downloading"; break;
     case DL_DONE: title = "Download complete"; break;
     case DL_FAILED: title = "Download stopped"; break;
-    case DL_UNZIPPING: title = "Unzipping"; break;
-    case DL_UNZIPPED: title = "Unzipped"; break;
-    case DL_UNZIP_FAILED: title = "Couldn't unzip"; break;
+    case DL_UNZIPPING: title = dl_is_7z ? "Unpacking" : "Unzipping"; break;
+    case DL_UNZIPPED: title = dl_is_7z ? "Unpacked" : "Unzipped"; break;
+    case DL_UNZIP_FAILED: title = dl_is_7z ? "Couldn't unpack" : "Couldn't unzip"; break;
     case DL_CARD: case DL_CARD_REPLACE: title = "Copy to memory card"; break;
     case DL_CARD_WRITING: title = "Copying to memory card"; break;
     case DL_CARD_DONE: title = "Copied"; break;
@@ -852,7 +848,7 @@ static void draw_download(bool interactive) {
         if (ui_button(ui_id("dl-go", 0), bx, by, bw, bh, "Download", 17, UIB_ACCENT)) { dl_unzip_after = false; start_download(); }
         bx += bw + 12;
         if (dl_is_zip) {
-            if (ui_button(ui_id("dl-go", 1), bx, by, bw, bh, "Download & unzip", 17, UIB_NORMAL)) { dl_unzip_after = true; start_download(); }
+            if (ui_button(ui_id("dl-go", 1), bx, by, bw, bh, dl_is_7z ? "Download & unpack" : "Download & unzip", 17, UIB_NORMAL)) { dl_unzip_after = true; start_download(); }
             bx += bw + 12;
         }
         if (dl_is_gci) {   /* a GameCube save: straight on to a memory card */
@@ -933,7 +929,7 @@ static void draw_download(bool interactive) {
             bx += bw + 12;
         }
         if (dl_is_zip) {
-            if (ui_button(ui_id("dl-done", 0), bx, by, bw, bh, "Unzip", 17, UIB_NORMAL)) start_unzip();
+            if (ui_button(ui_id("dl-done", 0), bx, by, bw, bh, dl_is_7z ? "Unpack" : "Unzip", 17, UIB_NORMAL)) start_unzip();
             bx += bw + 12;
         }
         if (dl_is_gci) {
@@ -1300,7 +1296,7 @@ static void veil_update(float view_h) {
 
 static void handle_fetch_result(void) {
     if (fetch_state() != FETCH_DONE) return;
-    if (fetch_job_is_update()) return;   /* update_poll() / swiss_poll() take these */
+    if (fetch_job_is_update()) return;   /* update_poll() takes these */
     if (fetch_job_kind() == JOB_DOWNLOAD || fetch_job_kind() == JOB_UNZIP) { handle_task_result(); return; }
     if (queued) {
         /* a new page was requested while something was downloading */
@@ -1709,7 +1705,6 @@ void browser_frame(bool interactive) {
         if (g_set.update_auto) update_request_check(true);
     }
     update_poll();
-    swiss_poll();
     handle_fetch_result();
     if (refresh_at) {
         if (loading || refresh_gen != page_gen) refresh_at = 0;   /* moved on already */
@@ -1874,37 +1869,13 @@ kb_done:
     bool on_home = has_page && !strcmp(page.url, "about:home");
     bool on_help = has_page && !strcmp(page.url, "about:help");
     bool on_update = has_page && !strcmp(page.url, "about:update");
-    bool on_swiss = has_page && !strcmp(page.url, "about:swiss");
-    if (on_swiss) {
-        static char have[24], avail[200], done_text[300];
-        snprintf(have, sizeof(have), "%s", swiss_installed());
-        const char *tgt = swiss_target();
-        char dest[300];
-        swiss_destination(dest, sizeof(dest));
-        snprintf(avail, sizeof(avail), "%s%s. It will be saved as %s (a file already there is kept as .old).",
-                 swiss_installed()[0] ? "You have " : "Your Swiss version is unknown", swiss_installed(), dest);
-        snprintf(done_text, sizeof(done_text), "Saved as %s. The old version was kept as a backup (.old).", tgt);
-        UpdView v = { "Swiss Update", "Swiss", have, SWISS_REPO, swiss_latest(), swiss_notes(), swiss_error(),
-                      avail, done_text, "START THE NEW SWISS", swiss_state(), swiss_step() };
-        HomeAction ua = home_update_draw(cx, cy, cw, ch, content_ok, &v);
-        if (ua != HOME_NONE) sound_play(SFX_SELECT);
-        if (ua == HOME_OPEN_URL) navigate("about:home", NULL, true);
-        else if (ua == HOME_UPDATE_INSTALL) { midi_release_memory(); swiss_request_install(); }
-        else if (ua == HOME_UPDATE_CHECK) swiss_request_check();
-        else if (ua == HOME_UPDATE_STOP) fetch_cancel_update();
-        else if (ua == HOME_UPDATE_RESTART) {
-            settings_save();
-            cookies_save_if_needed();
-            char err[256];
-            if (!swiss_launch(err, sizeof(err))) { ui_toast(err); sound_play(SFX_ERROR); }
-        }
-    } else if (on_update) {
+    if (on_update) {
         static char have[24], avail[160];
         snprintf(have, sizeof(have), "v%s", CB_VERSION);
         snprintf(avail, sizeof(avail), "You have v%s. Installing keeps your settings, bookmarks and logins.", CB_VERSION);
         UpdView v = { "Software Update", "CubeBrowser", have, UPDATE_REPO, update_latest_version(), update_notes(),
                       update_error(), avail,
-                      "Restart CubeBrowser to use it. The old version was kept as a backup (.old).",
+                      "Restart CubeBrowser to use it. The old version is removed once the new one has started.",
                       "RESTART CUBEBROWSER", update_state(), update_step() };
         HomeAction ua = home_update_draw(cx, cy, cw, ch, content_ok, &v);
         if (ua != HOME_NONE) sound_play(SFX_SELECT);

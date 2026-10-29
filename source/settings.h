@@ -39,9 +39,6 @@ typedef struct {
     char dl_folder[128];
     int  dl_delete_zip, dl_connections;
     int  update_auto;
-    int  swiss_name;           /* how a new Swiss is named (SWISS_NAME_*) */
-    int  swiss_rev;            /* Swiss revision this browser installed ... */
-    char swiss_rev_path[256];  /* ... and where */
     /* Leaving the browser */
     int  exit_action;
     char swiss_dol[256];
@@ -54,7 +51,7 @@ extern const char *const category_names[CAT_COUNT];
 
 typedef enum { ST_BOOL, ST_INT, ST_CHOICE, ST_STR, ST_BIND, ST_ACTION } SetType;
 
-enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE, SA_OPEN_MUSIC, SA_CHECK_SWISS, SA_CLEAR_PIC_CACHE };
+enum { SA_CLEAR_HISTORY = 1, SA_CLEAR_BOOKMARKS, SA_RESET_ALL, SA_SAVE_NOW, SA_FIND_DOL, SA_CLEAR_COOKIES, SA_MOVE_DATA, SA_CHECK_UPDATE, SA_OPEN_MUSIC, SA_CLEAR_PIC_CACHE };
 enum { OSK_TEXTMODE_TEXT = 0, OSK_TEXTMODE_URL = 1, OSK_TEXTMODE_IP = 2 };
 
 typedef struct {

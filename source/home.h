@@ -19,7 +19,7 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
 void home_help_reset(void);
 HomeAction home_help_draw(float x, float y, float w, float h, bool input_ok);
 
-/* An update page (about:update for CubeBrowser, about:swiss for Swiss):
+/* The update page (about:update):
  * status, release notes and buttons. Returns HOME_OPEN_URL for "Back to
  * start page", or a HOME_UPDATE_* action. */
 typedef struct {
