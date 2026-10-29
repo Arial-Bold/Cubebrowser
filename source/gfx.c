@@ -191,8 +191,11 @@ void gfx_set_widescreen(bool w) {
 bool gfx_widescreen(void) { return wide; }
 float gfx_width(void) { return vw; }
 float gfx_height(void) { return 480.0f; }
-float gfx_pixel_w(void) { return vw / rmode->fbWidth; }
-float gfx_pixel_h(void) { return 480.0f / rmode->efbHeight; }
+/* One screen pixel in drawing units, allowing for the current transform.
+ * Lines thinner than this can fall between the GPU's pixel centres and
+ * vanish on some sides (in 16:9 a drawing unit is only 3/4 of a pixel). */
+float gfx_pixel_w(void) { float s = fabsf(t_sx); return vw / rmode->fbWidth / (s > 1e-4f ? s : 1); }
+float gfx_pixel_h(void) { float s = fabsf(t_sy); return 480.0f / rmode->efbHeight / (s > 1e-4f ? s : 1); }
 bool gfx_has_component_cable(void) { return VIDEO_HaveComponentCable(); }
 
 const char *gfx_mode_name(void) {
@@ -491,9 +494,15 @@ void gfx_rrect(float x, float y, float w, float h, float r, Color c) { gfx_rrect
 void gfx_rrect_outline(float x, float y, float w, float h, float r, float t, Color c) {
     if (!(w > 0) || !(h > 0) || !isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h) || !isfinite(t)) return;
     if (!guard_rrect(&x, &y, &w, &h, r + t, NULL, NULL)) return;
+    /* never thinner than a pixel (a hair more, so a line that lands exactly
+     * between two pixel centres still covers one of them) */
+    float ux = gfx_pixel_w() * 1.02f, uy = gfx_pixel_h() * 1.02f;
+    float tx = t < ux ? ux : t, ty = t < uy ? uy : t;
+    if (2 * tx >= w || 2 * ty >= h) { gfx_rrect(x, y, w, h, r, c); return; }
     float ox[RR_PTS], oy[RR_PTS], ix[RR_PTS], iy[RR_PTS];
     int n = rr_points(x, y, w, h, r, ox, oy);
-    rr_points(x + t, y + t, w - 2 * t, h - 2 * t, r - t, ix, iy);
+    float ri = r - (tx > ty ? tx : ty);
+    rr_points(x + tx, y + ty, w - 2 * tx, h - 2 * ty, ri > 0 ? ri : 0, ix, iy);
     mode_color();
     BEGIN(GX_TRIANGLESTRIP, (n + 1) * 2);
     for (int i = 0; i <= n; i++) {
