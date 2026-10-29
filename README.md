@@ -42,7 +42,7 @@ Component cables are optional and unlock 480p video.
                └── cacert.pem
    ```
 
-   This is the layout Swiss and other launchers (and Dolphin Depot) expect.
+   This is the layout Swiss and other launchers expect.
    Any other folder works too, as long as `gcbrowser` stays **next to**
    `default.dol`.
 2. The `gcbrowser` folder holds your settings, bookmarks and saved logins.
