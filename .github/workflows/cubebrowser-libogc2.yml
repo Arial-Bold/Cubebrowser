@@ -25,9 +25,12 @@ jobs:
 
       - name: Gather files for the SD card
         run: |
-          mkdir -p package
-          cp cubebrowser.dol package/
-          cp -r sd/gcbrowser package/
+          # the app's folder for the card (it goes in sd:/apps): the browser
+          # as default.dol, its banner, and the data folder
+          mkdir -p package/cubebrowser
+          cp cubebrowser.dol package/cubebrowser/default.dol
+          cp dist/opening.bnr package/cubebrowser/
+          cp -r sd/gcbrowser package/cubebrowser/
 
       - name: Upload result
         uses: actions/upload-artifact@v6
