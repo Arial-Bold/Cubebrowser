@@ -80,7 +80,8 @@ void input_update(void) {
     if (moved) {
         gliding = false;
         idle_frames = 0;
-        float speed = 2.0f + g_set.cursor_speed * 1.1f;
+        /* 1 is as slow as it always was (3.1); 10 is twice the old top speed (26), evenly spaced between */
+        float speed = 3.1f + (g_set.cursor_speed - 1) * ((26.0f - 3.1f) / 9.0f);
         if (held & action_mask(ACT_SLOW)) speed *= 0.35f;
         cx += ax * speed * steps;
         cy -= ay * speed * steps;   /* stick up = positive Y */

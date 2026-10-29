@@ -204,7 +204,7 @@ void settings_defaults(Settings *s) {
     s->tz_minutes = -300;
     s->dst = 1;
     s->deadzone = 12;
-    s->cursor_speed = 6;
+    s->cursor_speed = 3;   /* about the old default 6, on the wider scale */
     s->accel = 5;
     s->scroll_speed = 5;
     s->rumble = 1;

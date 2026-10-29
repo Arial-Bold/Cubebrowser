@@ -215,8 +215,13 @@ static void load_matrix(void) {
 }
 
 void gfx_begin_frame(void) {
+    /* Everything is drawn at depth 0, which this puts halfway between the
+     * near and far planes. Shape masks (below) rely on drawn shapes having a
+     * depth clearly different from the cleared "far" one; with the near
+     * plane at 0, shapes sat right on the near plane and the marks didn't
+     * hold on the console, so rounded corners came out square. */
     Mtx44 proj;
-    guOrtho(proj, 0, 480, 0, vw, 0, 300);
+    guOrtho(proj, 0, 480, 0, vw, -300, 300);
     GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
     gfx_reset_transform();
     gfx_clear_clip();
