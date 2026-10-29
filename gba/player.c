@@ -54,6 +54,26 @@ static Col pal[GBT_COUNT] = {
 #define CUBE1  pal[GBT_CUBE1]
 #define CUBE2  pal[GBT_CUBE2]
 
+/* System (sent with the colours): square boxes with a light frame, a grid
+ * backdrop and gold selection, like the browser's System look */
+static bool sys_look;
+static void box(int x, int y, int w, int h, int r, Col c) {
+    if (sys_look) gfx_fill(x, y, w, h, c);
+    else gfx_rrect(x, y, w, h, r, c);
+}
+static void box_line(int x, int y, int w, int h, int r, Col line, Col fill) {
+    if (!sys_look) { gfx_rrect_line(x, y, w, h, r, line, fill); return; }
+    gfx_fill(x, y, w, h, line);
+    gfx_fill(x + 1, y + 1, w - 2, h - 2, fill);
+}
+/* System's gold selection frame, two pixels wide, just outside a box */
+static void gold_frame(int x, int y, int w, int h) {
+    gfx_fill(x - 2, y - 2, w + 4, 2, ACC);
+    gfx_fill(x - 2, y + h, w + 4, 2, ACC);
+    gfx_fill(x - 2, y, 2, h, ACC);
+    gfx_fill(x + w, y, 2, h, ACC);
+}
+
 /* what the GameCube told us */
 static GbpState st;
 static bool have_state;
@@ -107,6 +127,7 @@ void player_message(int type, const uint8_t *d, int len) {
     case GBP_MSG: copy_text(msg, d, len); break;
     case GBP_THEME:
         for (int i = 0; i < GBT_COUNT && 2 * i + 1 < len; i++) pal[i] = (Col)gbp_get16(d + 2 * i);
+        sys_look = len > 2 * GBT_COUNT && d[2 * GBT_COUNT] == 1;
         break;
     case GBP_SONG:
         if (len >= 2) {
@@ -222,6 +243,12 @@ int player_missing_song(void) {
 /* ------------------------------------------------------------- drawing */
 
 static void background(bool deco) {
+    if (sys_look) {   /* near black with a 12-pixel grid, centred */
+        gfx_fill(0, 0, SCR_W, SCR_H, BG0);
+        for (int x = SCR_W / 2 % 12; x < SCR_W; x += 12) gfx_fill(x, 0, 1, SCR_H, DECO);
+        for (int y = SCR_H / 2 % 12; y < SCR_H; y += 12) gfx_fill(0, y, SCR_W, 1, DECO);
+        return;
+    }
     gfx_vgrad(0, SCR_H, BG0, BG1);
     if (deco) {
         static const int sq[3][3] = { { 200, 120, 30 }, { 30, 70, 22 }, { 170, 40, 16 } };
@@ -236,12 +263,13 @@ static void background(bool deco) {
 }
 
 static void tabs(void) {
-    gfx_rrect_line(3, 2, 234, 18, 8, BARL, BAR);
+    box_line(3, 2, 234, 18, 8, BARL, BAR);
+    if (sys_look) gfx_fill(4, 3, 232, 1, ROW);   /* faint top light */
     static const char *const names[3] = { "Playing", "Songs", "Sounds" };
     /* the tabs sit between the L and R marks, so the highlight never covers them */
     for (int i = 0; i < 3; i++) {
         int x0 = 18 + i * 69;
-        if (i == tab) gfx_rrect(x0, 4, 67, 14, 6, ACC);
+        if (i == tab) box(x0, 4, 67, 14, 6, ACC);
         gfx_text_c(&font9b, x0 + 33, 5, i == tab ? ONACC : BARTXT, names[i]);
     }
     gfx_text(&font8b, 8, 5, BARTXT, "L", 0);
@@ -250,6 +278,7 @@ static void tabs(void) {
 
 static void hints(const char *t) {
     gfx_fill(0, SCR_H - 13, SCR_W, 13, HINT);
+    if (sys_look) gfx_fill(0, SCR_H - 14, SCR_W, 1, DIM);
     gfx_text_c(&font8b, SCR_W / 2, SCR_H - 12, HINTTXT, t);
 }
 
@@ -277,6 +306,16 @@ static const char *song_name(int i) {
 }
 
 static void button(int cx, int cy, bool big, bool picked, const Mask *icon, Col icol) {
+    if (sys_look) {   /* a square of grey glass; the gold frame marks the pick */
+        int w = big ? 28 : 22, h = big ? 24 : 18, x = cx - w / 2, y = cy - h / 2;
+        gfx_fill(x, y, w, h, EDGE);
+        gfx_fill(x + 1, y + 1, w - 2, h - 2, BTN);
+        gfx_fill(x + 1, y + 1, w - 2, (h - 2) / 2, ROWL);
+        gfx_fill(x + 1, y + h / 2, w - 2, 1, BTN);
+        if (picked) gold_frame(x, y, w, h);
+        gfx_mask(cx - 6, cy - 6, icon, icol);
+        return;
+    }
     if (big) {
         if (picked) gfx_mask(cx - 15, cy - 15, &m_circle15, ACC);
         gfx_mask(cx - 13, cy - 13, &m_circle13, EDGE);
@@ -291,7 +330,7 @@ static void button(int cx, int cy, bool big, bool picked, const Mask *icon, Col 
 
 static void draw_playing(void) {
     tabs();
-    gfx_rrect_line(6, 23, 228, 48, 6, EDGE, FIELD);
+    box_line(6, 23, 228, 48, 6, EDGE, FIELD);
     const char *what = st.state == GBS_PLAYING ? "Now playing" : st.state == GBS_PAUSED ? "Paused"
                      : st.state == GBS_LOADING ? "Loading..." : "Stopped";
     gfx_text(&font8b, 12, 25, FDIM, what, 0);
@@ -356,18 +395,18 @@ static void draw_songs(void) {
     for (int r = 0; r < vis && song_top + r < st.count; r++) {
         int i = song_top + r, y = 24 + r * 17;
         bool s = i == song_cur;
-        if (s) gfx_rrect(5, y - 1, 222, 16, 5, ACC);
-        else gfx_rrect_line(6, y, 220, 14, 5, ROWL, ROW);
+        if (s) box(5, y - 1, 222, 16, 5, ACC);
+        else box_line(6, y, 220, 14, 5, ROWL, ROW);
         Col c = s ? ONACC : TXT;
         if (i == st.cur) gfx_mask(10, y + 1, &m_note, s ? ONACC : ACC);
         gfx_text(&font9b, 25, y + 2, c, song_name(i), 196);
     }
     if (st.count > vis) {
-        gfx_rrect(231, 24, 5, 117, 3, BAR);
+        box(231, 24, 5, 117, 3, BAR);
         int th = 117 * vis / st.count;
         if (th < 10) th = 10;
         int ty = 24 + (117 - th) * song_top / (st.count - vis);
-        gfx_rrect(231, ty, 5, th, 3, BARTXT);
+        box(231, ty, 5, th, 3, BARTXT);
     }
     hints("\x81\x82 move   \x7f\x80 page   A play   B back");
 }
@@ -383,8 +422,8 @@ static void draw_sounds(void) {
     for (int r = 0; r < vis && sf_top + r < n; r++) {
         int i = sf_top + r, y = 35 + r * 27;
         bool s = i == sf_cur_row;
-        if (s) gfx_rrect(5, y - 1, 230, 24, 6, ACC);
-        else gfx_rrect_line(6, y, 228, 22, 6, ROWL, ROW);
+        if (s) box(5, y - 1, 230, 24, 6, ACC);
+        else box_line(6, y, 228, 22, 6, ROWL, ROW);
         Col c = s ? ONACC : TXT, cd = s ? ONACC : DIM;
         gfx_mask(11, y + 6, &m_ring9, c);
         if (i == st.sf_cur) gfx_mask(13, y + 8, &m_dot5r, c);
@@ -400,12 +439,12 @@ static void draw_sounds(void) {
 }
 
 static void draw_loading(void) {
-    gfx_rrect_line(30, 60, 180, 46, 8, EDGE, BAR);
+    box_line(30, 60, 180, 46, 8, EDGE, BAR);
     gfx_text_c(&font9b, 120, 68, TXT, "Loading instruments...");
-    gfx_rrect(46, 87, 148, 6, 3, ROW);
+    box(46, 87, 148, 6, 3, ROW);
     int span = 148 - 40, p = (int)(frames % 120);
     int x = p < 60 ? p * span / 60 : (120 - p) * span / 60;
-    gfx_rrect(46 + x, 87, 40, 6, 3, ACC);
+    box(46 + x, 87, 40, 6, 3, ACC);
 }
 
 static void draw_connecting(void) {
@@ -422,7 +461,7 @@ static void draw_connecting(void) {
 
 static void draw_unplugged(void) {
     background(true);
-    gfx_rrect_line(20, 30, 200, 98, 10, EDGE, BAR);
+    box_line(20, 30, 200, 98, 10, EDGE, BAR);
     gfx_text_c(&font12b, 120, 42, ACC, "Link cable unplugged");
     gfx_text_c(&font8, 120, 66, TXT, "Plug it back into port 2 and the");
     gfx_text_c(&font8, 120, 79, TXT, "player picks up where it left off.");
