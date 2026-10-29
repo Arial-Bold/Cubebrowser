@@ -2,9 +2,6 @@
 
 **A real web browser for the Nintendo GameCube.**
 
-<img width="1280" height="960" alt="01_start_page" src="https://github.com/user-attachments/assets/bac4efbf-47a4-47f6-bde5-a382602e21bf" />
-
-
 CubeBrowser loads websites over a wired network connection, including secure
 (HTTPS) sites, with pictures, page styles, tables and forms. You can download
 files straight to your SD card, play MIDI music in the background, and
@@ -101,6 +98,20 @@ Point and press A on a key, or use the D-Pad to hop from key to key.
 When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 `.net`, `/`) save typing.
 
+### Keyboard controller
+
+The GameCube keyboard controller (the ASCII keyboard made for Phantasy Star
+Online) works in any controller port, alongside a normal controller.
+
+- Type into any text box: Enter accepts, Esc cancels, the arrows, Home and End
+  move the text cursor.
+- While browsing, just start typing to open the address bar with a new address
+  or search.
+- Backspace goes back a page; the arrow keys, Page Up/Down, Space, Home and End
+  scroll; F5 loads the page again.
+
+It can be turned off in Settings > Controls > Keyboard controller.
+
 ---
 
 ## Browsing
@@ -150,10 +161,6 @@ When typing an address, shortcut keys (`https://`, `www.`, `.com`, `.org`,
 
 ## Music player
 
-
-<img width="1280" height="960" alt="04_music_player" src="https://github.com/user-attachments/assets/cbb262da-953a-4bb7-a9db-fa6a36e014c5" />
-
-
 CubeBrowser can play MIDI music in the background while you browse.
 
 - Put `.mid` files (also `.midi`, `.kar` and `.rmi`) in a folder called `midi`
@@ -184,9 +191,6 @@ CubeBrowser can play MIDI music in the background while you browse.
   finishes, because downloading at full speed makes the music skip.
 
 ### Game Boy Advance player
-
-<img width="4096" height="3072" alt="IMG_20261020_213718719" src="https://github.com/user-attachments/assets/69c429e1-2776-4ff5-8516-034e78883614" />
-
 
 A Game Boy Advance can be the music player's own screen and remote, so you can
 see what's playing and change songs without leaving the page you're on.
@@ -264,6 +268,10 @@ CubeBrowser asks **"Save to SD card?"**, showing the file's name and size. Hold
 - **Zip files** can be unzipped automatically (**Download & unzip**) or later
   from the "Download complete" screen. Files go into a folder named after the
   zip, and the zip can be deleted afterwards if you like.
+- **GameCube saves** (`.gci` files) can be copied straight onto a memory card
+  in slot A or B (**To memory card**, or **Copy to memory card** once it's
+  downloaded). It shows the game, the save's size and the room on each card,
+  and asks before replacing a save that's already there.
 - Existing files are never overwritten, and free space is checked before
   starting.
 
@@ -288,8 +296,8 @@ defaults.
 | Section | What you can change |
 |---|---|
 | **Network** | Automatic (DHCP) or manual IP address, subnet mask, gateway, DNS server, time server, time zone and daylight saving. |
-| **Controls** | Stick dead zone, pointer speed and acceleration, scroll speed, pointer snapping, rumble, the button for each action, on-screen key layout (QWERTY or ABC) and key repeat speed. |
-| **Display** | Aspect ratio (4:3 or 16:9), video mode (Auto, 480i, 480p), picture width (Full 704 or Standard 640), screen margin, page text size, theme, animations, loading screen, sound effects and volume. |
+| **Controls** | Stick dead zone, pointer speed and acceleration, scroll speed, pointer snapping, rumble, the button for each action, on-screen key layout (QWERTY or ABC), key repeat speed and the keyboard controller. |
+| **Display** | Aspect ratio (4:3 or 16:9), resolution (Auto, 480i, 480p), picture width (Full 704 or Standard 640), overscan, page text size, theme, animations, loading screen, sound effects and volume. |
 | **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle, repeat, the glowing note button, and the Game Boy Advance player (on/off). |
 | **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture & style cache, picture labels, maximum page size. |
 | **Security** | Cookies on/off, keep logins after restart, certificate checking and the certificate file. |
@@ -299,7 +307,8 @@ defaults.
 A few worth knowing about:
 
 - **Themes:** Indigo, Jet Black, Platinum and Spice, named after the console
-  colours.
+  colours, plus System, which gives the menus a square, grid-backed look with
+  gold selection (the Game Boy Advance player follows it too).
 - **16:9** is for TVs set to stretch the picture to widescreen.
 - **Picture size** (Small, Medium, Large) limits how tall photos can be, so
   news pages don't fill the screen with one photo at a time.
@@ -349,7 +358,7 @@ Older and hobbyist sites from the 1990s and 2000s usually display very well.
 | **A page looks cluttered** | Turn off Settings > Browsing > Page styles. |
 | **Pictures don't appear** | Check Settings > Browsing > Load images, and leave Image helper on for best results. |
 | **A page is cut off at the end** | Raise Settings > Browsing > Max page size. |
-| **The screen edges are cut off** | Raise Settings > Display > Screen margin, or set Picture width to Standard (640). |
+| **The screen edges are cut off** | Raise Settings > Display > Overscan, or set Picture width to Standard (640). |
 | **The picture looks stretched or squashed** | Match Settings > Display > Aspect ratio to your TV. |
 | **A file link shows an error instead of downloading** | Some sites only allow downloads for signed-in accounts. If the site's login works without JavaScript, log in first; otherwise it isn't possible. |
 | **A login doesn't stick** | Make sure Settings > Security > Cookies is on. Sites that sign in with JavaScript can't be logged into. |
@@ -418,5 +427,3 @@ Built with [libogc2](https://libogc2.org/), [mbedTLS](https://github.com/Mbed-TL
 Advance player is built with devkitARM and [libgba](https://github.com/devkitPro/libgba);
 the way it's sent over the link cable follows the method used by FIX94's
 [GBA Link Cable Dumper](https://github.com/FIX94/gba-link-cable-dumper).
-Designed and art-directed by Arial-Bold. Code written with AI assistance (Claude by Anthropic).
-
