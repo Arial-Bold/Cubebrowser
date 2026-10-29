@@ -29,28 +29,30 @@ Component cables are optional and unlock 480p video.
 ## Installing
 
 1. Download the latest release from the **Releases** section of this page.
-   You'll get `cubebrowser.dol` and a `gcbrowser` folder.
-2. Copy both to your SD card, keeping the `gcbrowser` folder **next to**
-   `cubebrowser.dol`. That can be the root of the card or any folder you keep
-   apps in:
+   Copy the `cubebrowser` folder from the zip into an `apps` folder at the
+   root of your SD card:
 
    ```
-   SD card                        SD card
-   ├── cubebrowser.dol      or    └── apps/
-   └── gcbrowser/                     └── cubebrowser/
-       └── cacert.pem                     ├── cubebrowser.dol
-                                          └── gcbrowser/
-                                              └── cacert.pem
+   SD card
+   └── apps/
+       └── cubebrowser/
+           ├── default.dol      the browser
+           ├── opening.bnr      its banner and description in launchers
+           └── gcbrowser/
+               └── cacert.pem
    ```
 
-   The `gcbrowser` folder holds your settings, bookmarks and saved logins.
+   This is the layout Swiss and other launchers (and Dolphin Depot) expect.
+   Any other folder works too, as long as `gcbrowser` stays **next to**
+   `default.dol`.
+2. The `gcbrowser` folder holds your settings, bookmarks and saved logins.
    CubeBrowser uses the one next to the `.dol` if there is one, otherwise
    `gcbrowser` at the root of the card. Settings from an older version kept at
    the root are moved over automatically. You can also move it later in
    Settings > Data > Move data folder.
 
 3. Insert the SD card, plug in the network adapter, boot Swiss and launch
-   `cubebrowser.dol`.
+   CubeBrowser (`default.dol` in `apps/cubebrowser`, shown with its banner).
 
 On first start, the status bar shows the browser connecting to your router,
 setting its clock and loading security certificates. When the dot in the
@@ -59,8 +61,8 @@ bottom-right corner turns green, you're online.
 To upgrade later, use **Settings > Updates > Check for CubeBrowser updates** (or the
 "Update available" bubble on the start page), which downloads the newest
 release from GitHub and installs it, then **Restart CubeBrowser** starts the
-new version straight away. You can also just replace
-`cubebrowser.dol` yourself. Your settings, bookmarks and downloads stay put.
+new version straight away. You can also just replace the `.dol`
+(`default.dol` or `cubebrowser.dol`) yourself. Your settings, bookmarks and downloads stay put.
 
 ---
 
