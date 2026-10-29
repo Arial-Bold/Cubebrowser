@@ -23,6 +23,7 @@
 #include "midi.h"
 #include "music_ui.h"
 #include "memstat.h"
+#include "gcicard.h"
 #include <ogc/lwp_watchdog.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -496,11 +497,14 @@ void browser_clear_history(void) {
 
 /* ------------------------------------------------------------- downloads */
 
-enum { DL_IDLE, DL_OFFER, DL_RUNNING, DL_DONE, DL_FAILED, DL_UNZIPPING, DL_UNZIPPED, DL_UNZIP_FAILED };
+enum { DL_IDLE, DL_OFFER, DL_RUNNING, DL_DONE, DL_FAILED, DL_UNZIPPING, DL_UNZIPPED, DL_UNZIP_FAILED,
+       DL_CARD, DL_CARD_REPLACE, DL_CARD_WRITING, DL_CARD_DONE, DL_CARD_FAILED };   /* the last five: a save to a memory card */
 static int dl_state;
 static char dl_url[URL_MAX], dl_name[128], dl_path[600], dl_msg[256], dl_unzip_dir[600];
 static long long dl_size;
-static bool dl_is_zip, dl_unzip_after, dl_confirm_cancel;
+static bool dl_is_zip, dl_unzip_after, dl_confirm_cancel, dl_is_gci, dl_card_after;
+static int dl_card_slot;
+static float dl_card_check_at;
 static int dl_files;
 
 static void fmt_size(long long b, char *out, size_t n) {
@@ -588,7 +592,8 @@ static void offer_download(const HttpResult *r) {
     pick_download_name(r->url, r->filename);
     dl_size = r->length;
     dl_is_zip = ends_with_ci(dl_name, ".zip");
-    dl_unzip_after = false;
+    dl_is_gci = ends_with_ci(dl_name, ".gci");
+    dl_unzip_after = dl_card_after = false;
     dl_confirm_cancel = false;
     dl_state = DL_OFFER;
     /* the link didn't lead to a new page, so don't add one to Back */
@@ -643,6 +648,21 @@ static void start_unzip(void) {
     dl_state = DL_UNZIPPING;
 }
 
+/* Memory card saves: read the downloaded .gci, then look at both slots. */
+static void start_card(void) {
+    char err[160];
+    if (!gci_load(dl_path, err, sizeof(err))) {
+        snprintf(dl_msg, sizeof(dl_msg), "%s", err);
+        dl_state = DL_CARD_FAILED;
+        sound_play(SFX_ERROR);
+        return;
+    }
+    gci_write_reset();
+    gci_check_slots();
+    dl_card_check_at = ui_time() + 3;
+    dl_state = DL_CARD;
+}
+
 static void handle_task_result(void) {
     bool ok;
     char err[256];
@@ -651,6 +671,7 @@ static void handle_task_result(void) {
         if (ok) {
             sound_play(SFX_LOADED);
             if (dl_unzip_after) start_unzip();
+            else if (dl_card_after) start_card();
             else dl_state = DL_DONE;
             if (dl_state != DL_UNZIPPING) dl_resume_music();
         } else if (!strcmp(err, "Stopped.")) {
@@ -718,15 +739,100 @@ static void draw_download(bool interactive) {
     case DL_UNZIPPING: title = "Unzipping"; break;
     case DL_UNZIPPED: title = "Unzipped"; break;
     case DL_UNZIP_FAILED: title = "Couldn't unzip"; break;
+    case DL_CARD: case DL_CARD_REPLACE: title = "Copy to memory card"; break;
+    case DL_CARD_WRITING: title = "Copying to memory card"; break;
+    case DL_CARD_DONE: title = "Copied"; break;
+    case DL_CARD_FAILED: title = "Couldn't copy the save"; break;
     }
     gfx_text(FONT_UI, 24, px + 24, py + 16, t->text, title, -1);
     float tx = px + 24, ty = py + 58, tw = pw - 48;
-    gfx_text(FONT_UI, 18, tx, ty, t->text, dl_name, gfx_text_fit(FONT_UI, 18, dl_name, -1, tw));
+    bool card = dl_state >= DL_CARD;
+    const GciInfo *gi = gci_info();
+    /* for a save: the game's name from the save itself, when it has one */
+    const char *head = card && gi && gi->title[0] ? gi->title : dl_name;
+    gfx_text(FONT_UI, 18, tx, ty, t->text, head, gfx_text_fit(FONT_UI, 18, head, -1, tw));
     ty += 32;
     float by = py + ph - 58, bh = 40;
     bool close = false;
 
-    if (dl_state == DL_OFFER) {
+    if (card && gi && dl_state != DL_CARD_FAILED) {   /* what the save is */
+        if (gi->detail[0]) gfx_text(FONT_BODY, 16, tx, ty - 6, t->text_dim, gi->detail, gfx_text_fit(FONT_BODY, 16, gi->detail, -1, tw));
+        snprintf(line, sizeof(line), "%s%s%s  |  %d block%s  |  %s", gi->code, gi->region[0] ? " " : "", gi->region,
+                 gi->blocks, gi->blocks == 1 ? "" : "s", gi->name);
+        gfx_text(FONT_BODY, 15, tx, ty + 16, t->text_dim, line, gfx_text_fit(FONT_BODY, 15, line, -1, tw));
+        ty += 46;
+    }
+
+    if (dl_state == DL_CARD) {
+        /* re-check now and then, so a card put in afterwards shows up */
+        if (ui_time() > dl_card_check_at) { gci_check_slots(); dl_card_check_at = ui_time() + 3; }
+        float bw = (tw - 12) / 2, bh2 = 62;
+        for (int i = 0; i < 2; i++) {
+            const GciSlot *sl = gci_slot(i);
+            char status[64];
+            bool usable = false;
+            switch (sl->state) {
+            case GC_SLOT_READY:
+                if (sl->has_save) { snprintf(status, sizeof(status), "Has this save already"); usable = true; }
+                else if (sl->blocks_free < gi->blocks) snprintf(status, sizeof(status), "Not enough room (%d free)", sl->blocks_free);
+                else if (sl->files_free <= 0) snprintf(status, sizeof(status), "Full (127 saves)");
+                else { snprintf(status, sizeof(status), "%d of %d blocks free", sl->blocks_free, sl->blocks_total); usable = true; }
+                break;
+            case GC_SLOT_EMPTY: snprintf(status, sizeof(status), "No memory card"); break;
+            case GC_SLOT_SD: snprintf(status, sizeof(status), "SD card adapter"); break;
+            case GC_SLOT_OTHER: snprintf(status, sizeof(status), "Not a memory card"); break;
+            case GC_SLOT_BROKEN: snprintf(status, sizeof(status), "Can't be read"); break;
+            default: snprintf(status, sizeof(status), "Checking..."); break;
+            }
+            float bx = tx + i * (bw + 12);
+            if (ui_button(ui_id("dl-slot", i), bx, ty, bw, bh2, "", 17, usable ? UIB_NORMAL : UIB_FLAT) && usable) {
+                dl_card_slot = i;
+                if (sl->has_save) dl_state = DL_CARD_REPLACE;
+                else { gci_write(i, false); dl_state = DL_CARD_WRITING; dl_pause_music(); }
+            }
+            Color tc = usable ? t->text : color_alpha(t->text, 0.55f);
+            gfx_text_centered(FONT_UI, 19, bx + bw * 0.5f, ty + 8, tc, i ? "Slot B" : "Slot A");
+            gfx_text_centered(FONT_BODY, 15, bx + bw * 0.5f, ty + 35, usable ? t->text_dim : color_alpha(t->text_dim, 0.7f), status);
+        }
+        if (ui_button(ui_id("dl-card", 0), tx + tw * 0.25f, by, tw * 0.5f, bh, "Cancel", 17, UIB_NORMAL)) close = true;
+    } else if (dl_state == DL_CARD_REPLACE) {
+        snprintf(line, sizeof(line), "The memory card in slot %c already has this save. Replace it with the one you downloaded? "
+                 "The save on the card can't be brought back.", 'A' + dl_card_slot);
+        wrap_text(FONT_BODY, 17, tx, ty, tw, t->text, line, 3);
+        float bw = (tw - 12) / 2;
+        if (ui_button(ui_id("dl-rep", 0), tx, by, bw, bh, "Replace", 17, UIB_ACCENT)) {
+            gci_write(dl_card_slot, true);
+            dl_state = DL_CARD_WRITING;
+            dl_pause_music();
+        }
+        if (ui_button(ui_id("dl-rep", 1), tx + bw + 12, by, bw, bh, "Back", 17, UIB_NORMAL)) dl_state = DL_CARD;
+    } else if (dl_state == DL_CARD_WRITING) {
+        GciWriteState ws = gci_write_state();
+        if (ws == GCW_DONE) { dl_state = DL_CARD_DONE; sound_play(SFX_LOADED); dl_resume_music(); }
+        else if (ws == GCW_FAILED) {
+            snprintf(dl_msg, sizeof(dl_msg), "%s", gci_write_message());
+            dl_state = DL_CARD_FAILED;
+            sound_play(SFX_ERROR);
+            dl_resume_music();
+        }
+        wrap_text(FONT_BODY, 17, tx, ty, tw, t->text_dim, "Don't take out the memory card or turn off the GameCube.", 2);
+        float bar_y = ty + 40, frac = gci_write_progress();
+        gfx_rrect(tx, bar_y, tw, 18, ui_r(9), color_alpha(t->button_bottom, 0.6f));
+        gfx_rrect_vgrad(tx, bar_y, fmaxf(18, tw * frac), 18, ui_r(9), t->accent_hi, t->accent);
+        ui_spinner(px + pw - 40, py + 34, 24);
+    } else if (dl_state == DL_CARD_DONE) {
+        snprintf(line, sizeof(line), "The save is on the memory card in slot %c.", 'A' + dl_card_slot);
+        wrap_text(FONT_BODY, 17, tx, ty, tw, t->text, line, 2);
+        if (gci_write_message()[0]) wrap_text(FONT_BODY, 16, tx, ty + 28, tw, t->text_dim, gci_write_message(), 2);
+        if (ui_button(ui_id("dl-cd", 0), tx + tw * 0.25f, by, tw * 0.5f, bh, "OK", 17, UIB_ACCENT)) close = true;
+    } else if (dl_state == DL_CARD_FAILED) {
+        wrap_text(FONT_BODY, 17, tx, ty, tw, t->text, dl_msg, 3);
+        float bw = (tw - 12) / 2;
+        if (gi) {
+            if (ui_button(ui_id("dl-cf", 0), tx, by, bw, bh, "Try again", 17, UIB_ACCENT)) { gci_write_reset(); gci_check_slots(); dl_state = DL_CARD; }
+            if (ui_button(ui_id("dl-cf", 1), tx + bw + 12, by, bw, bh, "Close", 17, UIB_NORMAL)) close = true;
+        } else if (ui_button(ui_id("dl-cf", 2), tx + tw * 0.25f, by, tw * 0.5f, bh, "OK", 17, UIB_ACCENT)) close = true;
+    } else if (dl_state == DL_OFFER) {
         fmt_size(dl_size, a, sizeof(a));
         snprintf(line, sizeof(line), "Size: %s", a);
         gfx_text(FONT_BODY, 17, tx, ty, t->text_dim, line, -1);
@@ -740,12 +846,16 @@ static void draw_download(bool interactive) {
         if (midi_state() == MIDI_PLAYING)
             gfx_text(FONT_BODY, 16, tx, ny, t->text_dim, "The music will pause during the download and resume after.",
                      gfx_text_fit(FONT_BODY, 16, "The music will pause during the download and resume after.", -1, tw));
-        int nb = dl_is_zip ? 3 : 2;
+        int nb = (dl_is_zip || dl_is_gci) ? 3 : 2;
         float bw = (tw - 12 * (nb - 1)) / nb, bx = tx;
         if (ui_button(ui_id("dl-go", 0), bx, by, bw, bh, "Download", 17, UIB_ACCENT)) { dl_unzip_after = false; start_download(); }
         bx += bw + 12;
         if (dl_is_zip) {
             if (ui_button(ui_id("dl-go", 1), bx, by, bw, bh, "Download & unzip", 17, UIB_NORMAL)) { dl_unzip_after = true; start_download(); }
+            bx += bw + 12;
+        }
+        if (dl_is_gci) {   /* a GameCube save: straight on to a memory card */
+            if (ui_button(ui_id("dl-go", 3), bx, by, bw, bh, "To memory card", 17, UIB_NORMAL)) { dl_card_after = true; start_download(); }
             bx += bw + 12;
         }
         if (ui_button(ui_id("dl-go", 2), bx, by, bw, bh, "Cancel", 17, UIB_NORMAL)) close = true;
@@ -808,8 +918,9 @@ static void draw_download(bool interactive) {
         wrap_text(FONT_BODY, 16, tx, ty + 56, tw, t->text_dim,
                   song ? "It's in the music player's song list."
                        : ends_with_ci(dl_name, ".sf2") ? "Choose it under Settings > Music > Instruments."
-                                                       : "You can open it from Swiss after leaving the browser.", 2);
-        bool two = dl_is_zip || song;
+                                                       : dl_is_gci ? "It's a GameCube save. Copy it to a memory card to use it."
+                                                                   : "You can open it from Swiss after leaving the browser.", 2);
+        bool two = dl_is_zip || song || dl_is_gci;
         float bw = two ? (tw - 12) / 2 : tw * 0.5f, bx = two ? tx : tx + tw * 0.25f;
         if (song) {
             if (ui_button(ui_id("dl-done", 2), bx, by, bw, bh, "Play now", 17, UIB_NORMAL)) {
@@ -822,6 +933,10 @@ static void draw_download(bool interactive) {
         }
         if (dl_is_zip) {
             if (ui_button(ui_id("dl-done", 0), bx, by, bw, bh, "Unzip", 17, UIB_NORMAL)) start_unzip();
+            bx += bw + 12;
+        }
+        if (dl_is_gci) {
+            if (ui_button(ui_id("dl-done", 3), bx, by, bw, bh, "Copy to memory card", 17, UIB_NORMAL)) start_card();
             bx += bw + 12;
         }
         if (ui_button(ui_id("dl-done", 1), bx, by, bw, bh, "OK", 17, UIB_ACCENT)) close = true;
@@ -839,11 +954,17 @@ static void draw_download(bool interactive) {
             dl_state = DL_DONE;   /* back to the downloaded zip */
         }
     }
-    if (interactive && dl_state != DL_RUNNING && dl_state != DL_UNZIPPING && input_pressed(ACT_BACK)) {
+    bool working = dl_state == DL_RUNNING || dl_state == DL_UNZIPPING || dl_state == DL_CARD_WRITING;
+    if (interactive && !working && input_pressed(ACT_BACK)) {
         input_consume(ACT_BACK);
-        close = true;
+        if (dl_state == DL_CARD_REPLACE) dl_state = DL_CARD;
+        else close = true;
     }
-    if (close) { dl_state = DL_IDLE; sound_play(SFX_CLOSE); }
+    if (close) {
+        if (card) gci_unload();
+        dl_state = DL_IDLE;
+        sound_play(SFX_CLOSE);
+    }
 }
 
 /* ---------------------------------------------------------------- images */
