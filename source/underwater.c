@@ -13,6 +13,7 @@
  * Light is drawn additively (it brightens what's under it). */
 #include "underwater.h"
 #include "gfx.h"
+#include "ui.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -100,7 +101,7 @@ void underwater_draw(float x, float y, float w, float h, float alpha, float t) {
     /* the water, which also marks its rounded shape: everything else is
      * drawn only inside it, right up to the edges and around the corners */
     gfx_mask_begin();
-    gfx_rrect_vgrad(x, y, w, h, 14, fade(rgba(38, 112, 190, 255), alpha), fade(rgba(3, 20, 58, 255), alpha));
+    gfx_rrect_vgrad(x, y, w, h, ui_r(14), fade(rgba(38, 112, 190, 255), alpha), fade(rgba(3, 20, 58, 255), alpha));
     gfx_mask_use();
     gfx_set_clip(x, y, w, h);
     gfx_rect_vgrad(x, y + h * 0.35f, w, h * 0.65f, fade(rgba(10, 50, 110, 0), alpha), fade(rgba(2, 12, 40, 150), alpha));

@@ -84,8 +84,11 @@ static void finish(bool accepted) {
 
 static void draw_field(float x, float y, float w, float h, float ts) {
     const Theme *t = theme();
-    gfx_rrect(x, y, w, h, 10, t->field_bg);
-    gfx_rrect_outline(x, y, w, h, 10, 2, t->accent);
+    if (t->system) ui_field_frame(x, y, w, h);
+    else {
+        gfx_rrect(x, y, w, h, 10, t->field_bg);
+        gfx_rrect_outline(x, y, w, h, 10, 2, t->accent);
+    }
     float pad = 12, fw = w - pad * 2;
     char shown[TEXT_MAX];
     for (int i = 0; i <= len; i++) shown[i] = (mode == OSK_PASSWORD && i < len) ? '*' : text[i];

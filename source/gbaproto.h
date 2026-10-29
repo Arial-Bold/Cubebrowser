@@ -31,7 +31,8 @@ enum {
     GBP_SF,             /* u8 index, u16 size in 100 KB units, text: one Instruments choice */
     GBP_MSG,            /* text: a problem to show, or empty */
     GBP_ACK,            /* u8 id: that command arrived */
-    GBP_THEME,          /* GBT_COUNT colours (u16 each, the GBA's 15-bit format): the browser's theme */
+    GBP_THEME,          /* GBT_COUNT colours (u16 each, the GBA's 15-bit format): the browser's theme,
+                         * then a style byte (1: System's square look) */
 };
 /* both ways: passed to the handler when the other side asks for a sync word */
 #define GBP_REQ_SYNC 0x30

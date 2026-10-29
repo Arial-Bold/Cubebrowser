@@ -784,16 +784,16 @@ static void draw_download(bool interactive) {
         }
         /* progress bar (an animated stripe when the size isn't known) */
         float bar_y = ty + 62;
-        gfx_rrect(tx, bar_y, tw, 18, 9, color_alpha(t->button_bottom, 0.6f));
+        gfx_rrect(tx, bar_y, tw, 18, ui_r(9), color_alpha(t->button_bottom, 0.6f));
         if (total > 0) {
             float frac = (float)done / (float)total;
             if (frac > 1) frac = 1;
-            gfx_rrect_vgrad(tx, bar_y, fmaxf(18, tw * frac), 18, 9, t->accent_hi, t->accent);
+            gfx_rrect_vgrad(tx, bar_y, fmaxf(18, tw * frac), 18, ui_r(9), t->accent_hi, t->accent);
             snprintf(line, sizeof(line), "%d%%", (int)(frac * 100));
             gfx_text_centered(FONT_UI, 14, tx + tw * 0.5f, bar_y + 1, t->text, line);
         } else {
             float k = fmodf(ui_time() * 0.6f, 1.0f);
-            gfx_rrect(tx + (tw - 80) * k, bar_y, 80, 18, 9, t->accent);
+            gfx_rrect(tx + (tw - 80) * k, bar_y, 80, 18, ui_r(9), t->accent);
         }
         ui_spinner(px + pw - 40, py + 34, 24);
         const char *lbl = dl_confirm_cancel ? "Press again to cancel" : "Cancel";
@@ -1488,7 +1488,7 @@ static void draw_clock(float right_x, float y) {
     int h12 = tmv.tm_hour % 12;
     snprintf(buf, sizeof(buf), "%d:%02d %s", h12 ? h12 : 12, tmv.tm_min, tmv.tm_hour < 12 ? "AM" : "PM");
     float w = gfx_text_width(FONT_UI, 15, buf, -1);
-    gfx_text(FONT_UI, 15, right_x - w, y, t->text, buf, -1);
+    gfx_text(FONT_UI, 15, right_x - w, y, t->system ? rgba(201, 198, 255, 255) : t->text, buf, -1);
 }
 
 /* Exit button: press twice (within 3 seconds) to leave the browser. */
@@ -1612,11 +1612,19 @@ void browser_frame(bool interactive) {
     /* while music plays the note button glows, pulsing gently */
     bool music_on = midi_state() == MIDI_PLAYING && g_set.music_glow;
     float pulse = music_on ? 0.5f + 0.5f * sinf(ui_time() * 4.0f) : 0;
-    if (music_on)   /* soft light spilling out behind the button */
+    bool sys = t->system;
+    if (music_on && !sys)   /* soft light spilling out behind the button */
         for (int k = 3; k >= 1; k--)
             gfx_circle(right - 88, by, r + 2 + k * 2.5f, color_alpha(t->accent, (0.14f + 0.12f * pulse) / k));
     if (ui_icon_button(ui_id("tb", 7), right - 88, by, r, ICON_MUSIC, true)) { music_open = true; music_ui_reset(); sound_play(SFX_OPEN); }
-    if (music_on) {   /* the button face itself lights up */
+    if (music_on && sys) {   /* System: the glass turns gold and glows */
+        float gw = r * 1.7f, gh = r * 1.45f, gx = right - 88 - gw * 0.5f, gy = by - gh * 0.5f;
+        for (int k = 3; k >= 1; k--)
+            gfx_rrect(gx - k * 2.5f, gy - k * 2.5f, gw + k * 5, gh + k * 5, 2 + k * 2.5f, color_alpha(t->accent, (0.12f + 0.1f * pulse) / k));
+        gfx_rrect_vgrad(gx, gy, gw, gh, 2, rgba(255, 244, 150, (u8)(190 + 50 * pulse)), rgba(190, 158, 34, (u8)(190 + 50 * pulse)));
+        gfx_rect(gx + 2, gy + 1, gw - 4, 1, rgba(255, 255, 230, 204));
+        ui_draw_icon(ICON_MUSIC, right - 88, by, r * 0.95f, t->text_on_accent);
+    } else if (music_on) {   /* the button face itself lights up */
         gfx_circle(right - 88, by, r - 1, color_alpha(t->accent, 0.65f + 0.3f * pulse));
         gfx_circle(right - 88, by - r * 0.35f, r * 0.5f, rgba(255, 255, 255, (int)(40 + 30 * pulse)));
         ui_draw_icon(ICON_MUSIC, right - 88, by, r * 1.1f, rgba(255, 255, 255, 255));
@@ -1627,9 +1635,15 @@ void browser_frame(bool interactive) {
     float stop_w = loading ? 34 : 0;
     bool addr_hover = ui_hover(ui_id("addr", 0), ax, ay, aw - stop_w, ah);
     float ahv = ui_anim(ui_id("addr", 1), addr_hover ? 1.0f : 0.0f, 0.25f);
-    if (ahv > 0.01f) gfx_rrect(ax - 4, ay - 4, aw + 8, ah + 8, 21, color_alpha(t->accent, 0.45f * ahv));
-    gfx_rrect(ax, ay, aw, ah, 17, t->field_bg);
-    gfx_rrect_outline(ax, ay, aw, ah, 17, 1.5f, t->panel_edge);
+    if (sys) {   /* a dark well in a light frame */
+        ah = 28; ay = by - ah * 0.5f;
+        ui_field_frame(ax, ay, aw, ah);
+        ui_gold_ring(ax - 2, ay - 2, aw + 4, ah + 4, ahv);
+    } else {
+        if (ahv > 0.01f) gfx_rrect(ax - 4, ay - 4, aw + 8, ah + 8, 21, color_alpha(t->accent, 0.45f * ahv));
+        gfx_rrect(ax, ay, aw, ah, 17, t->field_bg);
+        gfx_rrect_outline(ax, ay, aw, ah, 17, 1.5f, t->panel_edge);
+    }
     const char *shown = loading ? loading_url : (has_page ? page.url : "");
     float tx = ax + 14;
     if (!loading && has_page && page.secure) {
@@ -1638,7 +1652,7 @@ void browser_frame(bool interactive) {
     }
     gfx_set_clip(tx, ay, aw - (tx - ax) - 12 - stop_w, ah);
     int n = gfx_text_fit(FONT_BODY, 17, shown, -1, aw - (tx - ax) - 16 - stop_w);
-    gfx_text(FONT_BODY, 17, tx, ay + 7, t->field_text, shown, n);
+    gfx_text(FONT_BODY, 17, tx, by - gfx_line_height(FONT_BODY, 17) * 0.5f, t->field_text, shown, n);
     gfx_clear_clip();
     if (loading && ui_icon_button(ui_id("tb", 2), ax + aw - 19, by, 12, ICON_STOP, true)) { queued = false; fetch_cancel(); }
     if (addr_hover && input_ok && input_pressed(ACT_CLICK)) {
@@ -1650,12 +1664,14 @@ void browser_frame(bool interactive) {
     /* ---- content area (not while the loading screen covers it) */
     bool content_ok = input_ok && !veil_covering();
     float cx = sx + 8, cy = sy + bar_h + 16, cw = sw - 16, ch = sh - bar_h - 16 - 34;
-    gfx_shadow(cx + 2, cy + 4, cw, ch, 14, 6, t->shadow);
+    float pr = ui_r(14);
+    if (sys) gfx_rect(cx - 2, cy - 2, cw + 4, ch + 4, rgba(190, 200, 215, 128));   /* light frame */
+    else gfx_shadow(cx + 2, cy + 4, cw, ch, 14, 6, t->shadow);
     /* the page's rounded panel, which also marks its shape: the page is
      * drawn only inside it (below), so a site's full-width bars and
      * backgrounds keep the rounded corners instead of squaring them off */
     gfx_mask_begin();
-    gfx_rrect(cx, cy, cw, ch, 14, has_page && page.dom ? page.bg : t->page_bg);
+    gfx_rrect(cx, cy, cw, ch, pr, has_page && page.dom ? page.bg : t->page_bg);
     gfx_mask_end();
 
     float scale = g_set.text_size / 100.0f;
@@ -1826,8 +1842,8 @@ void browser_frame(bool interactive) {
         if (page.content_h > ch) {
             float bh = fmaxf(30, ch * ch / page.content_h);
             float byy = cy + (ch - bh) * (page.scroll / (page.content_h - ch));
-            gfx_rrect(cx + cw - 9, cy + 4, 5, ch - 8, 2.5f, color_alpha(t->page_rule, 0.6f));
-            gfx_rrect(cx + cw - 9, byy + 4, 5, bh - 8, 2.5f, t->accent);
+            gfx_rrect(cx + cw - 9, cy + 4, 5, ch - 8, ui_r(2.5f), color_alpha(t->page_rule, 0.6f));
+            gfx_rrect(cx + cw - 9, byy + 4, 5, bh - 8, ui_r(2.5f), t->accent);
         }
 
         if (note) {
@@ -1888,8 +1904,9 @@ void browser_frame(bool interactive) {
     if (veil.on)   /* over the page area only; the status bar below says what's loading */
         underwater_draw(cx, cy, cw, ch, veil.a, ui_time());
 
-    /* ---- status bar */
+    /* ---- status bar (System: inside the indigo description bar) */
     float sbx = sx + 14, sby = sy + sh - 28;
+    if (sys) ui_desc_bar(sx + 6, sby - 3, sw - 12, 25);
     char status[300];
     int pics_left = 0;
     if (loading) {
@@ -1917,7 +1934,7 @@ void browser_frame(bool interactive) {
     }
     float status_w = sw - 150 - (sbx - sx);
     int sn = gfx_text_fit(FONT_UI, 15, status, -1, status_w);
-    gfx_text(FONT_UI, 15, sbx, sby, t->text, status, sn);
+    gfx_text(FONT_UI, 15, sbx, sby, sys ? rgba(236, 235, 255, 255) : t->text, status, sn);
     Color dot = netio_state() == NET_UP ? t->good : (netio_state() == NET_FAILED ? t->bad : t->accent);
     gfx_circle(sx + sw - 110, sby + 10, 5, dot);
     draw_clock(sx + sw - 14, sby);

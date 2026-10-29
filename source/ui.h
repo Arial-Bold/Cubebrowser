@@ -42,5 +42,11 @@ void  ui_draw_background(void);
 void  ui_draw_cursor(void);
 void  ui_spinner(float cx, float cy, float size);
 void  ui_safe_area(float *x, float *y, float *w, float *h);
+/* The System look's own pieces (they also work in the other themes). */
+float ui_r(float r);                /* corner radius: small and square-ish in System */
+void  ui_desc_bar(float x, float y, float w, float h);         /* indigo bar with a fine grid */
+void  ui_frost_row(float x, float y, float w, float h);        /* frosted list row */
+void  ui_gold_ring(float x, float y, float w, float h, float a);/* the selection frame */
+void  ui_field_frame(float x, float y, float w, float h);      /* light frame + dark well */
 void  ui_toast(const char *msg);    /* brief message bubble */
 void  ui_draw_toast(void);

@@ -79,6 +79,20 @@ static Color site_col(const Site *s, float m, float a) {
 
 static Color opaque(Color c) { c.a = 255; return c; }
 
+/* The start page's flat colours. System swaps the navy, orange and pale
+ * blocks for Flashcube's near-black, indigo and frosted grey. */
+static bool sys_look(void) { return theme()->system != 0; }
+static Color h_navy(void) { return sys_look() ? rgba(8, 11, 14, 255) : rgba(26, 24, 66, 255); }
+static Color h_orange(void) { return sys_look() ? rgba(59, 44, 182, 255) : rgba(240, 132, 24, 255); }
+static Color h_panel(void) { return sys_look() ? rgba(178, 188, 204, 255) : opaque(theme()->panel_top); }
+static Color h_pale(void) {
+    return sys_look() ? rgba(208, 214, 230, 255) : opaque(color_lerp(theme()->panel_top, rgba(255, 255, 255, 255), 0.62f));
+}
+static Color h_base(void) {
+    const Theme *t = theme();
+    return t->system ? rgba(18, 30, 34, 255) : opaque(color_lerp(t->panel_bottom, t->bg_top, 0.25f));
+}
+
 /* ---- shapes */
 
 /* Rectangle with the top-right and bottom-left corners cut at 45 degrees
@@ -260,15 +274,15 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
     float now = ui_time();
 
     /* palette: flat versions of the theme colours plus fixed navy and orange */
-    Color base = opaque(color_lerp(t->panel_bottom, t->bg_top, 0.25f));   /* page background */
-    Color panel = opaque(t->panel_top);                                     /* lighter blocks */
-    Color navy = rgba(26, 24, 66, 255);                                     /* bars, outlines */
+    Color base = h_base();   /* page background */
+    Color panel = h_panel();                                     /* lighter blocks */
+    Color navy = h_navy();                                     /* bars, outlines */
     Color gold = opaque(t->accent);
-    Color orange = rgba(240, 132, 24, 255);
+    Color orange = h_orange();
     Color white = rgba(255, 255, 255, 255);
     Color shadow = rgba(20, 16, 50, 200);
 
-    gfx_rrect(x, y, w, h, 14, base);
+    gfx_rrect(x, y, w, h, ui_r(14), base);
     gfx_set_clip(x, y, w, h);
 
     float m = 10, hx = x + m, hw = w - 2 * m, cy = y + m;
@@ -320,10 +334,16 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
     float text_w = hw - 24;
     float text_h = wrap(FONT_BODY, tsz_body, 0, 0, text_w - 4, white, about_text, false);   /* same width as drawn */
     float about_h = text_h + 14;
-    cut_rect(hx, cy, hw, about_h, 8, color_alpha(color_lerp(panel, white, 0.62f), a1));   /* pale, for easy reading */
-    cut_outline(hx, cy, hw, about_h, 8, 1.5f, color_alpha(navy, a1));
-    gfx_rect(hx + 1, cy + 1, 5, about_h - 2 - 8, color_alpha(orange, a1));   /* accent edge */
-    wrap(FONT_BODY, tsz_body, hx + 15, cy + 7, text_w - 4, color_alpha(navy, a1), about_text, true);
+    if (t->system) {   /* System: the indigo description bar */
+        if (a1 > 0.99f) ui_desc_bar(hx, cy, hw, about_h);
+        else gfx_rect(hx, cy, hw, about_h, color_alpha(rgba(50, 40, 160, 255), a1));
+        wrap(FONT_BODY, tsz_body, hx + 15, cy + 7, text_w - 4, color_alpha(rgba(236, 235, 255, 255), a1), about_text, true);
+    } else {
+        cut_rect(hx, cy, hw, about_h, 8, color_alpha(color_lerp(panel, white, 0.62f), a1));   /* pale, for easy reading */
+        cut_outline(hx, cy, hw, about_h, 8, 1.5f, color_alpha(navy, a1));
+        gfx_rect(hx + 1, cy + 1, 5, about_h - 2 - 8, color_alpha(orange, a1));   /* accent edge */
+        wrap(FONT_BODY, tsz_body, hx + 15, cy + 7, text_w - 4, color_alpha(navy, a1), about_text, true);
+    }
     cy += about_h + 7;
 
     /* ---- featured sites */
@@ -370,8 +390,16 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
         em = white;
         em_dark = site_col(s, 0.6f, 1);
 #endif
-        gfx_rect(bx, by, tw, art_h, color_alpha(fill, ap));
-        gfx_rect(bx, by, tw, 3, color_alpha(edge, ap));                       /* light top edge */
+        if (t->system) {   /* a frosted block over the dark page */
+            fill = hov ? rgba(78, 98, 112, 255) : rgba(52, 70, 82, 255);
+            em = rgba(242, 244, 248, 255);
+            em_dark = fill;
+            gfx_rect(bx, by, tw, art_h, color_alpha(fill, ap));
+            if (ap > 0.99f) ui_frost_row(bx, by, tw, art_h);
+        } else {
+            gfx_rect(bx, by, tw, art_h, color_alpha(fill, ap));
+            gfx_rect(bx, by, tw, 3, color_alpha(edge, ap));                       /* light top edge */
+        }
         float es = fminf(art_h * 0.9f, tw * 0.45f);
         draw_emblem(s->icon, bx + tw / 2, by + art_h / 2 + 1, es, color_alpha(em, ap), color_alpha(em_dark, ap));
         /* caption bar with the orange arrow square */
@@ -379,7 +407,7 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
         float as = label_h - 6, ax = bx + tw - as - 3, ay = by + art_h + 3;
         gfx_rect(ax, ay, as, as, color_alpha(hov ? gold : orange, ap));
         gfx_tri(ax + as * 0.34f, ay + as * 0.22f, ax + as * 0.34f, ay + as * 0.78f, ax + as * 0.76f, ay + as * 0.5f,
-                color_alpha(navy, ap));
+                color_alpha(t->system && !hov ? gold : navy, ap));
         float ns = 11, nsp = 1.0f, room = tw - 8 - as - 8;
         while (ns > 8 && caps_width(ns, nsp, s->name) > room) ns -= 0.5f;
         caps(bx + 7, by + art_h + (label_h - gfx_line_height(FONT_UI, ns)) / 2, ns, nsp,
@@ -424,7 +452,8 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
     const char *tag = hover_blurb ? "SITE" : "TIP";
     float tag_w = caps_width(9.5f, 1.2f, tag) + 14;
     gfx_rect(lx + 3, ry + 3, tag_w, row_h - 6, color_alpha(orange, a3));
-    caps(lx + 10, ry + (row_h - gfx_line_height(FONT_UI, 9.5f)) / 2, 9.5f, 1.2f, color_alpha(navy, a3), rgba(0, 0, 0, 0), tag);
+    caps(lx + 10, ry + (row_h - gfx_line_height(FONT_UI, 9.5f)) / 2, 9.5f, 1.2f, color_alpha(t->system ? white : navy, a3),
+         rgba(0, 0, 0, 0), tag);
     char line[200];
     float fade = 1;
     if (hover_blurb) {
@@ -461,13 +490,13 @@ static const char *bind_name(int act) {
 
 /* One control: navy badge with the button in gold, then the description. */
 static void help_row(float x, float y, float w, float h, const char *badge, const char *text, float a) {
-    Color navy = rgba(26, 24, 66, 255), gold = opaque(theme()->accent);
-    Color pale = opaque(color_lerp(theme()->panel_top, rgba(255, 255, 255, 255), 0.62f));
+    Color navy = h_navy(), gold = opaque(theme()->accent);
+    Color pale = h_pale();
     float bw = fminf(84, w * 0.3f);
     gfx_rect(x + 2, y + 2, w, h, color_alpha(rgba(10, 8, 30, 255), 0.45f * a));    /* hard shadow */
     gfx_rect(x, y, bw, h, color_alpha(navy, a));
     gfx_rect(x + bw, y, w - bw, h, color_alpha(pale, a));
-    gfx_rect(x + bw, y, 4, h, color_alpha(rgba(240, 132, 24, 255), a));              /* orange edge */
+    gfx_rect(x + bw, y, 4, h, color_alpha(h_orange(), a));              /* orange edge */
     float bs = 11.5f;
     while (bs > 8 && caps_width(bs, 1.0f, badge) > bw - 10) bs -= 0.5f;
     caps(x + (bw - caps_width(bs, 1.0f, badge)) / 2, y + (h - gfx_line_height(FONT_UI, bs)) / 2, bs, 1.0f,
@@ -541,11 +570,11 @@ static float help_body(float x, float y, float w, bool draw) {
     float ph = th + 10;
     if (draw) {
         float a = intro(11);
-        Color navy = rgba(26, 24, 66, 255);
-        Color pale = opaque(color_lerp(theme()->panel_top, rgba(255, 255, 255, 255), 0.62f));
+        Color navy = h_navy();
+        Color pale = h_pale();
         cut_rect(x, yy, w, ph, 8, color_alpha(pale, a));
         cut_outline(x, yy, w, ph, 8, 1.5f, color_alpha(navy, a));
-        gfx_rect(x + 1, yy + 1, 5, ph - 2 - 8, color_alpha(rgba(240, 132, 24, 255), a));
+        gfx_rect(x + 1, yy + 1, 5, ph - 2 - 8, color_alpha(h_orange(), a));
         float ty = yy + 7;
         for (int i = 0; i < 3; i++) ty += wrap(FONT_BODY, ts, x + 15, ty, tw, color_alpha(navy, a), tips_text[i], true) + 6;
     }
@@ -556,10 +585,10 @@ static float help_body(float x, float y, float w, bool draw) {
 HomeAction home_help_draw(float x, float y, float w, float h, bool input_ok) {
     const Theme *t = theme();
     HomeAction act = HOME_NONE;
-    Color base = opaque(color_lerp(t->panel_bottom, t->bg_top, 0.25f));
-    Color panel = opaque(t->panel_top);
-    Color navy = rgba(26, 24, 66, 255), gold = opaque(t->accent), white = rgba(255, 255, 255, 255);
-    gfx_rrect(x, y, w, h, 14, base);
+    Color base = h_base();
+    Color panel = h_panel();
+    Color navy = h_navy(), gold = opaque(t->accent), white = rgba(255, 255, 255, 255);
+    gfx_rrect(x, y, w, h, ui_r(14), base);
     gfx_set_clip(x, y, w, h);
     float m = 10, hx = x + m, hw = w - 2 * m, cy = y + m;
 
@@ -665,8 +694,8 @@ static float notes_body(const char *notes, float x, float y, float tw, float ts,
 /* Flat button as on the old console sites; returns true when chosen. */
 static bool flat_button(const char *id, float x, float y, float h, const char *label, bool back, bool input_ok, float a,
                         float *w_out) {
-    Color navy = rgba(26, 24, 66, 255), gold = opaque(theme()->accent), white = rgba(255, 255, 255, 255);
-    Color panel = opaque(theme()->panel_top);
+    Color navy = h_navy(), gold = opaque(theme()->accent), white = rgba(255, 255, 255, 255);
+    Color panel = h_panel();
     float w = caps_width(10.5f, 1.2f, label) + 40;
     if (w_out) *w_out = w;
     UiId uid = ui_id(id, 0);
@@ -684,10 +713,10 @@ static bool flat_button(const char *id, float x, float y, float h, const char *l
 HomeAction home_update_draw(float x, float y, float w, float h, bool input_ok, const UpdView *v) {
     const Theme *t = theme();
     HomeAction act = HOME_NONE;
-    Color base = opaque(color_lerp(t->panel_bottom, t->bg_top, 0.25f));
-    Color navy = rgba(26, 24, 66, 255), gold = opaque(t->accent), white = rgba(255, 255, 255, 255);
-    Color pale = opaque(color_lerp(t->panel_top, white, 0.62f)), orange = rgba(240, 132, 24, 255);
-    gfx_rrect(x, y, w, h, 14, base);
+    Color base = h_base();
+    Color navy = h_navy(), gold = opaque(t->accent), white = rgba(255, 255, 255, 255);
+    Color pale = h_pale(), orange = h_orange();
+    gfx_rrect(x, y, w, h, ui_r(14), base);
     gfx_set_clip(x, y, w, h);
     float m = 10, hx = x + m, hw = w - 2 * m, cy = y + m;
     UpdateState us = v->state;

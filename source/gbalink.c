@@ -490,8 +490,34 @@ static void send_theme(void) {
     c[GBT_BARTXT] = readable(t->text_dim, c[GBT_BAR], light, dark);
     c[GBT_CUBE1] = t->button_top;
     c[GBT_CUBE2] = t->panel_bottom;
-    uint8_t d[2 * GBT_COUNT];
+    if (t->system) {   /* System: Flashcube's near-black grid, teal-black boxes, indigo bar, gold */
+        c[GBT_BG0] = c[GBT_BG1] = rgba(6, 6, 8, 255);
+        c[GBT_BAR] = rgba(18, 32, 36, 255);
+        c[GBT_BARL] = rgba(170, 180, 196, 255);
+        c[GBT_EDGE] = rgba(190, 200, 215, 255);
+        c[GBT_TXT] = c[GBT_FTXT] = c[GBT_BGTXT] = rgba(238, 241, 246, 255);
+        c[GBT_DIM] = c[GBT_BGDIM] = c[GBT_BARTXT] = rgba(201, 210, 238, 255);
+        c[GBT_BGDIM2] = rgba(140, 148, 176, 255);
+        c[GBT_ONACC] = rgba(26, 22, 8, 255);
+        c[GBT_FIELD] = rgba(11, 15, 18, 255);
+        c[GBT_FDIM] = rgba(150, 160, 182, 255);
+        c[GBT_ROW] = rgba(30, 48, 54, 255);
+        c[GBT_ROWL] = rgba(120, 136, 152, 255);
+        c[GBT_BTN] = rgba(74, 84, 98, 255);
+        c[GBT_TRACK] = rgba(60, 66, 80, 255);
+        c[GBT_VOLOFF] = rgba(50, 56, 66, 255);
+        c[GBT_HINT] = rgba(48, 38, 160, 255);
+        c[GBT_HINTTXT] = rgba(236, 235, 255, 255);
+        c[GBT_DECO] = rgba(37, 37, 43, 255);
+        c[GBT_BGACC] = t->accent;
+        c[GBT_CUBE1] = rgba(214, 218, 255, 255);
+        c[GBT_CUBE2] = rgba(90, 92, 184, 255);
+    }
+    /* the colours, then the look: 0 the rounded one, 1 System's square one
+     * (older players read only the colours and ignore the extra byte) */
+    uint8_t d[2 * GBT_COUNT + 1];
     for (int i = 0; i < GBT_COUNT; i++) gbp_put16(d + 2 * i, rgb15(c[i]));
+    d[2 * GBT_COUNT] = (uint8_t)(t->system ? 1 : 0);
     gbp_tx_put(&tx, GBP_THEME, d, sizeof(d));
     sent_theme = t;
 }

@@ -1,4 +1,5 @@
-/* theme.h - colour schemes named after the console's own colours. */
+/* theme.h - colour schemes named after the console's own colours, plus
+ * System, which also changes the shapes (Flashcube's look). */
 #pragma once
 #include "gfx.h"
 
@@ -16,10 +17,14 @@ typedef struct {
     Color cursor_fill, cursor_edge;
     Color shadow;
     Color good, bad;
+    int system;                     /* 1: square frames, grid backdrop, gold rings */
 } Theme;
 
-enum { THEME_INDIGO, THEME_JET, THEME_PLATINUM, THEME_SPICE, THEME_COUNT };
+enum { THEME_INDIGO, THEME_JET, THEME_PLATINUM, THEME_SPICE, THEME_SYSTEM, THEME_COUNT };
 
 extern const char *const theme_names[THEME_COUNT];
 const Theme *theme(void);
 void theme_set(int idx);
+
+/* True while the System look is on. */
+static inline int theme_system(void) { return theme()->system; }

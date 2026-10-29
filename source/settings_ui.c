@@ -249,6 +249,16 @@ static void draw_toggle(UiId id, float x, float y, bool on) {
     const Theme *t = theme();
     float k = ui_anim(id, on ? 1.0f : 0.0f, 0.3f);
     float w = 56, h = 28;
+    if (t->system) {   /* Flashcube's switch: a dark well, a glass block that turns gold */
+        ui_field_frame(x + 2, y + 4, w - 4, h - 8);
+        gfx_rect(x + 2, y + 4, (w - 4) * k, h - 8, color_alpha(t->accent, 0.55f * k));
+        float kx = x + k * (w - 26);
+        gfx_rect(kx - 1, y - 1, 28, h + 2, rgba(10, 12, 16, 220));
+        gfx_rect_vgrad(kx, y, 26, h, color_lerp(rgba(220, 226, 236, 255), rgba(255, 244, 150, 255), k),
+                       color_lerp(rgba(110, 120, 136, 255), rgba(170, 140, 30, 255), k));
+        gfx_rect(kx + 2, y + 1, 22, 1, rgba(255, 255, 255, 160));
+        return;
+    }
     gfx_rrect(x, y, w, h, 14, color_lerp(color_alpha(t->button_bottom, 0.7f), t->accent, k));
     gfx_rrect_outline(x, y, w, h, 14, 1.5f, t->panel_edge);
     float kx = x + 14 + k * (w - 28);
@@ -318,8 +328,8 @@ static void draw_picker(bool interactive) {
         float list_h = visible * (row_h + 6) - 6;
         float bh = fmaxf(24, list_h * visible / pick_count);
         float by = ly + (list_h - bh) * pick_scroll / (float)(pick_count - visible);
-        gfx_rrect(px + pw - 13, ly, 4, list_h, 2, color_alpha(t->text_dim, 0.25f));
-        gfx_rrect(px + pw - 13, by, 4, bh, 2, t->accent);
+        gfx_rrect(px + pw - 13, ly, 4, list_h, ui_r(2), color_alpha(t->text_dim, 0.25f));
+        gfx_rrect(px + pw - 13, by, 4, bh, ui_r(2), t->accent);
     }
     /* Cancel sits well clear of the last row */
     if (ui_button(ui_id("pick-cancel", 0), px + pw * 0.3f, py + ph - 56, pw * 0.4f, 40, "Cancel", 17, UIB_NORMAL) ||
@@ -398,7 +408,8 @@ bool settings_ui_frame(bool interactive) {
         if (y + row_h < rows_y || y > rows_y + rows_h) continue;
         bool visible = (y >= rows_y - 4 && y + row_h <= rows_y + rows_h + 4);
         ui_set_input(input_ok && visible);
-        if (r % 2 == 0) gfx_rrect(ox + 8, y + 2, ow - 16, row_h - 4, 10, rgba(255, 255, 255, 18));
+        if (t->system) { if (r % 2 == 0) gfx_rect(ox + 8, y + 2, ow - 16, row_h - 4, rgba(255, 255, 255, 10)); }
+        else if (r % 2 == 0) gfx_rrect(ox + 8, y + 2, ow - 16, row_h - 4, 10, rgba(255, 255, 255, 18));
         char value[300];
         settings_format_value(d, value, sizeof(value));
         float mid = y + row_h * 0.5f;
@@ -425,8 +436,8 @@ bool settings_ui_frame(bool interactive) {
             if (d->type == ST_INT) {
                 float frac = (float)(*setdef_int(d) - d->min) / (float)(d->max - d->min);
                 float bx = ctrl_x + 36, bw = ctrl_w - 72;
-                gfx_rrect(bx, y + row_h - 12, bw, 5, 2.5f, color_alpha(t->button_bottom, 0.6f));
-                gfx_rrect(bx, y + row_h - 12, fmaxf(5, bw * frac), 5, 2.5f, t->accent);
+                gfx_rrect(bx, y + row_h - 12, bw, 5, ui_r(2.5f), color_alpha(t->button_bottom, 0.6f));
+                gfx_rrect(bx, y + row_h - 12, fmaxf(5, bw * frac), 5, ui_r(2.5f), t->accent);
             }
             if (ui_hover(rid, ox + 8, y + 2, ctrl_x - ox - 16, row_h - 4)) help = d->help;
             break;
@@ -434,8 +445,13 @@ bool settings_ui_frame(bool interactive) {
         case ST_STR: {
             text_fit(ox + 20, mid, label_w, 17, false, t->text, d->label);
             bool hov = ui_hover(rid, ox + 8, y + 2, ow - 16, row_h - 4);
-            gfx_rrect(ctrl_x, y + 8, ctrl_w, row_h - 16, 9, t->field_bg);
-            gfx_rrect_outline(ctrl_x, y + 8, ctrl_w, row_h - 16, 9, hov ? 2.0f : 1.0f, hov ? t->accent : t->panel_edge);
+            if (t->system) {
+                ui_field_frame(ctrl_x, y + 8, ctrl_w, row_h - 16);
+                ui_gold_ring(ctrl_x - 2, y + 6, ctrl_w + 4, row_h - 12, ui_anim(rid ^ 0x51u, hov ? 1.0f : 0.0f, 0.25f));
+            } else {
+                gfx_rrect(ctrl_x, y + 8, ctrl_w, row_h - 16, 9, t->field_bg);
+                gfx_rrect_outline(ctrl_x, y + 8, ctrl_w, row_h - 16, 9, hov ? 2.0f : 1.0f, hov ? t->accent : t->panel_edge);
+            }
             bool is_sf2 = d->off == offsetof(Settings, music_sf2);
             const char *vshow = is_sf2 ? sf2_label(g_set.music_sf2) : value;
             int vn = gfx_text_fit(FONT_BODY, 16, vshow, -1, ctrl_w - 20);
@@ -492,12 +508,13 @@ bool settings_ui_frame(bool interactive) {
     if (content_h > rows_h) {
         float bh2 = fmaxf(24, rows_h * rows_h / content_h);
         float by2 = rows_y + (rows_h - bh2) * (scroll / (content_h - rows_h));
-        gfx_rrect(ox + ow - 8, by2, 4, bh2, 2, t->accent);
+        gfx_rrect(ox + ow - 8, by2, 4, bh2, ui_r(2), t->accent);
     }
 
     /* help line */
     float hy = oy + oh - help_h;
-    gfx_rect(ox + 14, hy - 2, ow - 28, 1.5f, color_alpha(t->panel_edge, 0.6f));
+    if (t->system) ui_desc_bar(ox + 10, hy + 4, ow - 20, help_h - 12);   /* help sits in the indigo bar */
+    else gfx_rect(ox + 14, hy - 2, ow - 28, 1.5f, color_alpha(t->panel_edge, 0.6f));
     if (help) {
         /* Too long for the line: wait a moment, glide along to show the rest,
          * pause at the end, then start over. Restarts for each new item. */
@@ -506,14 +523,14 @@ bool settings_ui_frame(bool interactive) {
         if (help != shown_help) { shown_help = help; help_since = ui_time(); }
         float avail = ow - 40, tw = gfx_text_width(FONT_UI, 15, help, -1);
         if (tw <= avail) {
-            gfx_text(FONT_UI, 15, ox + 20, hy + 10, t->text_dim, help, -1);
+            gfx_text(FONT_UI, 15, ox + 20, hy + 10, t->system ? rgba(236, 235, 255, 255) : t->text_dim, help, -1);
         } else {
             const float pause = 1.5f, speed = 45.0f;   /* seconds, units per second */
             float over = tw - avail + 8, run = over / speed;
             float k = fmodf(ui_time() - help_since, pause + run + pause);
             float off = k < pause ? 0 : (k < pause + run ? (k - pause) * speed : over);
             gfx_set_clip(ox + 20, hy, avail, help_h);
-            gfx_text(FONT_UI, 15, ox + 20 - off, hy + 10, t->text_dim, help, -1);
+            gfx_text(FONT_UI, 15, ox + 20 - off, hy + 10, t->system ? rgba(236, 235, 255, 255) : t->text_dim, help, -1);
             gfx_clear_clip();
         }
     }

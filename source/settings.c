@@ -18,7 +18,7 @@ const char *const category_names[CAT_COUNT] = {
 static const char *const video_mode_names[] = { "Auto", "480i", "480p", NULL };
 static const char *const aspect_names[] = { "4:3", "16:9", NULL };
 static const char *const width_names[] = { "Standard (640)", "Full (704)", NULL };
-static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platinum", "Spice", NULL };
+static const char *const theme_choice_names[] = { "Indigo", "Jet Black", "Platinum", "Spice", "System", NULL };
 static const char *const osk_layout_names[] = { "QWERTY", "ABC", NULL };
 static const char *const img_size_names[] = { "Small", "Medium", "Large", NULL };
 static const char *const pic_cache_names[] = { "Off", "25 MB", "50 MB", "100 MB", "250 MB", NULL };
@@ -96,7 +96,7 @@ const SetDef g_setdefs[] = {
     { CAT_DISPLAY, "disp.textsize", "Page text size", ST_INT, O(text_size), 70, 160, 10, NULL, "%",
       "Size of text on web pages." },
     { CAT_DISPLAY, "disp.theme", "Theme", ST_CHOICE, O(theme), 0, THEME_COUNT - 1, 1, theme_choice_names, NULL,
-      "Colour scheme for menus." },
+      "Colour scheme for menus. System gives them the Flashcube look." },
     { CAT_DISPLAY, "disp.anim", "Animations", ST_BOOL, O(animations), 0, 1, 1, NULL, NULL,
       "Menu motion and screen transitions." },
     { CAT_DISPLAY, "disp.loadscreen", "Loading screen", ST_BOOL, O(load_screen), 0, 1, 1, NULL, NULL,

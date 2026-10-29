@@ -37,6 +37,16 @@ static void fmt_time(char *out, size_t cap, float s) {
 static bool toggle_button(const char *id, float cx, float cy, int icon, bool on) {
     const Theme *t = theme();
     const float r = 15;
+    if (t->system) {   /* System: the glass button turns gold */
+        bool hit = ui_icon_button(ui_id(id, 0), cx, cy, r, icon, true);
+        if (on) {
+            float w = r * 1.7f, h = r * 1.45f;
+            gfx_rrect_vgrad(cx - w * 0.5f, cy - h * 0.5f, w, h, 2, rgba(255, 244, 150, 230), rgba(190, 158, 34, 230));
+            gfx_rect(cx - w * 0.5f + 2, cy - h * 0.5f + 1, w - 4, 1, rgba(255, 255, 230, 204));
+            ui_draw_icon(icon, cx, cy, r * 0.95f, t->text_on_accent);
+        }
+        return hit;
+    }
     if (on)   /* soft light around it */
         for (int k = 3; k >= 1; k--)
             gfx_circle(cx, cy, r + 2 + k * 2.5f, color_alpha(t->accent, 0.2f / k));
@@ -69,8 +79,11 @@ bool music_ui_draw(bool interactive) {
     /* now playing */
     MidiState st = midi_state();
     float bx = px + 18, bw = pw - 36, by = py + 54, bh = 92;
-    gfx_rrect(bx, by, bw, bh, 12, t->field_bg);
-    gfx_rrect_outline(bx, by, bw, bh, 12, 1.2f, t->panel_edge);
+    if (t->system) ui_field_frame(bx, by, bw, bh);
+    else {
+        gfx_rrect(bx, by, bw, bh, 12, t->field_bg);
+        gfx_rrect_outline(bx, by, bw, bh, 12, 1.2f, t->panel_edge);
+    }
     const char *ttl = midi_title();
     const char *status = st == MIDI_LOADING ? "Loading instruments..." : st == MIDI_PAUSED ? "Paused" :
                          st == MIDI_PLAYING ? "Now playing" : "Stopped";
@@ -93,8 +106,8 @@ bool music_ui_draw(bool interactive) {
     float tw = gfx_text_width(FONT_UI, 14, tm, -1);
     gfx_text(FONT_UI, 14, bx + bw - 14 - tw, by + 52, color_alpha(t->field_text, 0.65f), tm, -1);
     float gx = bx + 14, gw = bw - 28, gy = by + bh - 16;
-    gfx_rrect(gx, gy, gw, 6, 3, color_alpha(t->panel_edge, 0.5f));
-    if (len > 0) gfx_rrect(gx, gy, fmaxf(6, gw * pos / len), 6, 3, t->accent);
+    gfx_rrect(gx, gy, gw, 6, ui_r(3), color_alpha(t->panel_edge, 0.5f));
+    if (len > 0) gfx_rrect(gx, gy, fmaxf(6, gw * pos / len), 6, ui_r(3), t->accent);
 
     /* controls */
     float cy = by + bh + 34, mid = px + pw * 0.5f;
@@ -116,8 +129,8 @@ bool music_ui_draw(bool interactive) {
     if (ui_icon_button(ui_id("mus-vdn", 0), vx, cy, 12, ICON_LEFT, g_set.music_volume > 0)) g_set.music_volume--;
     if (ui_icon_button(ui_id("mus-vup", 0), vx + 100, cy, 12, ICON_RIGHT, g_set.music_volume < 10)) g_set.music_volume++;
     float vbx = vx + 18, vbw = 64;
-    gfx_rrect(vbx, cy - 3, vbw, 6, 3, color_alpha(t->panel_edge, 0.6f));
-    gfx_rrect(vbx, cy - 3, fmaxf(6, vbw * g_set.music_volume / 10.0f), 6, 3, t->accent);
+    gfx_rrect(vbx, cy - 3, vbw, 6, ui_r(3), color_alpha(t->panel_edge, 0.6f));
+    gfx_rrect(vbx, cy - 3, fmaxf(6, vbw * g_set.music_volume / 10.0f), 6, ui_r(3), t->accent);
     gfx_text_centered(FONT_UI, 12, vbx + vbw * 0.5f, cy + 7, t->text_dim, "VOLUME");
 
     /* song list */
@@ -158,8 +171,8 @@ bool music_ui_draw(bool interactive) {
         if (count > visible) {   /* scroll bar */
             float th = visible * (row_h + gap) - gap;
             float kh = fmaxf(16, th * visible / count), ky = ly + (th - kh) * list_scroll / (count - visible);
-            gfx_rrect(bx + bw - 6, ly, 5, th, 2.5f, color_alpha(t->panel_edge, 0.5f));
-            gfx_rrect(bx + bw - 6, ky, 5, kh, 2.5f, t->accent);
+            gfx_rrect(bx + bw - 6, ly, 5, th, ui_r(2.5f), color_alpha(t->panel_edge, 0.5f));
+            gfx_rrect(bx + bw - 6, ky, 5, kh, ui_r(2.5f), t->accent);
         }
     }
     if (msg[0]) {

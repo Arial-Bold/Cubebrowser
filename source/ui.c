@@ -164,8 +164,94 @@ void ui_safe_area(float *x, float *y, float *w, float *h) {
     *x = mx; *y = my; *w = gfx_width() - 2 * mx; *h = 480.0f - 2 * my;
 }
 
+/* ---------------------------------------------------------- System look
+ * Flashcube's drawing: square frames with a light outer line and a dark
+ * inner one, teal-black fills, the indigo description bar with its fine
+ * grid, frosted rows, grey glass buttons and the gold selection ring. */
+
+float ui_r(float r) { return theme()->system ? fminf(r, 3.0f) : r; }
+
+/* A fine grid fading in from one end (side 1: the right, -1: the left). */
+static void grid_patch(float x, float y, float w, float h, float cell, float span, int side, Color c) {
+    float sw = w * span, x0 = side > 0 ? x + w - sw : x;
+    for (float gy = y + cell * 0.5f; gy < y + h - 1; gy += cell)
+        gfx_rect_hgrad(x0, gy, sw, 1, side > 0 ? color_alpha(c, 0) : c, side > 0 ? c : color_alpha(c, 0));
+    for (int i = 0;; i++) {
+        float gx = side > 0 ? x + w - cell * 0.5f - cell * i : x + cell * 0.5f + cell * i;
+        if (gx < x0 || gx > x0 + sw) break;
+        float k = 1 - (side > 0 ? (x0 + sw - gx) : (gx - x0)) / sw;
+        gfx_rect(gx, y + 1, 1, h - 2, color_alpha(c, k * k));
+    }
+}
+
+void ui_desc_bar(float x, float y, float w, float h) {
+    gfx_rrect_outline(x - 1, y - 1, w + 2, h + 2, 4, 1, rgba(11, 11, 32, 255));
+    gfx_rrect_vgrad(x, y, w, h, 3, rgba(42, 34, 140, 255), rgba(59, 44, 182, 255));
+    grid_patch(x + 1, y + 1, w - 2, h - 2, 7, 0.30f, 1, rgba(190, 190, 255, 41));
+    gfx_rrect_outline(x, y, w, h, 3, 1, rgba(175, 175, 255, 153));
+}
+
+void ui_frost_row(float x, float y, float w, float h) {
+    gfx_rect_vgrad(x, y, w, h, rgba(140, 160, 180, 87), rgba(70, 90, 110, 56));
+    grid_patch(x + 1, y + 1, w - 2, h - 2, 7, 0.45f, -1, rgba(200, 235, 245, 51));
+    gfx_rrect_outline(x, y, w, h, 2, 1, rgba(215, 225, 240, 153));
+}
+
+void ui_gold_ring(float x, float y, float w, float h, float a) {
+    if (a <= 0.01f) return;
+    for (int k = 3; k >= 1; k--)   /* soft glow */
+        gfx_rrect_outline(x - 5 - k * 2, y - 5 - k * 2, w + 10 + k * 4, h + 10 + k * 4, 4 + k * 2, 2.5f,
+                          rgba(240, 210, 80, (u8)(40 * a / k)));
+    gfx_rrect_outline(x - 5, y - 5, w + 10, h + 10, 1, 2, rgba(106, 90, 16, (u8)(255 * a)));
+    gfx_rrect_outline(x - 3, y - 3, w + 6, h + 6, 0, 3, rgba(232, 207, 74, (u8)(255 * a)));
+}
+
+void ui_field_frame(float x, float y, float w, float h) {
+    gfx_rect(x - 2, y - 2, w + 4, h + 4, rgba(190, 200, 215, 128));
+    gfx_rect(x, y, w, h, theme()->field_bg);
+}
+
+static void sys_panel(float x, float y, float w, float h) {
+    gfx_shadow(x, y + 6, w, h, 6, 8, rgba(0, 0, 0, 120));
+    gfx_rrect_outline(x - 3, y - 3, w + 6, h + 6, 6, 2, rgba(200, 208, 220, 140));
+    gfx_rrect_outline(x - 1, y - 1, w + 2, h + 2, 5, 1, rgba(10, 13, 16, 255));
+    /* the teal-black fill: lightest a little above the middle */
+    float h1 = h * 0.35f;
+    gfx_rrect_vgrad(x, y, w, h, 4, rgba(26, 46, 50, 240), rgba(14, 22, 26, 247));
+    gfx_rect_vgrad(x, y + 3, w, h1, rgba(30, 54, 57, 0), rgba(40, 72, 74, 150));
+    gfx_rect_vgrad(x, y + 3 + h1, w, h * 0.4f, rgba(40, 72, 74, 150), rgba(30, 54, 57, 0));
+    float e = fminf(14, fminf(w, h) * 0.3f);   /* darker towards the sides */
+    gfx_rect_hgrad(x, y + 3, e, h - 6, rgba(0, 0, 0, 70), rgba(0, 0, 0, 0));
+    gfx_rect_hgrad(x + w - e, y + 3, e, h - 6, rgba(0, 0, 0, 0), rgba(0, 0, 0, 70));
+    gfx_rect(x + 4, y + 1, w - 8, 1, rgba(255, 255, 255, 46));   /* top light */
+    gfx_rrect_outline(x, y, w, h, 4, 1, rgba(255, 255, 255, 30));
+}
+
+/* Grey glass, or gold when on; hover adds the gold ring. */
+static void sys_button(float x, float y, float w, float h, bool on, bool flat, float hv, bool enabled) {
+    if (!flat) {
+        gfx_rrect_outline(x - 2, y - 2, w + 4, h + 4, 5, 1, on ? rgba(230, 200, 70, 115) : rgba(170, 178, 190, 56));
+        gfx_rrect_outline(x - 1, y - 1, w + 2, h + 2, 4, 1, on ? rgba(40, 32, 4, 230) : rgba(10, 12, 16, 204));
+    }
+    float m = h * 0.5f, k = flat ? 0.55f + 0.45f * hv : (enabled ? 1.0f : 0.5f);
+    Color c0 = on ? rgba(255, 244, 150, 204) : rgba(235, 240, 248, 107);
+    Color c1 = on ? rgba(225, 195, 60, 140) : rgba(170, 180, 195, 56);
+    Color c2 = on ? rgba(170, 140, 30, 158) : rgba(120, 130, 145, 77);
+    if (!on && hv > 0) {   /* a touch brighter under the pointer */
+        c0 = color_lerp(c0, rgba(245, 248, 255, 150), hv);
+        c1 = color_lerp(c1, rgba(190, 200, 215, 90), hv);
+    }
+    gfx_rect(x, y, w, h, rgba(8, 10, 14, (u8)(130 * k)));   /* glass needs something dark behind it */
+    gfx_rrect_vgrad(x, y, w, m, 2, color_alpha(c0, k), color_alpha(c1, k));
+    gfx_rect_vgrad(x, y + m, w, h - m, color_alpha(c1, k), color_alpha(c2, k));
+    gfx_rrect_outline(x, y, w, h, 2, 1, color_alpha(on ? rgba(255, 250, 200, 204) : rgba(235, 240, 250, 140), k));
+    gfx_rect(x + 2, y + 1, w - 4, 1, color_alpha(on ? rgba(255, 255, 230, 204) : rgba(255, 255, 255, 128), k));
+    ui_gold_ring(x, y, w, h, hv);
+}
+
 void ui_panel(float x, float y, float w, float h, float r) {
     const Theme *t = theme();
+    if (t->system) { sys_panel(x, y, w, h); return; }
     gfx_shadow(x + 3, y + 5, w, h, r, 8, t->shadow);
     gfx_rrect_vgrad(x, y, w, h, r, t->panel_top, t->panel_bottom);
     gfx_rrect_vgrad(x + 3, y + 2, w - 6, fminf(h * 0.45f, 40), r - 2, rgba(255, 255, 255, 46), rgba(255, 255, 255, 0));
@@ -188,6 +274,10 @@ bool ui_button(UiId id, float x, float y, float w, float h, const char *label, f
     float bx = x - grow, by = y - grow + press * 2.0f, bw = w + grow * 2, bh = h + grow * 2;
     float r = fminf(bh * 0.5f, 14.0f);
 
+    if (t->system) {   /* glass that stays put; the gold ring shows the pointer */
+        bx = x; by = y + press * 1.5f; bw = w; bh = h;
+        sys_button(bx, by, bw, bh, style == UIB_ACCENT, style == UIB_FLAT, hv, true);
+    } else {
     if (style != UIB_FLAT) gfx_shadow(bx + 1, by + 3, bw, bh, r, 4 + hv * 3, t->shadow);
     if (hv > 0.01f) gfx_rrect(bx - 4, by - 4, bw + 8, bh + 8, r + 4, color_alpha(t->accent, 0.45f * hv));
     Color top = style == UIB_ACCENT ? t->accent_hi : t->button_top;
@@ -196,6 +286,7 @@ bool ui_button(UiId id, float x, float y, float w, float h, const char *label, f
     gfx_rrect_vgrad(bx, by, bw, bh, r, top, bot);
     gfx_rrect_vgrad(bx + 3, by + 2, bw - 6, bh * 0.45f, r - 2, rgba(255, 255, 255, 70), rgba(255, 255, 255, 0));
     gfx_rrect_outline(bx, by, bw, bh, r, 1.5f, color_alpha(t->panel_edge, 0.8f + 0.2f * hv));
+    }
     if (label && *label) {
         Color tc = style == UIB_ACCENT ? t->text_on_accent : t->text;
         float lh = gfx_line_height(FONT_UI, ts);
@@ -205,6 +296,8 @@ bool ui_button(UiId id, float x, float y, float w, float h, const char *label, f
             lh = gfx_line_height(FONT_UI, ts);
             tw = gfx_text_width(FONT_UI, ts, label, -1);
         }
+        if (t->system && style != UIB_ACCENT)   /* a dark drop under light text on glass */
+            gfx_text(FONT_UI, ts, bx + (bw - tw) * 0.5f + 1, by + (bh - lh) * 0.5f + 2, rgba(0, 0, 0, 150), label, -1);
         gfx_text(FONT_UI, ts, bx + (bw - tw) * 0.5f, by + (bh - lh) * 0.5f + 1, tc, label, -1);
     }
     return clicked;
@@ -224,6 +317,12 @@ bool ui_icon_button(UiId id, float cx, float cy, float r, int icon, bool enabled
     float press = ui_anim(id ^ 0x27d4eb2du, (over && input_held(ACT_CLICK)) ? 1.0f : 0.0f, 0.5f);
     float rr = r + hv * 2.5f - press * 2.0f;
     float y = cy + press * 1.5f;
+    if (t->system) {   /* a small square of glass, a little wider than tall */
+        float bw = r * 1.7f, bh = r * 1.45f, yy = cy + press * 1.5f;
+        sys_button(cx - bw * 0.5f, yy - bh * 0.5f, bw, bh, false, false, hv, enabled);
+        ui_draw_icon(icon, cx, yy, r * 0.95f, enabled ? rgba(242, 244, 248, 255) : rgba(242, 244, 248, 90));
+        return clicked;
+    }
     gfx_circle(cx + 1, y + 3, rr + 1, color_alpha(t->shadow, 0.7f));
     if (hv > 0.01f) gfx_circle(cx, y, rr + 4, color_alpha(t->accent, 0.45f * hv));
     Color base = enabled ? t->button_top : color_alpha(t->button_bottom, 0.5f);
@@ -356,6 +455,18 @@ void ui_draw_icon(int icon, float cx, float cy, float s, Color c) {
 void ui_draw_background(void) {
     const Theme *t = theme();
     float w = gfx_width();
+    if (t->system) {   /* Flashcube's backdrop: near black, a 24-unit grid, darker corners */
+        gfx_rect(0, 0, w, 480, t->bg_top);
+        float cx = w * 0.5f;
+        for (float gx = cx - 24 * (int)(cx / 24 + 1); gx < w; gx += 24) gfx_rect(gx, 0, 2, 480, t->bg_cube);
+        for (float gy = 240 - 24 * 11; gy < 480; gy += 24) gfx_rect(0, gy, w, 2, t->bg_cube);
+        float vw = w * 0.32f, vh = 150;
+        gfx_rect_hgrad(0, 0, vw, 480, rgba(0, 0, 0, 150), rgba(0, 0, 0, 0));
+        gfx_rect_hgrad(w - vw, 0, vw, 480, rgba(0, 0, 0, 0), rgba(0, 0, 0, 150));
+        gfx_rect_vgrad(0, 0, w, vh, rgba(0, 0, 0, 120), rgba(0, 0, 0, 0));
+        gfx_rect_vgrad(0, 480 - vh, w, vh, rgba(0, 0, 0, 0), rgba(0, 0, 0, 120));
+        return;
+    }
     gfx_rect_vgrad(0, 0, w, 480, t->bg_top, t->bg_bottom);
     /* soft light pool near the top */
     gfx_rrect(w * 0.15f, -120, w * 0.7f, 260, 130, rgba(255, 255, 255, 14));
@@ -426,6 +537,15 @@ void ui_draw_toast(void) {
     }
     float w = tw + 40, h = 40;
     float x = (gfx_width() - w) * 0.5f, y = 400 - in * 20;
+    if (t->system) {   /* the description bar, fading with the message */
+        gfx_shadow(x + 2, y + 4, w, h, 4, 6, color_alpha(t->shadow, a));
+        gfx_rrect_vgrad(x, y, w, h, 3, rgba(42, 34, 140, (u8)(255 * a)), rgba(59, 44, 182, (u8)(255 * a)));
+        if (a >= 1) ui_desc_bar(x, y, w, h);
+        gfx_text(FONT_UI, ts, x + 20, y + (h - gfx_line_height(FONT_UI, ts)) * 0.5f, rgba(236, 235, 255, (u8)(255 * a)),
+                 toast_msg, tn);
+        if (frame + 1 >= toast_until) toast_msg[0] = 0;
+        return;
+    }
     gfx_shadow(x + 2, y + 4, w, h, 20, 6, color_alpha(t->shadow, a));
     gfx_rrect_vgrad(x, y, w, h, 20, color_alpha(t->accent_hi, a), color_alpha(t->accent, a));
     gfx_text(FONT_UI, ts, x + 20, y + (h - gfx_line_height(FONT_UI, ts)) * 0.5f, color_alpha(t->text_on_accent, a),

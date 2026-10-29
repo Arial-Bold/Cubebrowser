@@ -1,9 +1,9 @@
-/* theme.c - Indigo, Jet Black, Platinum and Spice colour schemes. */
+/* theme.c - Indigo, Jet Black, Platinum, Spice and System colour schemes. */
 #include "theme.h"
 
 #define C(r, g, b, a) { r, g, b, a }
 
-const char *const theme_names[THEME_COUNT] = { "Indigo", "Jet Black", "Platinum", "Spice" };
+const char *const theme_names[THEME_COUNT] = { "Indigo", "Jet Black", "Platinum", "Spice", "System" };
 
 static const Theme themes[THEME_COUNT] = {
     { /* Indigo */
@@ -61,6 +61,21 @@ static const Theme themes[THEME_COUNT] = {
         .page_heading = C(120, 44, 8, 255), .page_rule = C(236, 210, 180, 255),
         .cursor_fill = C(255, 255, 255, 255), .cursor_edge = C(140, 60, 10, 255),
         .shadow = C(90, 30, 0, 120), .good = C(60, 150, 60, 255), .bad = C(200, 40, 30, 255),
+    },
+    { /* System: Flashcube's grid, teal-black panels, gold selection */
+        .name = "System",
+        .bg_top = C(6, 6, 8, 255), .bg_bottom = C(6, 6, 8, 255), .bg_cube = C(37, 37, 43, 255),
+        .panel_top = C(40, 72, 74, 235), .panel_bottom = C(14, 22, 26, 247), .panel_edge = C(200, 208, 220, 140),
+        .button_top = C(130, 140, 156, 255), .button_bottom = C(62, 70, 82, 255),
+        .accent = C(232, 207, 74, 255), .accent_hi = C(255, 244, 150, 255),
+        .text = C(238, 241, 246, 255), .text_dim = C(201, 210, 238, 255), .text_on_accent = C(26, 22, 8, 255),
+        .field_bg = C(11, 15, 18, 255), .field_text = C(238, 241, 246, 255),
+        .page_bg = C(244, 245, 248, 255), .page_text = C(22, 26, 32, 255), .page_dim = C(100, 106, 120, 255),
+        .page_link = C(59, 44, 182, 255), .page_link_hover = C(190, 120, 10, 255),
+        .page_heading = C(42, 34, 140, 255), .page_rule = C(204, 208, 222, 255),
+        .cursor_fill = C(255, 255, 255, 255), .cursor_edge = C(42, 34, 140, 255),
+        .shadow = C(0, 0, 0, 160), .good = C(95, 227, 154, 255), .bad = C(255, 92, 124, 255),
+        .system = 1,
     },
 };
 
