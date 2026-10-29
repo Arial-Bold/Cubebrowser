@@ -61,7 +61,8 @@ bottom-right corner turns green, you're online.
 To upgrade later, use **Settings > Updates > Check for CubeBrowser updates** (or the
 "Update available" bubble on the start page), which downloads the newest
 release from GitHub and installs it, then **Restart CubeBrowser** starts the
-new version straight away. You can also just replace the `.dol`
+new version straight away (the old version is deleted once the new one has
+started, so they don't pile up). You can also just replace the `.dol`
 (`default.dol` or `cubebrowser.dol`) yourself. Your settings, bookmarks and downloads stay put.
 
 ---
@@ -130,12 +131,6 @@ It can be turned off in Settings > Controls > Keyboard controller.
   files on SD card** lists them), or set the Exit button to **Restart console**
   if Swiss starts automatically when your GameCube powers on. If the chosen
   file has moved, the browser looks for a Swiss `.dol` on the card by itself.
-- **Update Swiss:** Settings > Updates > **Check for Swiss updates** compares
-  your Swiss with the newest release on github.com/emukidid/swiss-gc and can
-  install it: it downloads the release, takes out the main Swiss `.dol` and
-  replaces the one the Exit button starts (the old one is kept as `.old`).
-  If your console starts Swiss from `boot.dol` or `ipl.dol`, set **Save new
-  Swiss as** to that name; those are saved at the root of the card.
 - **Loading screen:** while a page loads, an underwater scene fills the page
   window, and the page appears all at once when its styles and the pictures
   on the first screen are in (after 8 seconds at most). Turn it off in
@@ -268,9 +263,10 @@ CubeBrowser asks **"Save to SD card?"**, showing the file's name and size. Hold
   two presses, so it can't be hit by accident.
 - **Interrupted downloads continue where they stopped:** choose Retry, or open
   the same link again later.
-- **Zip files** can be unzipped automatically (**Download & unzip**) or later
-  from the "Download complete" screen. Files go into a folder named after the
-  zip, and the zip can be deleted afterwards if you like.
+- **Zip and 7z files** can be unpacked automatically (**Download & unzip** /
+  **Download & unpack**) or later from the "Download complete" screen. Files
+  go into a folder named after the archive, and a zip can be deleted
+  afterwards if you like.
 - **GameCube saves** (`.gci` files) can be copied straight onto a memory card
   in slot A or B (**To memory card**, or **Copy to memory card** once it's
   downloaded). It shows the game, the save's size and the room on each card,
@@ -304,7 +300,7 @@ defaults.
 | **Music** | Open the music player, the instruments (a SoundFont from the `midi` folder, or built-in), music volume, shuffle, repeat, the glowing note button, and the Game Boy Advance player (on/off). |
 | **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture & style cache, picture labels, maximum page size. |
 | **Security** | Cookies on/off, keep logins after restart, certificate checking and the certificate file. |
-| **Updates** | Check for CubeBrowser updates (now, and automatically at start), check for Swiss updates, and the name to save a new Swiss as (keep its name, numbered, swiss.dol, boot.dol or ipl.dol). |
+| **Updates** | Check for CubeBrowser updates (now, and automatically at start). |
 | **Data** | Exit button action and Swiss `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear picture & style cache, clear history, delete bookmarks, reset all settings. |
 
 A few worth knowing about:
@@ -398,7 +394,9 @@ If you report a problem, please include these files and the page address.
   forms do.
 - **No video, and no sound on web pages.** Animated GIFs show their first frame.
   (MIDI songs from your SD card play in the music player.)
-- **Unzipping** supports standard `.zip` files; 7z, RAR and RVZ aren't
+- **Unpacking** supports standard `.zip` files and `.7z` files packed with
+  LZMA or LZMA2 (7-Zip's usual methods). A `.7z` made with very large solid
+  blocks may not fit in the GameCube's memory; it says so. RAR and RVZ aren't
   supported.
 - **Speed:** very heavy pages can take a few seconds to lay out, and each new
   secure site needs a second or two to connect.
@@ -426,7 +424,8 @@ If you report a problem, please include these files and the page address.
 ## Credits
 
 Built with [libogc2](https://libogc2.org/), [mbedTLS](https://github.com/Mbed-TLS/mbedtls),
-[stb_image](https://github.com/nothings/stb) and the DejaVu fonts. The Game Boy
+[stb_image](https://github.com/nothings/stb), the [LZMA SDK](https://www.7-zip.org/sdk.html)
+by Igor Pavlov (for .7z files) and the DejaVu fonts. The Game Boy
 Advance player is built with devkitARM and [libgba](https://github.com/devkitPro/libgba);
 the way it's sent over the link cable follows the method used by FIX94's
 [GBA Link Cable Dumper](https://github.com/FIX94/gba-link-cable-dumper).
