@@ -582,7 +582,7 @@ static int voice_cap = NVOICES;
  * place of a quieter one instead of adding to the load, so the chip isn't
  * pushed over (each time it is, a little of the music is skipped). */
 static float dsp_load_now, dsp_per_note = 3.5f;
-#define LOAD_ROOM 88.0f
+#define LOAD_ROOM 82.0f   /* room left for the chip's own peaks (88 still ran over now and then) */
 
 static int voice_pick(void) {
     int best = -1, active = 0;
@@ -1134,9 +1134,24 @@ static void *seq_main(void *arg) {
         static float load_peak;
         static int load_over, load_notes, load_cut, cap_low = NVOICES;
         static double load_from, calm_since;
-        static int ceiling = NVOICES;      /* the most notes since the chip last ran over */
-        static int ceiling_song = -2;
-        if (current != ceiling_song) { ceiling_song = current; ceiling = NVOICES; voice_cap = NVOICES; }
+        /* The most notes a song can have at once without running the chip
+         * over, learned the first time it does and kept for that song from
+         * then on (until the browser is restarted), so a busy song skips
+         * once at most instead of again every time the limit crept back up. */
+        static unsigned char learned[512];   /* by the song's name: 0 = not learned yet */
+        static int ceiling = NVOICES;
+        static int ceiling_song = -2, slot = -1;
+        if (current != ceiling_song) {
+            ceiling_song = current;
+            slot = -1;
+            if (current >= 0) {
+                unsigned hsh = 5381;
+                for (const char *c = songs[current]; *c; c++) hsh = hsh * 33 + (unsigned char)*c;
+                slot = (int)(hsh % 512);
+            }
+            ceiling = (slot >= 0 && learned[slot]) ? learned[slot] : NVOICES;
+            voice_cap = ceiling;
+        }
         if (busy) {
             float u = AESND_GetDSPProcessUsage();
             int act = voices_active();
@@ -1150,9 +1165,11 @@ static void *seq_main(void *arg) {
                 load_over++;
                 /* it ran over with this many: stay below it for this song,
                  * creeping back up only after a long calm (below) */
-                int c = act - 2;
+                int c = act - 3;
                 if (c < 12) c = 12;
                 if (c < ceiling) ceiling = c;
+                if (voice_cap > ceiling) voice_cap = ceiling;
+                if (slot >= 0) learned[slot] = (unsigned char)ceiling;
             }
             /* Close to running out of time: let the quietest fading note go
              * and allow fewer notes at once; when it's been calm for a
@@ -1173,13 +1190,10 @@ static void *seq_main(void *arg) {
                 if (cap < voice_cap) voice_cap = cap < 12 ? 12 : cap;
                 if (voice_cap < cap_low) cap_low = voice_cap;
                 calm_since = now;
-            } else if (u < 70 && voice_cap < ceiling && now - calm_since > 4.0) {
+            } else if (u < 65 && voice_cap < ceiling && now - calm_since > 4.0) {
                 voice_cap++;
                 calm_since = now;
             }
-            static double ceiling_calm;
-            if (u >= 95) ceiling_calm = now;
-            else if (ceiling < NVOICES && now - ceiling_calm > 30.0) { ceiling++; ceiling_calm = now; }
             if (now - load_from >= 10) {
                 if (load_peak >= 85 || irq_block_max_us > 400)
                     http_log_note("music   | sound chip load peak %d%% (%d notes), %d blocks over time, %d notes let go, "
