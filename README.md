@@ -58,7 +58,8 @@ bottom-right corner turns green, you're online.
 
 To upgrade later, use **Settings > Updates > Check for CubeBrowser updates** (or the
 "Update available" bubble on the start page), which downloads the newest
-release from GitHub and installs it. You can also just replace
+release from GitHub and installs it, then **Restart CubeBrowser** starts the
+new version straight away. You can also just replace
 `cubebrowser.dol` yourself. Your settings, bookmarks and downloads stay put.
 
 ---
