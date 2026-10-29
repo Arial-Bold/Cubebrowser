@@ -8,6 +8,7 @@
 #include "input.h"
 #include "settings.h"
 #include "sound.h"
+#include "gckbd.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -130,7 +131,11 @@ void osk_frame(void) {
     gfx_text(FONT_UI, 20, px + 20, py + 12, t->text, title, -1);
     const char *hint = "B: Delete  Y: Space  X: Shift  L/R: Move  START: OK";
     float hs = 13;
-    gfx_text(FONT_UI, hs, px + pw - 20 - gfx_text_width(FONT_UI, hs, hint, -1), py + 18, t->text_dim, hint, -1);
+    /* the button hints share the title's line: smaller, or left out, if they'd run into it */
+    float room = pw - 40 - gfx_text_width(FONT_UI, 20, title, -1) - 16;
+    while (hs > 10.5f && gfx_text_width(FONT_UI, hs, hint, -1) > room) hs -= 0.5f;
+    if (gfx_text_width(FONT_UI, hs, hint, -1) <= room)
+        gfx_text(FONT_UI, hs, px + pw - 20 - gfx_text_width(FONT_UI, hs, hint, -1), py + 18, t->text_dim, hint, -1);
 
     draw_field(px + 16, py + 44, pw - 32, 46, 22);
 
@@ -195,6 +200,35 @@ void osk_frame(void) {
             }
         }
         bx += w + gap;
+    }
+
+    /* the keyboard controller: type straight into the box */
+    {
+        KbEvent e;
+        while (kb_next(&e)) {
+            switch (e.key) {
+            case KB_CHAR:
+                if (ip && !((e.ch >= '0' && e.ch <= '9') || e.ch == '.')) break;
+                if (len < maxlen) {
+                    memmove(text + caret + 1, text + caret, (size_t)(len - caret + 1));
+                    text[caret++] = e.ch;
+                    len++;
+                    sound_play(SFX_KEY);
+                }
+                break;
+            case KB_BACKSPACE: backspace(); break;
+            case KB_DELETE:
+                if (caret < len) { memmove(text + caret, text + caret + 1, (size_t)(len - caret)); len--; sound_play(SFX_KEY); }
+                break;
+            case KB_LEFT: if (caret > 0) caret--; break;
+            case KB_RIGHT: if (caret < len) caret++; break;
+            case KB_HOME: caret = 0; break;
+            case KB_END: caret = len; break;
+            case KB_ENTER: kb_clear(); finish(true); return;
+            case KB_ESC: kb_clear(); finish(false); return;
+            default: break;
+            }
+        }
     }
 
     /* controller shortcuts (ignored on the frame the keyboard opened) */

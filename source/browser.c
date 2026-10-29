@@ -24,6 +24,7 @@
 #include "music_ui.h"
 #include "memstat.h"
 #include "gcicard.h"
+#include "gckbd.h"
 #include <ogc/lwp_watchdog.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -1416,6 +1417,12 @@ static void open_address_bar(void) {
              address_done, NULL);
 }
 
+/* Typing on the keyboard controller with no box open starts a new address or search. */
+static void open_address_bar_typed(char first) {
+    char s[2] = { first, 0 };
+    osk_open("Address or search", s, URL_MAX - 1, OSK_URL, address_done, NULL);
+}
+
 static void submit_form(int field, int submit_field) {
     char url[URL_MAX];
     char *post = NULL;
@@ -1718,6 +1725,33 @@ void browser_frame(bool interactive) {
     ui_set_input(interactive && !modal);
     bool input_ok = interactive && !modal;
 
+    /* the keyboard controller: typing opens the address bar, Backspace goes
+     * back, the arrows and page keys scroll, F5 loads the page again */
+    float kb_scroll = 0;
+    int kb_jump = 0;   /* -1 top, 1 bottom */
+    if (input_ok && !osk_active()) {
+        KbEvent e;
+        while (kb_next(&e)) {
+            switch (e.key) {
+            case KB_CHAR:
+                if (e.ch != ' ') { open_address_bar_typed(e.ch); goto kb_done; }
+                kb_scroll += 300;   /* Space pages down, as on a computer */
+                break;
+            case KB_BACKSPACE: if (nback > 0) go_back(); break;
+            case KB_F5: if (has_page && !loading) navigate(page.url, NULL, false); break;
+            case KB_UP: kb_scroll -= 60; break;
+            case KB_DOWN: kb_scroll += 60; break;
+            case KB_PGUP: kb_scroll -= 300; break;
+            case KB_PGDN: kb_scroll += 300; break;
+            case KB_HOME: kb_jump = -1; break;
+            case KB_END: kb_jump = 1; break;
+            default: break;
+            }
+        }
+        kb_clear();
+    }
+kb_done:
+
     /* ---- toolbar */
     float bar_h = 54;
     ui_panel(sx + 4, sy + 4, sw - 8, bar_h, 24);
@@ -1910,7 +1944,9 @@ void browser_frame(bool interactive) {
         /* scrolling */
         if (content_ok) {
             float before = page.scroll_target;
-            page.scroll_target += input_scroll_delta();
+            page.scroll_target += input_scroll_delta() + kb_scroll;
+            if (kb_jump < 0) page.scroll_target = 0;
+            if (kb_jump > 0) page.scroll_target = page.content_h;
             int d = ui_dpad_unhandled();
             if (d == DIR_DOWN) page.scroll_target += 120;
             if (d == DIR_UP) page.scroll_target -= 120;

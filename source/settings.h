@@ -17,6 +17,7 @@ typedef struct {
     int  bind[ACT_COUNT];
     /* Keyboard */
     int  key_repeat, osk_layout;
+    int  kb_enabled;           /* the GameCube keyboard controller (gckbd.c) */
     /* Display */
     int  video_mode, widescreen, margin, text_size, theme, animations, sounds, volume, full_width;
     int  load_screen;          /* the underwater scene while a page loads */

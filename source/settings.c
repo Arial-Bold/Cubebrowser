@@ -84,14 +84,16 @@ const SetDef g_setdefs[] = {
       "Arrangement of letters on the on-screen keyboard." },
     { CAT_CONTROLS, "osk.repeat", "Key repeat speed", ST_INT, O(key_repeat), 1, 10, 1, NULL, NULL,
       "How fast held Backspace and arrow shortcuts repeat." },
+    { CAT_CONTROLS, "kbd.enabled", "Keyboard controller", ST_BOOL, O(kb_enabled), 0, 1, 1, NULL, NULL,
+      "Type with the GameCube keyboard controller (made for Phantasy Star Online) in any controller port." },
     /* Display */
     { CAT_DISPLAY, "disp.aspect", "Aspect ratio", ST_CHOICE, O(widescreen), 0, 1, 1, aspect_names, NULL,
       "Choose 16:9 if your TV stretches the picture to widescreen." },
-    { CAT_DISPLAY, "disp.video", "Video mode", ST_CHOICE, O(video_mode), 0, 2, 1, video_mode_names, NULL,
+    { CAT_DISPLAY, "disp.video", "Resolution", ST_CHOICE, O(video_mode), 0, 2, 1, video_mode_names, NULL,
       "480p needs component cables." },
     { CAT_DISPLAY, "disp.width", "Picture width", ST_CHOICE, O(full_width), 0, 1, 1, width_names, NULL,
       "Full uses the whole width of the TV picture. Standard leaves thin borders at the sides." },
-    { CAT_DISPLAY, "disp.margin", "Screen margin", ST_INT, O(margin), 0, 10, 1, NULL, "%",
+    { CAT_DISPLAY, "disp.margin", "Overscan", ST_INT, O(margin), 0, 10, 1, NULL, "%",
       "Raise this if the edges are cut off on your TV." },
     { CAT_DISPLAY, "disp.textsize", "Page text size", ST_INT, O(text_size), 70, 160, 10, NULL, "%",
       "Size of text on web pages." },
@@ -216,6 +218,7 @@ void settings_defaults(Settings *s) {
     s->bind[ACT_PAGE_UP] = BTN_L;
     s->bind[ACT_PAGE_DOWN] = BTN_R;
     s->key_repeat = 5;
+    s->kb_enabled = 1;
     s->osk_layout = 0;
     s->video_mode = VMODE_AUTO;
     s->widescreen = 0;

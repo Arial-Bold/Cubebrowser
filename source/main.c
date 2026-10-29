@@ -15,6 +15,7 @@
 #include "fetch.h"
 #include "ui.h"
 #include "osk.h"
+#include "gckbd.h"
 #include "browser.h"
 #include "diag.h"
 #include "gbalink.h"
@@ -97,6 +98,7 @@ int main(int argc, char **argv) {
         diag_frame();
         diag_note(DIAG_MAIN, "reading controller");
         input_update();
+        kb_update();
         gbalink_frame();
         ui_begin_frame();
         gfx_begin_frame();

@@ -2,4 +2,4 @@
  * websites in the browser's identity string. Change it here only. */
 #pragma once
 
-#define CB_VERSION "2.5"
+#define CB_VERSION "2.6"
