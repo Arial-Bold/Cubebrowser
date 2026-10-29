@@ -171,16 +171,25 @@ void ui_safe_area(float *x, float *y, float *w, float *h) {
 
 float ui_r(float r) { return theme()->system ? fminf(r, 3.0f) : r; }
 
-/* A fine grid fading in from one end (side 1: the right, -1: the left). */
+/* A fine grid fading in from one end (side 1: the right, -1: the left).
+ * Every line is one screen pixel wide and starts on a whole pixel, and the
+ * cells are a whole number of pixels, so the spacing stays even (in 16:9 a
+ * drawing unit is less than a pixel, which made the gaps uneven). */
 static void grid_patch(float x, float y, float w, float h, float cell, float span, int side, Color c) {
+    float px = gfx_pixel_w(), py = gfx_pixel_h();
+    float cx = fmaxf(2, roundf(cell / px)) * px, cy = fmaxf(2, roundf(cell / py)) * py;
     float sw = w * span, x0 = side > 0 ? x + w - sw : x;
-    for (float gy = y + cell * 0.5f; gy < y + h - 1; gy += cell)
-        gfx_rect_hgrad(x0, gy, sw, 1, side > 0 ? color_alpha(c, 0) : c, side > 0 ? c : color_alpha(c, 0));
+    float top = ceilf(y / py) * py;
+    for (float gy = top + cy * 0.5f; gy < y + h - py; gy += cy) {
+        gy = roundf(gy / py) * py;
+        gfx_rect_hgrad(x0, gy, sw, py, side > 0 ? color_alpha(c, 0) : c, side > 0 ? c : color_alpha(c, 0));
+    }
+    float edge = side > 0 ? floorf((x + w) / px) * px : ceilf(x / px) * px;
     for (int i = 0;; i++) {
-        float gx = side > 0 ? x + w - cell * 0.5f - cell * i : x + cell * 0.5f + cell * i;
+        float gx = side > 0 ? edge - roundf(cx * 0.5f / px) * px - cx * i : edge + roundf(cx * 0.5f / px) * px + cx * i;
         if (gx < x0 || gx > x0 + sw) break;
         float k = 1 - (side > 0 ? (x0 + sw - gx) : (gx - x0)) / sw;
-        gfx_rect(gx, y + 1, 1, h - 2, color_alpha(c, k * k));
+        gfx_rect(gx, top + py, px, h - 2 * py, color_alpha(c, k * k));
     }
 }
 
@@ -234,9 +243,9 @@ static void sys_button(float x, float y, float w, float h, bool on, bool flat, f
         gfx_rrect_outline(x - 1, y - 1, w + 2, h + 2, 4, 1, on ? rgba(40, 32, 4, 230) : rgba(10, 12, 16, 204));
     }
     float m = h * 0.5f, k = flat ? 0.55f + 0.45f * hv : (enabled ? 1.0f : 0.5f);
-    Color c0 = on ? rgba(255, 244, 150, 204) : rgba(235, 240, 248, 107);
-    Color c1 = on ? rgba(225, 195, 60, 140) : rgba(170, 180, 195, 56);
-    Color c2 = on ? rgba(170, 140, 30, 158) : rgba(120, 130, 145, 77);
+    Color c0 = on ? rgba(255, 248, 178, 240) : rgba(235, 240, 248, 107);   /* gold: bright all the way down */
+    Color c1 = on ? rgba(244, 218, 98, 232) : rgba(170, 180, 195, 56);
+    Color c2 = on ? rgba(222, 192, 70, 232) : rgba(120, 130, 145, 77);
     if (!on && hv > 0) {   /* a touch brighter under the pointer */
         c0 = color_lerp(c0, rgba(245, 248, 255, 150), hv);
         c1 = color_lerp(c1, rgba(190, 200, 215, 90), hv);

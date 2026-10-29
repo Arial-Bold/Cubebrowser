@@ -1488,7 +1488,7 @@ static void draw_clock(float right_x, float y) {
     int h12 = tmv.tm_hour % 12;
     snprintf(buf, sizeof(buf), "%d:%02d %s", h12 ? h12 : 12, tmv.tm_min, tmv.tm_hour < 12 ? "AM" : "PM");
     float w = gfx_text_width(FONT_UI, 15, buf, -1);
-    gfx_text(FONT_UI, 15, right_x - w, y, t->system ? rgba(201, 198, 255, 255) : t->text, buf, -1);
+    gfx_text(FONT_UI, 15, right_x - w, y, t->text, buf, -1);
 }
 
 /* Exit button: press twice (within 3 seconds) to leave the browser. */
@@ -1621,7 +1621,7 @@ void browser_frame(bool interactive) {
         float gw = r * 1.7f, gh = r * 1.45f, gx = right - 88 - gw * 0.5f, gy = by - gh * 0.5f;
         for (int k = 3; k >= 1; k--)
             gfx_rrect(gx - k * 2.5f, gy - k * 2.5f, gw + k * 5, gh + k * 5, 2 + k * 2.5f, color_alpha(t->accent, (0.12f + 0.1f * pulse) / k));
-        gfx_rrect_vgrad(gx, gy, gw, gh, 2, rgba(255, 244, 150, (u8)(190 + 50 * pulse)), rgba(190, 158, 34, (u8)(190 + 50 * pulse)));
+        gfx_rrect_vgrad(gx, gy, gw, gh, 2, rgba(255, 248, 178, (u8)(200 + 50 * pulse)), rgba(222, 192, 70, (u8)(200 + 50 * pulse)));
         gfx_rect(gx + 2, gy + 1, gw - 4, 1, rgba(255, 255, 230, 204));
         ui_draw_icon(ICON_MUSIC, right - 88, by, r * 0.95f, t->text_on_accent);
     } else if (music_on) {   /* the button face itself lights up */
@@ -1664,6 +1664,7 @@ void browser_frame(bool interactive) {
     /* ---- content area (not while the loading screen covers it) */
     bool content_ok = input_ok && !veil_covering();
     float cx = sx + 8, cy = sy + bar_h + 16, cw = sw - 16, ch = sh - bar_h - 16 - 34;
+    if (t->system) { cx = sx + 4; cw = sw - 8; }   /* as wide as the toolbar above */
     float pr = ui_r(14);
     if (sys) gfx_rect(cx - 2, cy - 2, cw + 4, ch + 4, rgba(190, 200, 215, 128));   /* light frame */
     else gfx_shadow(cx + 2, cy + 4, cw, ch, 14, 6, t->shadow);
@@ -1904,9 +1905,8 @@ void browser_frame(bool interactive) {
     if (veil.on)   /* over the page area only; the status bar below says what's loading */
         underwater_draw(cx, cy, cw, ch, veil.a, ui_time());
 
-    /* ---- status bar (System: inside the indigo description bar) */
+    /* ---- status bar */
     float sbx = sx + 14, sby = sy + sh - 28;
-    if (sys) ui_desc_bar(sx + 6, sby - 3, sw - 12, 25);
     char status[300];
     int pics_left = 0;
     if (loading) {
@@ -1934,7 +1934,7 @@ void browser_frame(bool interactive) {
     }
     float status_w = sw - 150 - (sbx - sx);
     int sn = gfx_text_fit(FONT_UI, 15, status, -1, status_w);
-    gfx_text(FONT_UI, 15, sbx, sby, sys ? rgba(236, 235, 255, 255) : t->text, status, sn);
+    gfx_text(FONT_UI, 15, sbx, sby, t->text, status, sn);
     Color dot = netio_state() == NET_UP ? t->good : (netio_state() == NET_FAILED ? t->bad : t->accent);
     gfx_circle(sx + sw - 110, sby + 10, 5, dot);
     draw_clock(sx + sw - 14, sby);

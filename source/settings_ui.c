@@ -255,7 +255,7 @@ static void draw_toggle(UiId id, float x, float y, bool on) {
         float kx = x + k * (w - 26);
         gfx_rect(kx - 1, y - 1, 28, h + 2, rgba(10, 12, 16, 220));
         gfx_rect_vgrad(kx, y, 26, h, color_lerp(rgba(220, 226, 236, 255), rgba(255, 244, 150, 255), k),
-                       color_lerp(rgba(110, 120, 136, 255), rgba(170, 140, 30, 255), k));
+                       color_lerp(rgba(110, 120, 136, 255), rgba(222, 192, 70, 255), k));
         gfx_rect(kx + 2, y + 1, 22, 1, rgba(255, 255, 255, 160));
         return;
     }

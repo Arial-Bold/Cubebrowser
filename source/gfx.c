@@ -191,6 +191,8 @@ void gfx_set_widescreen(bool w) {
 bool gfx_widescreen(void) { return wide; }
 float gfx_width(void) { return vw; }
 float gfx_height(void) { return 480.0f; }
+float gfx_pixel_w(void) { return vw / rmode->fbWidth; }
+float gfx_pixel_h(void) { return 480.0f / rmode->efbHeight; }
 bool gfx_has_component_cable(void) { return VIDEO_HaveComponentCable(); }
 
 const char *gfx_mode_name(void) {

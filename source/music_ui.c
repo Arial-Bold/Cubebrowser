@@ -41,7 +41,7 @@ static bool toggle_button(const char *id, float cx, float cy, int icon, bool on)
         bool hit = ui_icon_button(ui_id(id, 0), cx, cy, r, icon, true);
         if (on) {
             float w = r * 1.7f, h = r * 1.45f;
-            gfx_rrect_vgrad(cx - w * 0.5f, cy - h * 0.5f, w, h, 2, rgba(255, 244, 150, 230), rgba(190, 158, 34, 230));
+            gfx_rrect_vgrad(cx - w * 0.5f, cy - h * 0.5f, w, h, 2, rgba(255, 248, 178, 240), rgba(222, 192, 70, 240));
             gfx_rect(cx - w * 0.5f + 2, cy - h * 0.5f + 1, w - 4, 1, rgba(255, 255, 230, 204));
             ui_draw_icon(icon, cx, cy, r * 0.95f, t->text_on_accent);
         }

@@ -26,6 +26,10 @@ void  gfx_set_widescreen(bool wide);
 bool  gfx_widescreen(void);
 float gfx_width(void);   /* 640 or 854 */
 float gfx_height(void);  /* 480 */
+/* Size of one screen pixel in drawing units (wider than 1 in 16:9), for
+ * fine lines that must land on whole pixels. */
+float gfx_pixel_w(void);
+float gfx_pixel_h(void);
 bool  gfx_has_component_cable(void);
 const char *gfx_mode_name(void);
 
