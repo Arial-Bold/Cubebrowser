@@ -380,6 +380,11 @@ static void start_load(const char *url, const char *post) {
             home_update_reset();
             if (update_state() == UPD_NONE || update_state() == UPD_CHECK_FAILED) update_request_check(false);
         }
+        else if (!strcasecmp(url, "about:console")) {   /* the last page's script log */
+            static char html[12288];
+            js_console_html(html, sizeof(html));
+            show_html(html, "about:console", false);
+        }
         else if (!strcasecmp(url, "about:js")) {   /* the JavaScript speed test (the screen waits a moment while it runs) */
             static char html[12288];
             js_speed_test_html(html, sizeof(html));

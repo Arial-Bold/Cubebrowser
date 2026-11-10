@@ -37,5 +37,8 @@ int  js_take_navigation(char *url, size_t cap, int *field);
 const char *js_take_message(void);   /* alert() text, or a note about a stopped script */
 bool js_busy(void);                  /* scripts still to run before the page is ready */
 
+/* about:console: the last page's script files, errors and console messages. */
+void js_console_html(char *out, size_t cap);
+
 /* The speed test on about:js (a few seconds). */
 void js_speed_test_html(char *out, size_t cap);

@@ -61,6 +61,8 @@ typedef struct {
     char *code;          /* a downloaded file's code (owned) */
     size_t len;
     unsigned char state;
+    unsigned char dynamic;   /* added by a script (it gets a load or error event) */
+    unsigned char failed;    /* its file couldn't be downloaded */
 } Script;
 
 static struct {
@@ -92,6 +94,24 @@ static struct {
 } J;
 
 static void queue_add_at(Node *n, int at);
+
+/* -------------------------------------------------------------- the log
+ * What happened with the last page's scripts (files, errors, console
+ * messages), for about:console: kept when you go there to read it. */
+#define LOG_LINES 40
+static char log_lines[LOG_LINES][180];
+static int log_count;
+static char log_page[256];
+
+static void jslog(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void jslog(const char *fmt, ...) {
+    char *l = log_lines[log_count % LOG_LINES];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(l, sizeof(log_lines[0]), fmt, ap);
+    va_end(ap);
+    log_count++;
+}
 
 /* ------------------------------------------------- elements handed out */
 
@@ -611,6 +631,7 @@ FN(n_rm_attr) {
 FN(n_text) {
     UNUSED;
     Node *n = NODE(c, argv[0]);
+    if (n && n->tag == TAG_SCRIPT) return JS_NewStringLen(c, n->text ? n->text : "", n->text ? (size_t)n->len : 0);
     Buf b = { 0 };
     if (n) text_into(n, &b, 0);
     return buf_value(c, &b);
@@ -622,7 +643,10 @@ FN(n_set_text) {
     size_t len;
     const char *s = arg_str(c, argv[1], &len);
     Dom *d = DOM();
-    if (n && s && d) {
+    if (n && s && d && n->tag == TAG_SCRIPT) {   /* a script's code: kept as it is */
+        char *code = arena_strndup(&d->arena, s, len);
+        if (code) { n->text = code; n->len = (int)len; }
+    } else if (n && s && d) {
         if (n->type == NT_TEXT) {
             Node *t = dom_create_text(d, s, len);
             if (t) { n->text = t->text; n->len = t->len; }
@@ -666,7 +690,10 @@ FN(n_set_inner) {
     Dom *d = DOM();
     if (n && s && d && n->type == NT_ELEM) {
         while (n->first) dom_detach(n->first);
-        if (n->tag == TAG_SCRIPT || n->tag == TAG_STYLE) {
+        if (n->tag == TAG_SCRIPT) {
+            char *code = arena_strndup(&d->arena, s, len);
+            if (code) { n->text = code; n->len = (int)len; }
+        } else if (n->tag == TAG_STYLE) {
             Node *t = dom_create_text(d, s, len);
             if (t) dom_append(n, t);
         } else {
@@ -699,8 +726,20 @@ FN(n_create_text) {
     return H(c, n);
 }
 
+/* <script> elements a script put into the page run too (loaders do this) */
+static void queue_added_scripts(Node *n, int depth) {
+    if (n->type != NT_ELEM || depth > 50) return;
+    if (n->tag == TAG_SCRIPT && n->sub != 1) {
+        int before = J.nq;
+        queue_add_at(n, -1);
+        if (J.nq > before) J.q[J.nq - 1].dynamic = 1;
+        return;
+    }
+    for (Node *k = n->first; k; k = k->next) queue_added_scripts(k, depth + 1);
+}
+
 static void inserted(Node *child) {
-    if (is_connected(child)) page_dom_added(J.page, child);
+    if (is_connected(child)) { page_dom_added(J.page, child); queue_added_scripts(child, 0); }
     if (child->parent) button_caption(child->parent);
     changed();
 }
@@ -1045,6 +1084,7 @@ FN(n_log) {
     const char *s = JS_ToCString(c, argv[0]);
     if (s) {
         diag_note(DIAG_PAGE, "script: %.150s", s);
+        jslog("console: %.160s", s);
 #ifndef GEKKO
         fprintf(stderr, "[console] %s\n", s);
 #endif
@@ -1156,12 +1196,19 @@ static void report_exception(void) {
         J.stopped_now = false;
         J.stops++;
         snprintf(J.message, sizeof(J.message), "A script on this page took too long and was stopped.");
-        if (J.stops >= 3) J.failed = true;   /* (it keeps happening: no more scripts on this page) */
+        jslog("STOPPED: a script ran too long");
+        if (J.stops >= 3) { J.failed = true; jslog("Scripts turned off for this page (stopped 3 times)"); }
     } else {
         const char *s = JS_ToCString(J.ctx, e);
         JSValue stack = JS_GetPropertyStr(J.ctx, e, "stack");
         const char *st = JS_IsUndefined(stack) ? NULL : JS_ToCString(J.ctx, stack);
         diag_note(DIAG_PAGE, "script error: %.100s %.80s", s ? s : "?", st ? st : "");
+        {   /* the log: the error, and where (the first line of the stack) */
+            const char *at = st ? strstr(st, "at ") : NULL;
+            char where[100] = "";
+            if (at) { size_t k = 0; at += 3; while (at[k] && at[k] != '\n' && k < sizeof(where) - 1) { where[k] = at[k]; k++; } where[k] = 0; }
+            jslog("ERROR: %.90s%s%.80s", s ? s : "?", where[0] ? " | " : "", where);
+        }
 #ifndef GEKKO
         fprintf(stderr, "[js] %s\n%s\n", s ? s : "?", st ? st : "");   /* (PC tests) */
 #endif
@@ -1219,7 +1266,7 @@ static void start_context(void) {
     if (J.started || J.failed) return;
     J.started = true;
     J.rt = JS_NewRuntime2(&jm_funcs, NULL);
-    if (!J.rt) { J.failed = true; return; }
+    if (!J.rt) { J.failed = true; jslog("Not enough memory to start JavaScript"); return; }
     size_t free_now = cb_mem_free();
     size_t limit = free_now / 3;
     if (limit > 6 * 1024 * 1024) limit = 6 * 1024 * 1024;
@@ -1235,7 +1282,7 @@ static void start_context(void) {
     JS_SetPropertyStr(J.ctx, global, "__n", n);
     J.deadline = now_ms() + LOAD_TIME_LIMIT;
     JSValue api = JS_Eval(J.ctx, js_prelude, js_prelude_len, "<browser>", JS_EVAL_TYPE_GLOBAL);
-    if (JS_IsException(api)) { report_exception(); J.failed = true; JS_FreeValue(J.ctx, global); return; }
+    if (JS_IsException(api)) { report_exception(); J.failed = true; jslog("The browser's own script part failed to start"); JS_FreeValue(J.ctx, global); return; }
     J.fn_timers = JS_GetPropertyStr(J.ctx, api, "timers");
     J.fn_dispatch = JS_GetPropertyStr(J.ctx, api, "dispatch");
     J.fn_loaded = JS_GetPropertyStr(J.ctx, api, "loaded");
@@ -1310,6 +1357,7 @@ static void apply_changes(bool from_timer) {
     if (d && (d->arena.used > J.arena_start + DOM_GROWTH_MAX || cb_mem_free() < MEM_FLOOR) && !J.failed) {
         J.failed = true;   /* (the page itself stays as it is) */
         snprintf(J.message, sizeof(J.message), "This page's scripts were stopped: they were using too much memory.");
+        jslog("STOPPED: scripts were using too much memory");
     }
     double t = now_ms();
     if (from_timer && t - J.last_relayout < TIMER_RELAYOUT_MS) return;
@@ -1330,7 +1378,14 @@ static bool runnable_type(const Node *n) {
 }
 
 static void queue_add_at(Node *n, int at) {
-    if (!runnable_type(n) || J.nq >= DOM_MAX_SCRIPTS * 2) return;
+    if (n->sub == 1) return;   /* queued already */
+    n->sub = 1;
+    if (!runnable_type(n)) {
+        const char *t = dom_attr(n, "type"), *src = dom_attr(n, "src");
+        if (t && (strstr(t, "module") || strstr(t, "MODULE"))) jslog("Skipped a module script (not supported yet)%s%.100s", src ? ": " : "", src ? src : "");
+        return;
+    }
+    if (J.nq >= DOM_MAX_SCRIPTS * 2) { jslog("Too many scripts: the rest are skipped"); return; }
     if (J.nq == J.capq) {
         int nc = J.capq ? J.capq * 2 : 32;
         Script *ns = realloc(J.q, sizeof(Script) * (size_t)nc);
@@ -1379,6 +1434,10 @@ void js_page_begin(Page *p) {
     if (!g_set.javascript || !p || !p->dom || !dom_keep_scripts) return;
     J.page = p;
     J.arena_start = p->dom->arena.used;
+    if (strncasecmp(p->url, "about:", 6)) {   /* (about: pages, like the log itself, keep the last one) */
+        log_count = 0;
+        snprintf(log_page, sizeof(log_page), "%s", p->url);
+    }
     for (int i = 0; i < p->dom->nscript_nodes; i++) queue_add_at(p->dom->scripts[i], -1);
 }
 
@@ -1401,10 +1460,14 @@ void js_script_loaded(int idx, char *body, size_t len) {
         s->len = len;
         s->state = SQ_READY;
         J.total += len;
+        jslog("Downloaded %u KB: %.140s", (unsigned)((len + 1023) / 1024), s->url);
     } else {
-        if (body && len > SCRIPT_MAX) diag_note(DIAG_PAGE, "script too big (%u KB): %.100s", (unsigned)(len / 1024), s->url);
+        if (!body) jslog("FAILED to download: %.140s", s->url);
+        else if (len > SCRIPT_MAX) jslog("Skipped (too big, %u KB): %.120s", (unsigned)(len / 1024), s->url);
+        else if (len) jslog("Skipped (too much script on this page): %.120s", s->url);
         free(body);
         s->state = SQ_DONE;
+        s->failed = 1;
     }
 }
 
@@ -1413,6 +1476,13 @@ bool js_scripts_pending(void) {
     for (int i = J.next; i < J.nq; i++)
         if (J.q[i].state == SQ_NEED || J.q[i].state == SQ_LOADING) return true;
     return false;
+}
+
+/* a script element's load or error event (loaders wait for it) */
+static void script_event(Node *n, const char *type) {
+    if (!J.started || J.failed || !n) return;
+    EventJob e = { n, type, false };
+    run_with_big_stack(event_job, &e);
 }
 
 bool js_busy(void) { return ready() && (J.next < J.nq || (!J.loaded && J.nq)); }
@@ -1434,6 +1504,10 @@ void js_frame(void) {
             }
             free(s->code);
             s->code = NULL;
+            if (s->url || s->dynamic) script_event(s->node, "load");
+        } else if (s->failed && (s->url || s->dynamic)) {
+            s->failed = 0;
+            script_event(s->node, "error");
         }
         J.next++;
         if (now_ms() - start > 400) break;   /* (let the screen update now and then) */
@@ -1496,6 +1570,38 @@ const char *js_take_message(void) {
     snprintf(out, sizeof(out), "%s", J.message);
     J.message[0] = 0;
     return out;
+}
+
+/* ---------------------------------------------------------- about:console */
+
+static void html_escape_into(char *out, size_t cap, size_t *k, const char *s) {
+    for (; *s && *k + 8 < cap; s++) {
+        if (*s == '<') *k += (size_t)snprintf(out + *k, cap - *k, "&lt;");
+        else if (*s == '>') *k += (size_t)snprintf(out + *k, cap - *k, "&gt;");
+        else if (*s == '&') *k += (size_t)snprintf(out + *k, cap - *k, "&amp;");
+        else out[(*k)++] = *s;
+    }
+    out[*k] = 0;
+}
+
+void js_console_html(char *out, size_t cap) {
+    size_t k = 0;
+    if (!cap) return;
+    out[0] = 0;
+    k += (size_t)snprintf(out + k, cap - k, "<title>Script log</title><h2>Script log</h2><p>What happened with the scripts on ");
+    if (log_page[0]) html_escape_into(out, cap, &k, log_page);
+    else k += (size_t)snprintf(out + k, cap - k, "(no page yet)");
+    k += (size_t)snprintf(out + k, cap - k, ":</p>");
+    if (!log_count) k += (size_t)snprintf(out + k, cap - k, "<p>Nothing to report: no script files, errors or messages.</p>");
+    int first = log_count > LOG_LINES ? log_count - LOG_LINES : 0;
+    if (first) k += (size_t)snprintf(out + k, cap - k, "<p>(the first %d lines are left out)</p>", first);
+    k += (size_t)snprintf(out + k, cap - k, "<ol>");
+    for (int i = first; i < log_count && k + 400 < cap; i++) {
+        k += (size_t)snprintf(out + k, cap - k, "<li>");
+        html_escape_into(out, cap, &k, log_lines[i % LOG_LINES]);
+        k += (size_t)snprintf(out + k, cap - k, "</li>");
+    }
+    if (k + 120 < cap) k += (size_t)snprintf(out + k, cap - k, "</ol><p><a href=\"about:home\">Start page</a></p>");
 }
 
 /* ================================================================ speed test */
