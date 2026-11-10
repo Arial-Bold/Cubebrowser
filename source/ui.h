@@ -40,7 +40,10 @@ void  ui_panel(float x, float y, float w, float h, float r);
 void  ui_draw_icon(int icon, float cx, float cy, float size, Color c);
 void  ui_draw_background(void);
 void  ui_draw_cursor(void);
-void  ui_spinner(float cx, float cy, float size);
+void  ui_spinner(float cx, float cy, float size);   /* the logo, its satellite circling */
+/* CubeBrowser's logo, size px across; sat = where the satellite is on its ring
+ * (radians; 0.677 is its place in the still logo). */
+void  ui_logo(float cx, float cy, float size, float sat, float alpha);
 void  ui_safe_area(float *x, float *y, float *w, float *h);
 /* The System look's own pieces (they also work in the other themes). */
 float ui_r(float r);                /* corner radius: small and square-ish in System */

@@ -2262,20 +2262,20 @@ kb_done:
         int kb = fetch_progress() / 1024;
         if (kb > 0) snprintf(status, sizeof(status), "%s %d KB", fetch_stage(), kb);
         else snprintf(status, sizeof(status), "%s", fetch_stage());
-        ui_spinner(sbx + 8, sby + 10, 14);
-        sbx += 24;
+        ui_spinner(sbx + 11, sby + 10, 14);
+        sbx += 28;
     } else if (hover_link >= 0) {
         snprintf(status, sizeof(status), "%s", page_link_url(&page, hover_link));
     } else if (home_hover) {
         snprintf(status, sizeof(status), "%s", home_hover);
     } else if (has_page && sheets_pending() && netio_state() == NET_UP) {
         snprintf(status, sizeof(status), "Loading page styles...");
-        ui_spinner(sbx + 8, sby + 10, 14);
-        sbx += 24;
+        ui_spinner(sbx + 11, sby + 10, 14);
+        sbx += 28;
     } else if (has_page && g_set.load_images && (pics_left = images_pending()) > 0 && netio_state() == NET_UP) {
         snprintf(status, sizeof(status), "Loading pictures (%d left)", pics_left);
-        ui_spinner(sbx + 8, sby + 10, 14);
-        sbx += 24;
+        ui_spinner(sbx + 11, sby + 10, 14);
+        sbx += 28;
     } else if (netio_state() != NET_UP) {
         snprintf(status, sizeof(status), "%s", fetch_stage()[0] ? fetch_stage() : netio_status());
     } else {

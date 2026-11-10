@@ -490,11 +490,68 @@ void ui_draw_background(void) {
     }
 }
 
+/* CubeBrowser's logo: an indigo cube with a gold ring around it, tilted, and
+ * a white satellite on the ring. Drawn from shapes (no picture), 240 units
+ * across scaled to size. The ring's far half goes behind the cube and its near
+ * half in front; the satellite too, by where it is. */
+#define LOGO_RING_TILT (-16.0f * (float)M_PI / 180.0f)
+#define LOGO_SAT_REST 0.677f   /* where the satellite sits in the still logo */
+
+static void logo_ring_pt(float cx, float cy, float k, float t, float *x, float *y) {
+    float ex = 108 * cosf(t), ey = 32 * sinf(t);
+    float c = cosf(LOGO_RING_TILT), s = sinf(LOGO_RING_TILT);
+    *x = cx + (ex * c - ey * s) * k;
+    *y = cy + (ex * s + ey * c) * k;
+}
+
+/* half the ring: from angle t0 to t1 (radians) */
+static void logo_ring_half(float cx, float cy, float k, float t0, float t1, Color c) {
+    const int n = 20;
+    float th = 11 * k;
+    float px, py;
+    logo_ring_pt(cx, cy, k, t0, &px, &py);
+    if (th > 2.5f) gfx_circle(px, py, th * 0.5f, c);
+    for (int i = 1; i <= n; i++) {
+        float x, y;
+        logo_ring_pt(cx, cy, k, t0 + (t1 - t0) * i / n, &x, &y);
+        gfx_line(px, py, x, y, th, c);
+        if (th > 2.5f) gfx_circle(x, y, th * 0.5f, c);   /* (round joins) */
+        px = x;
+        py = y;
+    }
+}
+
+void ui_logo(float cx, float cy, float size, float sat, float alpha) {
+    float k = size / 240.0f;
+    Color gold = color_alpha(rgba(242, 201, 76, 255), alpha);
+    Color white = color_alpha(rgba(255, 255, 255, 255), alpha);
+    sat = fmodf(sat, 2 * (float)M_PI);
+    if (sat < 0) sat += 2 * (float)M_PI;
+    bool sat_front = sat < (float)M_PI;   /* the lower half of the ring is the near one */
+    float sx, sy;
+    logo_ring_pt(cx, cy, k, sat, &sx, &sy);
+    float sr = 13 * k;
+    if (sr < 1.5f) sr = 1.5f;
+    /* far half of the ring, and the satellite when it's back there */
+    logo_ring_half(cx, cy, k, (float)M_PI, 2 * (float)M_PI, gold);
+    if (!sat_front) gfx_circle(sx, sy, sr, white);
+    /* the cube (64 units: the 80-unit cube at 0.8) */
+    float s = 64 * k, w = s * 0.866f;
+    float top[8] = { cx, cy - s, cx + w, cy - s * 0.5f, cx, cy, cx - w, cy - s * 0.5f };
+    float left[8] = { cx - w, cy - s * 0.5f, cx, cy, cx, cy + s, cx - w, cy + s * 0.5f };
+    float right[8] = { cx, cy, cx + w, cy - s * 0.5f, cx + w, cy + s * 0.5f, cx, cy + s };
+    gfx_quad(top, color_alpha(rgba(143, 138, 242, 255), alpha));
+    gfx_quad(left, color_alpha(rgba(74, 67, 208, 255), alpha));
+    gfx_quad(right, color_alpha(rgba(42, 36, 148, 255), alpha));
+    /* near half of the ring, and the satellite in front */
+    logo_ring_half(cx, cy, k, 0, (float)M_PI, gold);
+    if (sat_front) gfx_circle(sx, sy, sr, white);
+}
+
+/* "Working on it": the logo with its satellite going round */
 void ui_spinner(float cx, float cy, float size) {
-    const Theme *t = theme();
-    float time = ui_time();
-    gfx_circle(cx + 2, cy + size * 0.65f, size * 0.45f, color_alpha(t->shadow, 0.35f));
-    gfx_cube(cx, cy + sinf(time * 4.0f) * size * 0.08f, size, time * 1.7f, time * 2.3f, t->accent);
+    float speed = g_set.animations ? 3.2f : 0.0f;
+    ui_logo(cx, cy, size * 1.7f, LOGO_SAT_REST + ui_time() * speed, 1.0f);
 }
 
 void ui_draw_cursor(void) {

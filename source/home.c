@@ -291,20 +291,15 @@ HomeAction home_draw(float x, float y, float w, float h, bool input_ok, const ch
     float a0 = intro(0);
     float bar_h = 34;
     cut_rect(hx, cy, hw, bar_h, 12, color_alpha(navy, a0));
-    /* emblem: a small flat cube (three faces) */
-    {
-        float ex = hx + 22, ey = cy + bar_h / 2, s = 11;
-        float top[8] = { ex, ey - s, ex + s, ey - s * 0.5f, ex, ey, ex - s, ey - s * 0.5f };
-        float left[8] = { ex - s, ey - s * 0.5f, ex, ey, ex, ey + s, ex - s, ey + s * 0.5f };
-        float right[8] = { ex, ey, ex + s, ey - s * 0.5f, ex + s, ey + s * 0.5f, ex, ey + s };
-        gfx_quad(top, color_alpha(rgba(170, 160, 240, 255), a0));
-        gfx_quad(left, color_alpha(rgba(110, 96, 210, 255), a0));
-        gfx_quad(right, color_alpha(rgba(76, 62, 168, 255), a0));
-    }
+    /* emblem: the logo (the orbit cube) */
+    ui_logo(hx + 24, cy + bar_h / 2, 40, 0.677f, a0);
     float tsz = w < 700 ? 21 : 23;
-    caps(hx + 42, cy + (bar_h - gfx_line_height(FONT_UI, tsz)) / 2, tsz, 0.8f, color_alpha(gold, a0),
-         color_alpha(rgba(0, 0, 0, 255), a0), "CubeBrowser");
-    float title_end = hx + 42 + caps_width(tsz, 0.8f, "CubeBrowser");
+    /* the name as in the logo: Cube in white, Browser in gold */
+    float ttx = hx + 52, tty = cy + (bar_h - gfx_line_height(FONT_UI, tsz)) / 2;
+    caps(ttx, tty, tsz, 0.8f, color_alpha(white, a0), color_alpha(rgba(0, 0, 0, 255), a0), "Cube");
+    float cube_w = caps_width(tsz, 0.8f, "Cube");
+    caps(ttx + cube_w, tty, tsz, 0.8f, color_alpha(gold, a0), color_alpha(rgba(0, 0, 0, 255), a0), "Browser");
+    float title_end = ttx + cube_w + caps_width(tsz, 0.8f, "Browser");
     /* the welcome bubble, or a clickable notice when an update is ready */
     char bubble[48];
     UpdateState us = update_state();
