@@ -2,6 +2,9 @@
 
 **A real web browser for the Nintendo GameCube.**
 
+<img width="640" height="480" alt="screenshot0" src="https://github.com/user-attachments/assets/9b5d277f-b586-4854-bce8-833e145b53a4" />
+
+
 CubeBrowser loads websites over a wired network connection, including secure
 (HTTPS) sites, with pictures, page styles, tables and forms. You can download
 files straight to your SD card, play MIDI music in the background, and
@@ -120,6 +123,9 @@ It can be turned off in Settings > Controls > Keyboard controller.
 ---
 
 ## Browsing
+
+<img width="640" height="480" alt="screenshot1" src="https://github.com/user-attachments/assets/8037aa03-ec9a-4b98-8b79-a8134cfe7eaa" />
+
 
 - **Go anywhere:** press X, type an address like `text.npr.org`, or type any
   words to search. Addresses open securely (HTTPS) automatically.
