@@ -24,6 +24,7 @@
 #include "memstat.h"
 #include "gcicard.h"
 #include "gckbd.h"
+#include "jsengine.h"
 #include <ogc/lwp_watchdog.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -376,6 +377,11 @@ static void start_load(const char *url, const char *post) {
             show_html("<title>Software Update</title>", "about:update", false);
             home_update_reset();
             if (update_state() == UPD_NONE || update_state() == UPD_CHECK_FAILED) update_request_check(false);
+        }
+        else if (!strcasecmp(url, "about:js")) {   /* the JavaScript speed test (the screen waits a moment while it runs) */
+            static char html[12288];
+            js_speed_test_html(html, sizeof(html));
+            show_html(html, "about:js", false);
         }
         else
             show_error(url, "There's no built-in page with that name.");
