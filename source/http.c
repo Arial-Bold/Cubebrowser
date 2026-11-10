@@ -1,6 +1,7 @@
 /* http.c - HTTP/1.1 GET/POST with redirects, chunked decoding, size limits
  * and keep-alive: the last connection stays open so the next request to the
  * same site (e.g. a run of images) skips the slow TLS handshake. */
+#include "adblock.h"
 #include "http.h"
 #ifdef GEKKO
 #include <gccore.h>
@@ -524,6 +525,11 @@ bool http_fetch(const char *url, const char *post_body, const char *accept, Http
         http_result_free(res);
         memset(res, 0, sizeof(*res));
         snprintf(res->url, sizeof(res->url), "%s", cur);
+        if (adblock_blocked(cur)) {   /* (each step of a redirect too) */
+            res->blocked = true;
+            snprintf(res->error, sizeof(res->error), "Blocked: this site is on the ad block list.");
+            return false;
+        }
         int r = fetch_once(cur, post, accept, res, hooks, location, sizeof(location));
         if (r == FO_RETRY) {
             memset(res, 0, sizeof(*res));

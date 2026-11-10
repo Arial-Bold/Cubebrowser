@@ -20,6 +20,7 @@ void js_page_end(void);
  * in) or -1, and its delivery (body is taken, NULL if it failed). */
 int  js_next_script(char *url, size_t cap);
 void js_script_loaded(int idx, char *body, size_t len);
+void js_script_blocked(int idx);  /* not downloaded: on the ad block list */
 bool js_scripts_pending(void);   /* still downloading scripts the page needs */
 
 /* Data the page's scripts asked for: the next one to download (its number,

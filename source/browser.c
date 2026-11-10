@@ -24,6 +24,7 @@
 #include "memstat.h"
 #include "gcicard.h"
 #include "gckbd.h"
+#include "adblock.h"
 #include "jsengine.h"
 #include <ogc/lwp_watchdog.h>
 #include <sys/stat.h>
@@ -376,6 +377,13 @@ static void start_load(const char *url, const char *post) {
         if (loading) { queued = false; fetch_cancel(); loading = false; }
         free(cur_post);
         cur_post = NULL;
+        if (!strncasecmp(url, "about:unblock?", 14)) {   /* "Open it anyway" on the blocked-page screen */
+            char u[URL_MAX];
+            snprintf(u, sizeof(u), "%s", url + 14);
+            adblock_allow(u);
+            start_load(u, NULL);
+            return;
+        }
         if (!strcasecmp(url, "about:home") || !strcasecmp(url, "about:blank") || !strcasecmp(url, "about:"))
         { show_html(home_html, "about:home", false); home_reset(); }
         else if (!strcasecmp(url, "about:help"))
@@ -460,6 +468,12 @@ static void start_load(const char *url, const char *post) {
     }
     fetch_start(url, post);
 }
+
+/* "Leave this site?" card: a page's script tried to send you to another site
+ * without you clicking anything (Block ads on) */
+static int ask_gen = -1, ask_nav;
+static char ask_url[URL_MAX];
+static unsigned last_click_ms;   /* the player last clicked or sent something on the page */
 
 /* "This page needs JavaScript" card: shown for page_gen == script_note_gen */
 static int script_note_gen = -1;
@@ -1410,8 +1424,11 @@ static void handle_fetch_result(void) {
         if (!fetch_take_css(&r, &tag)) return;
         int idx = TAG_IDX(tag);
         if (TAG_CURRENT(tag) && has_page && (idx & TAG_SCRIPT_BIT)) {
-            js_script_loaded(idx & ~TAG_SCRIPT_BIT, r.status < 400 ? r.body : NULL, r.body_len);   /* takes the text */
-            if (r.status < 400) r.body = NULL;
+            if (r.blocked) js_script_blocked(idx & ~TAG_SCRIPT_BIT);
+            else {
+                js_script_loaded(idx & ~TAG_SCRIPT_BIT, r.status < 400 ? r.body : NULL, r.body_len);   /* takes the text */
+                if (r.status < 400) r.body = NULL;
+            }
         } else if (TAG_CURRENT(tag) && has_page) {
             page_sheet_loaded(&page, idx, r.body, r.body_len);   /* takes the text */
             r.body = NULL;
@@ -1428,6 +1445,23 @@ static void handle_fetch_result(void) {
     if (r.download) {
         offer_download(&r);
         http_result_free(&r);
+        return;
+    }
+    if (r.blocked) {   /* an ad page: say so, with a way through */
+        static char eu[URL_MAX * 6], html[16384];
+        char host[256];
+        Url bu;
+        snprintf(host, sizeof(host), "%s", url_parse(r.url, &bu) ? bu.host : "this site");
+        html_escape(r.url, eu, sizeof(eu));
+        snprintf(html, sizeof(html),
+                 "<title>Ad page blocked</title><h2>Ad page blocked</h2>"
+                 "<p>CubeBrowser didn't open <b>%s</b>: it's on the list of ad and tracking sites "
+                 "(Settings &gt; Browsing &gt; Block ads).</p><p>Address: %s</p>"
+                 "<p><a href=\"about:unblock?%s\">Open it anyway</a> &nbsp; <a href=\"about:home\">Start page</a></p>",
+                 host, eu, eu);
+        show_html(html, r.url, false);
+        http_result_free(&r);
+        restore_scroll = -1;
         return;
     }
     if (!r.body) {
@@ -1517,6 +1551,7 @@ static Node *form_node(int field) {
 }
 
 static void submit_form(int field, int submit_field) {
+    last_click_ms = now_ms();
     char url[URL_MAX];
     char *post = NULL;
     Node *fn = form_node(field);
@@ -1948,6 +1983,17 @@ kb_done:
         char ju[URL_MAX];
         int jf = -1;
         int nav = js_take_navigation(ju, sizeof(ju), &jf);
+        if ((nav == JS_NAV_GO || nav == JS_NAV_REPLACE) && g_set.block_ads && now_ms() - last_click_ms > 2500 &&
+            strncasecmp(page.url, "about:", 6) && (!strncasecmp(ju, "http://", 7) || !strncasecmp(ju, "https://", 8))) {
+            char s1[256], s2[256];
+            adblock_site_of(page.url, s1, sizeof(s1));
+            adblock_site_of(ju, s2, sizeof(s2));
+            if (strcmp(s1, s2) != 0) {   /* off to another site by itself: often an ad */
+                if (adblock_blocked(ju)) ui_toast("Blocked a page sending you to an ad site");
+                else { snprintf(ask_url, sizeof(ask_url), "%s", ju); ask_nav = nav; ask_gen = page_gen; }
+                nav = JS_NAV_NONE;
+            }
+        }
         if (nav == JS_NAV_GO) navigate(ju, NULL, true);
         else if (nav == JS_NAV_REPLACE) start_load(ju, NULL);
         else if (nav == JS_NAV_BACK) go_back();
@@ -2069,6 +2115,16 @@ kb_done:
             "This site builds its pages with scripts that need more than CubeBrowser's JavaScript can do, so some "
             "or all of it may be missing. Text mode asks the site for a simpler version, which some sites offer.";
         const char *note_text = g_set.javascript ? note_text_on : note_text_off;
+        bool ask = ask_gen == page_gen && !loading;
+        static char ask_text[400];
+        if (ask) {
+            char site[256];
+            adblock_site_of(ask_url, site, sizeof(site));
+            snprintf(ask_text, sizeof(ask_text), "This page is trying to send you to %s by itself. Pages that do this "
+                     "are often ads.", site[0] ? site : "another site");
+            note = true;
+            note_text = ask_text;
+        }
         float nw = fminf(cw - 40, 600), nx = cx + (cw - nw) * 0.5f;
         float ntext_h = note ? note_wrap(FONT_BODY, 17, 0, 0, nw - 48, t->text, note_text, false) : 0;
         float nh = 24 + 30 + ntext_h + 14 + 40 + 20, ny = cy + ch - nh - 14;
@@ -2108,7 +2164,20 @@ kb_done:
             gfx_rrect(cx + cw - 9, byy + 4, 5, bh - 8, ui_r(2.5f), t->accent);
         }
 
-        if (note) {
+        if (ask) {
+            ui_panel(nx, ny, nw, nh, 18);
+            gfx_text(FONT_UI, 22, nx + 24, ny + 20, t->text, "Leave this site?", -1);
+            note_wrap(FONT_BODY, 17, nx + 24, ny + 54, nw - 48, t->text_dim, note_text, true);
+            float bw = (nw - 48 - 12) / 2, bh = 40, by = ny + nh - bh - 18;
+            if (ui_button(ui_id("ask", 0), nx + 24, by, bw, bh, "Stay here", 17, UIB_ACCENT) && content_ok) ask_gen = -1;
+            if (ui_button(ui_id("ask", 1), nx + 24 + bw + 12, by, bw, bh, "Go there", 17, UIB_NORMAL) && content_ok) {
+                char u[URL_MAX];
+                snprintf(u, sizeof(u), "%s", ask_url);
+                ask_gen = -1;
+                if (ask_nav == JS_NAV_REPLACE) start_load(u, NULL);
+                else navigate(u, NULL, true);
+            }
+        } else if (note) {
             ui_panel(nx, ny, nw, nh, 18);
             gfx_text(FONT_UI, 22, nx + 24, ny + 20, t->text, "This page needs JavaScript", -1);
             note_wrap(FONT_BODY, 17, nx + 24, ny + 54, nw - 48, t->text_dim, note_text, true);
@@ -2140,6 +2209,7 @@ kb_done:
         }
 
         if (content_ok && input_pressed(ACT_CLICK) && (hover_link >= 0 || hover_field >= 0)) {
+            last_click_ms = now_ms();
             input_consume(ACT_CLICK);
             input_rumble(3);
             sound_play(SFX_SELECT);

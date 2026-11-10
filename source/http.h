@@ -12,6 +12,7 @@ typedef struct {
     char *body;                /* malloc'd, NUL-terminated */
     size_t body_len;
     bool secure, verified, truncated;
+    bool blocked;              /* on the ad block list (adblock.c): not asked for */
     bool download;             /* not a web page: offer to save it instead */
     long long length;          /* Content-Length, or -1 */
     char filename[128];        /* from Content-Disposition, if given */

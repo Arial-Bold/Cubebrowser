@@ -31,6 +31,7 @@ typedef struct {
     char search_custom[256];
     int  user_agent, show_alt, max_page_kb, load_images, image_proxy, page_styles, img_size;
     int  javascript;           /* run pages' scripts (jsengine.c) */
+    int  block_ads;            /* adblock.c's list, and ask before a page sends you to another site */
     int  pic_cache;            /* picture cache limit: 0 off, 1 25 MB, 2 50 MB, 3 100 MB, 4 250 MB */
     /* Security */
     int  verify_certs;

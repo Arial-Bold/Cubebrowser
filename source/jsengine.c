@@ -63,7 +63,21 @@ typedef struct {
     unsigned char state;
     unsigned char dynamic;   /* added by a script (it gets a load or error event) */
     unsigned char failed;    /* its file couldn't be downloaded */
+    unsigned char module;    /* type="module": run as an ES module, once the files it imports are here */
+    unsigned char scanned;   /* ...and its imports have been looked for */
 } Script;
+
+/* The files module scripts import, downloaded before the module runs (QuickJS
+ * asks for them by address as it links the module). */
+#define MOD_BASE 0x100       /* (their numbers for the downloader start here) */
+#define MOD_MAX 200
+typedef struct {
+    char *url;
+    char *code;              /* downloaded, not yet handed to QuickJS */
+    size_t len;
+    unsigned char state;     /* SQ_NEED, SQ_LOADING, SQ_READY, SQ_DONE */
+    unsigned char failed;
+} ModFile;
 
 /* Data a script asked for (XMLHttpRequest, fetch), waiting for the
  * browser's downloader or being downloaded. */
@@ -83,6 +97,8 @@ static struct {
     JSContext *ctx;
     JSValue fn_timers, fn_dispatch, fn_loaded, fn_net;
     NetReq net[NET_MAX];
+    ModFile *mods;
+    int nmods, capmods;
     bool started;        /* the context exists */
     bool failed;         /* it couldn't start, or scripts keep getting stopped */
     Script *q;
@@ -107,6 +123,8 @@ static struct {
 } J;
 
 static void queue_add_at(Node *n, int at);
+static char *mod_normalize(JSContext *ctx, const char *base, const char *name, void *op);
+static JSModuleDef *mod_load(JSContext *ctx, const char *name, void *op);
 
 /* -------------------------------------------------------------- the log
  * What happened with the last page's scripts (files, errors, console
@@ -1063,8 +1081,10 @@ FN(n_resolve) {
     const char *s = JS_ToCString(c, argv[0]);
     char out[URL_MAX] = "";
     if (s && J.page) {
-        if (!strncasecmp(s, "javascript:", 11) || !*s) snprintf(out, sizeof(out), "%s", *s ? s : J.page->url);
-        else url_resolve(J.page->base, s, out, sizeof(out));
+        const char *b = argc > 1 && JS_IsString(argv[1]) ? JS_ToCString(c, argv[1]) : NULL;
+        if (!strncasecmp(s, "javascript:", 11) || (!*s && !b)) snprintf(out, sizeof(out), "%s", *s ? s : J.page->url);
+        else url_resolve(b && *b ? b : J.page->base, s, out, sizeof(out));
+        if (b) JS_FreeCString(c, b);
     }
     if (s) JS_FreeCString(c, s);
     return JS_NewString(c, out);
@@ -1257,7 +1277,7 @@ static const JSCFunctionListEntry n_funcs[] = {
     JS_CFUNC_DEF("setChecked", 2, n_set_checked), JS_CFUNC_DEF("shown", 1, n_shown),
     JS_CFUNC_DEF("listen", 1, n_listen), JS_CFUNC_DEF("write", 1, n_write),
     JS_CFUNC_DEF("currentScript", 0, n_current_script), JS_CFUNC_DEF("title", 0, n_title),
-    JS_CFUNC_DEF("setTitle", 1, n_set_title), JS_CFUNC_DEF("url", 0, n_url), JS_CFUNC_DEF("resolve", 1, n_resolve),
+    JS_CFUNC_DEF("setTitle", 1, n_set_title), JS_CFUNC_DEF("url", 0, n_url), JS_CFUNC_DEF("resolve", 2, n_resolve),
     JS_CFUNC_DEF("cookie", 0, n_cookie), JS_CFUNC_DEF("setCookie", 1, n_set_cookie), JS_CFUNC_DEF("ua", 0, n_ua),
     JS_CFUNC_DEF("log", 1, n_log), JS_CFUNC_DEF("note", 1, n_note), JS_CFUNC_DEF("net", 6, n_net), JS_CFUNC_DEF("tz", 0, n_tz), JS_CFUNC_DEF("alert", 1, n_alert), JS_CFUNC_DEF("now", 0, n_now),
     JS_CFUNC_DEF("timers", 1, n_timers), JS_CFUNC_DEF("go", 2, n_go), JS_CFUNC_DEF("back", 0, n_back),
@@ -1349,7 +1369,19 @@ static void promise_failed(JSContext *ctx, JSValueConst promise, JSValueConst re
     (void)promise; (void)op;
     if (handled) return;
     const char *s = JS_ToCString(ctx, reason);
-    if (s && !strstr(s, "not supported yet")) jslog("Error (in a promise): %.140s", s);
+    if (s && !strstr(s, "not supported yet")) {
+        char where[100] = "";
+        JSValue st = JS_IsObject(reason) ? JS_GetPropertyStr(ctx, reason, "stack") : JS_UNDEFINED;
+        const char *sts = JS_IsString(st) ? JS_ToCString(ctx, st) : NULL;
+        const char *at = sts ? strstr(sts, "at ") : NULL;
+        if (at) {
+            size_t n = strcspn(at + 3, "\n");
+            snprintf(where, sizeof(where), " | %.*s", (int)(n < 90 ? n : 90), at + 3);
+        }
+        if (sts) JS_FreeCString(ctx, sts);
+        JS_FreeValue(ctx, st);
+        jslog("Error (in a promise): %.120s%s", s, where);
+    }
     if (s) JS_FreeCString(ctx, s);
 }
 
@@ -1368,6 +1400,7 @@ static void start_context(void) {
     JS_SetMaxStackSize(J.rt, JS_STACK_LIMIT);
     JS_SetInterruptHandler(J.rt, interrupt, NULL);
     JS_SetHostPromiseRejectionTracker(J.rt, promise_failed, NULL);
+    JS_SetModuleLoaderFunc(J.rt, mod_normalize, mod_load, NULL);
     J.ctx = JS_NewContext(J.rt);
     if (!J.ctx) { J.failed = true; return; }
     JSValue global = JS_GetGlobalObject(J.ctx);
@@ -1388,6 +1421,144 @@ static void start_context(void) {
 static bool ready(void) { return J.page && !J.failed && g_set.javascript; }
 
 /* Runs one script of the page's (on the big stack). */
+/* ------------------------------------------------------------ modules */
+
+static bool is_path_spec(const char *s, size_t n) {
+    return (n >= 2 && s[0] == '.' && (s[1] == '/' || (n >= 3 && s[1] == '.' && s[2] == '/'))) || (n >= 1 && s[0] == '/') ||
+           (n >= 7 && !strncmp(s, "http://", 7)) || (n >= 8 && !strncmp(s, "https://", 8));
+}
+
+static ModFile *mod_find(const char *url) {
+    for (int i = 0; i < J.nmods; i++) if (!strcmp(J.mods[i].url, url)) return &J.mods[i];
+    return NULL;
+}
+
+static void mod_add(const char *base, const char *spec, size_t n) {
+    char rel[URL_MAX], abs[URL_MAX];
+    if (n >= sizeof(rel)) return;
+    memcpy(rel, spec, n);
+    rel[n] = 0;
+    if (!is_path_spec(rel, n)) { jslog("A module imports \"%.60s\" (a bare name: not supported)", rel); return; }
+    url_resolve(base, rel, abs, sizeof(abs));
+    if (mod_find(abs)) return;
+    if (J.nmods >= MOD_MAX) return;
+    if (J.nmods == J.capmods) {
+        int nc = J.capmods ? J.capmods * 2 : 16;
+        ModFile *nm = realloc(J.mods, sizeof(ModFile) * (size_t)nc);
+        if (!nm) return;
+        J.mods = nm;
+        J.capmods = nc;
+    }
+    ModFile *m = &J.mods[J.nmods];
+    memset(m, 0, sizeof(*m));
+    m->url = strdup(abs);
+    if (!m->url) return;
+    m->state = SQ_NEED;
+    J.nmods++;
+}
+
+static bool ident_char(char c) { return isalnum((unsigned char)c) || c == '_' || c == '$'; }
+
+/* The files a module's code imports: import ... from "x", import "x",
+ * export ... from "x" and import("x") with a written-out address. (A look
+ * through the text, not a full parse: a stray match only costs a download.) */
+static void scan_imports(const char *code, size_t len, const char *base) {
+    for (size_t i = 0; i + 6 < len; i++) {
+        bool imp = !memcmp(code + i, "import", 6), exp = !memcmp(code + i, "export", 6);
+        if (!imp && !exp) continue;
+        if (i > 0 && (ident_char(code[i - 1]) || code[i - 1] == '.')) continue;
+        size_t j = i + 6;
+        if (j < len && ident_char(code[j])) continue;
+        while (j < len && isspace((unsigned char)code[j])) j++;
+        if (j >= len) break;
+        if (imp && code[j] == '.') continue;                 /* import.meta */
+        if (imp && code[j] == '(') {                         /* import("x") */
+            j++;
+            while (j < len && isspace((unsigned char)code[j])) j++;
+        } else if (!(imp && (code[j] == '"' || code[j] == '\''))) {
+            /* ... from "x", before the statement ends */
+            size_t k = j, stop = j + 4000 < len ? j + 4000 : len;
+            bool found = false;
+            int depth = 0;
+            for (; k + 4 < stop; k++) {
+                char c = code[k];
+                if (c == '{') depth++;
+                else if (c == '}') depth--;
+                else if (depth <= 0 && (c == ';' || c == '(' || c == '=')) break;
+                if (!memcmp(code + k, "from", 4) && (k == 0 || !ident_char(code[k - 1])) && !ident_char(code[k + 4])) {
+                    k += 4;
+                    while (k < len && isspace((unsigned char)code[k])) k++;
+                    if (k < len && (code[k] == '"' || code[k] == '\'')) { found = true; break; }
+                }
+            }
+            if (!found) continue;
+            j = k;
+        }
+        if (j >= len || (code[j] != '"' && code[j] != '\'' && code[j] != '`')) continue;
+        char q = code[j++];
+        size_t a = j;
+        while (j < len && code[j] != q && code[j] != '\n' && j - a < URL_MAX) j++;
+        if (j >= len || code[j] != q) continue;
+        if (q == '`' && memchr(code + a, '$', j - a)) continue;   /* a template with ${}: not a fixed address */
+        mod_add(base, code + a, j - a);
+        i = j;
+    }
+}
+
+static bool mods_pending(void) {
+    for (int i = 0; i < J.nmods; i++) if (J.mods[i].state == SQ_NEED || J.mods[i].state == SQ_LOADING) return true;
+    return false;
+}
+
+static void set_import_meta(JSContext *ctx, JSModuleDef *d, const char *url) {
+    JSValue meta = JS_GetImportMeta(ctx, d);
+    if (JS_IsException(meta)) return;
+    JS_DefinePropertyValueStr(ctx, meta, "url", JS_NewString(ctx, url), JS_PROP_C_W_E);
+    JS_FreeValue(ctx, meta);
+}
+
+/* QuickJS: a module's import, made into an address (relative to the module) */
+static char *mod_normalize(JSContext *ctx, const char *base, const char *name, void *op) {
+    (void)op;
+    char out[URL_MAX];
+    if (is_path_spec(name, strlen(name))) url_resolve(base, name, out, sizeof(out));
+    else snprintf(out, sizeof(out), "%s", name);
+    size_t n = strlen(out);
+    char *r = js_malloc(ctx, n + 1);
+    if (r) memcpy(r, out, n + 1);
+    return r;
+}
+
+/* QuickJS: the module at this address (downloaded beforehand) */
+static JSModuleDef *mod_load(JSContext *ctx, const char *name, void *op) {
+    (void)op;
+    ModFile *m = mod_find(name);
+    if (!m || !m->code) {
+        JS_ThrowReferenceError(ctx, "could not load module %s%s", name,
+                               !m ? "" : m->failed ? " (its download failed)" : " (not downloaded)");
+        return NULL;
+    }
+    JSValue f = JS_Eval(ctx, m->code, m->len, name, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    free(m->code);
+    m->code = NULL;
+    m->state = SQ_DONE;
+    if (JS_IsException(f)) return NULL;
+    JSModuleDef *d = JS_VALUE_GET_PTR(f);
+    set_import_meta(ctx, d, name);
+    JS_FreeValue(ctx, f);
+    return d;
+}
+
+static void run_module(Script *s, const char *code, size_t len) {
+    const char *name = s->url ? s->url : J.page->base;
+    JSValue f = JS_Eval(J.ctx, code, len, name, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (JS_IsException(f)) { report_exception(); return; }
+    set_import_meta(J.ctx, JS_VALUE_GET_PTR(f), name);
+    JSValue r = JS_EvalFunction(J.ctx, f);   /* (takes f) */
+    if (JS_IsException(r)) report_exception();
+    JS_FreeValue(J.ctx, r);
+}
+
 static void run_script_job(void *arg) {
     Script *s = arg;
     start_context();
@@ -1401,12 +1572,17 @@ static void run_script_job(void *arg) {
     char name[128];
     snprintf(name, sizeof(name), "%.120s", s->url ? s->url : "<page>");
     double t0 = now_ms();
-    JSValue r = JS_Eval(J.ctx, code, len, name, JS_EVAL_TYPE_GLOBAL);
-    if (JS_IsException(r)) report_exception();
-    JS_FreeValue(J.ctx, r);
+    if (s->module) {
+        run_module(s, code, len);
+    } else {
+        JSValue r = JS_Eval(J.ctx, code, len, name, JS_EVAL_TYPE_GLOBAL);
+        if (JS_IsException(r)) report_exception();
+        JS_FreeValue(J.ctx, r);
+    }
     run_jobs();
-    if (s->url) jslog("Ran %.120s (%.0f ms)", s->url, now_ms() - t0);
-    else jslog("Ran a script in the page (%u bytes, %.0f ms)", (unsigned)len, now_ms() - t0);
+    const char *what = s->module ? "module" : "script";
+    if (s->url) jslog("Ran %s%.120s (%.0f ms)", s->module ? "module " : "", s->url, now_ms() - t0);
+    else jslog("Ran a %s in the page (%u bytes, %.0f ms)", what, (unsigned)len, now_ms() - t0);
     J.cur_script = J.write_after = NULL;
 }
 
@@ -1478,11 +1654,10 @@ static bool runnable_type(const Node *n) {
 static void queue_add_at(Node *n, int at) {
     if (n->sub == 1) return;   /* queued already */
     n->sub = 1;
-    if (!runnable_type(n)) {
-        const char *t = dom_attr(n, "type"), *src = dom_attr(n, "src");
-        if (t && (strstr(t, "module") || strstr(t, "MODULE"))) jslog("Skipped a module script (not supported yet)%s%.100s", src ? ": " : "", src ? src : "");
-        return;
-    }
+    const char *ty = dom_attr(n, "type");
+    bool module = ty && !strcasecmp(ty, "module");
+    if (!module && !runnable_type(n)) return;
+    if (!module && dom_attr(n, "nomodule")) return;   /* (for browsers without modules: this one runs those) */
     if (J.nq >= DOM_MAX_SCRIPTS * 2) { jslog("Too many scripts: the rest are skipped"); return; }
     if (J.nq == J.capq) {
         int nc = J.capq ? J.capq * 2 : 32;
@@ -1496,6 +1671,7 @@ static void queue_add_at(Node *n, int at) {
     Script *s = &J.q[at];
     memset(s, 0, sizeof(*s));
     s->node = n;
+    s->module = module;
     const char *src = dom_attr(n, "src");
     if (src && *src) {
         char abs[URL_MAX];
@@ -1519,6 +1695,8 @@ static void free_all(void) {
     if (J.rt) JS_FreeRuntime(J.rt);
     for (int i = 0; i < J.nq; i++) { free(J.q[i].url); free(J.q[i].code); }
     for (int i = 0; i < NET_MAX; i++) { free(J.net[i].url); free(J.net[i].body); }
+    for (int i = 0; i < J.nmods; i++) { free(J.mods[i].url); free(J.mods[i].code); }
+    free(J.mods);
     free(J.q);
     free(J.reg);
     memset(&J, 0, sizeof(J));
@@ -1597,21 +1775,55 @@ void js_page_begin(Page *p) {
     J.arena_start = p->dom->arena.used;
     if (strncasecmp(p->url, "about:", 6))
         jslog("The page has %d script%s", p->dom->nscript_nodes, p->dom->nscript_nodes == 1 ? "" : "s");
-    for (int i = 0; i < p->dom->nscript_nodes; i++) queue_add_at(p->dom->scripts[i], -1);
+    /* module scripts wait for the page (like defer): after the others */
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < p->dom->nscript_nodes; i++) {
+            const char *ty = dom_attr(p->dom->scripts[i], "type");
+            if ((ty && !strcasecmp(ty, "module")) == (pass == 1)) queue_add_at(p->dom->scripts[i], -1);
+        }
 }
 
 int js_next_script(char *url, size_t cap) {
     if (!ready()) return -1;
-    for (int i = J.next; i < J.nq; i++)
+    for (int i = J.next; i < J.nq && i < MOD_BASE; i++)
         if (J.q[i].state == SQ_NEED) {
             J.q[i].state = SQ_LOADING;
             snprintf(url, cap, "%s", J.q[i].url);
             return i;
         }
+    for (int i = 0; i < J.nmods; i++)
+        if (J.mods[i].state == SQ_NEED) {
+            J.mods[i].state = SQ_LOADING;
+            snprintf(url, cap, "%s", J.mods[i].url);
+            return MOD_BASE + i;
+        }
     return -1;
 }
 
 void js_script_loaded(int idx, char *body, size_t len) {
+    if (idx >= MOD_BASE) {   /* a file a module imports */
+        int mi = idx - MOD_BASE;
+        if (mi >= J.nmods || J.mods[mi].state != SQ_LOADING) { free(body); return; }
+        ModFile *m = &J.mods[mi];
+        if (body && len && len <= SCRIPT_MAX && J.total + len <= SCRIPTS_TOTAL) {
+            m->code = body;
+            m->len = len;
+            m->state = SQ_READY;
+            J.total += len;
+            jslog("Downloaded %u KB (module): %.130s", (unsigned)((len + 1023) / 1024), m->url);
+            char base[URL_MAX];
+            snprintf(base, sizeof(base), "%s", m->url);   /* (adding may move J.mods) */
+            scan_imports(body, len, base);
+        } else {
+            if (!body) jslog("FAILED to download module: %.130s", m->url);
+            else if (len > SCRIPT_MAX) jslog("Skipped module (too big, %u KB): %.120s", (unsigned)(len / 1024), m->url);
+            else if (len) jslog("Skipped module (too much script on this page): %.110s", m->url);
+            free(body);
+            m->state = SQ_DONE;
+            m->failed = 1;
+        }
+        return;
+    }
     if (idx < 0 || idx >= J.nq || J.q[idx].state != SQ_LOADING) { free(body); return; }
     Script *s = &J.q[idx];
     if (body && len && len <= SCRIPT_MAX && J.total + len <= SCRIPTS_TOTAL) {
@@ -1630,11 +1842,26 @@ void js_script_loaded(int idx, char *body, size_t len) {
     }
 }
 
+void js_script_blocked(int idx) {
+    char *u = NULL;
+    if (idx >= MOD_BASE && idx - MOD_BASE < J.nmods && J.mods[idx - MOD_BASE].state == SQ_LOADING) {
+        ModFile *m = &J.mods[idx - MOD_BASE];
+        m->state = SQ_DONE;
+        m->failed = 1;
+        u = m->url;
+    } else if (idx >= 0 && idx < J.nq && J.q[idx].state == SQ_LOADING) {
+        J.q[idx].state = SQ_DONE;
+        J.q[idx].failed = 1;
+        u = J.q[idx].url;
+    }
+    if (u) jslog("Blocked (ad list): %.140s", u);
+}
+
 bool js_scripts_pending(void) {
     if (!ready()) return false;
     for (int i = J.next; i < J.nq; i++)
         if (J.q[i].state == SQ_NEED || J.q[i].state == SQ_LOADING) return true;
-    return false;
+    return mods_pending();
 }
 
 /* a script element's load or error event (loaders wait for it) */
@@ -1659,6 +1886,15 @@ void js_frame(void) {
     while (J.next < J.nq && !J.failed) {
         Script *s = &J.q[J.next];
         if (s->state == SQ_NEED || s->state == SQ_LOADING) break;
+        if (s->state == SQ_READY && s->module) {   /* first the files it imports */
+            if (!s->scanned) {
+                s->scanned = 1;
+                const char *code = s->code ? s->code : s->node->text;
+                size_t clen = s->code ? s->len : (size_t)s->node->len;
+                if (code) scan_imports(code, clen, s->url ? s->url : J.page->base);
+            }
+            if (mods_pending()) break;
+        }
         if (s->state == SQ_READY) {
             s->state = SQ_DONE;
             if (s->code || (s->node->text && J.total + (size_t)s->node->len <= SCRIPTS_TOTAL)) {
