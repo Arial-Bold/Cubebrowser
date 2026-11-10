@@ -544,7 +544,7 @@
 
   const nav = { userAgent: N.ua(), appName: 'Netscape', appVersion: '5.0', platform: 'GameCube', language: 'en-US', languages: ['en-US', 'en'],
     cookieEnabled: true, onLine: true, vendor: '', product: 'Gecko', maxTouchPoints: 0, hardwareConcurrency: 1,
-    javaEnabled() { return false; }, sendBeacon() { return true; } };
+    javaEnabled() { return false; }, sendBeacon(u) { netNote(u); return true; } };
   win.navigator = nav;
   win.screen = { width: 640, height: 480, availWidth: 640, availHeight: 480, colorDepth: 24, pixelDepth: 24, orientation: { type: 'landscape-primary', angle: 0 } };
   win.innerWidth = 480; win.innerHeight = 640; win.outerWidth = 640; win.outerHeight = 480;
@@ -647,16 +647,18 @@
   // network: not yet (scripts that ask get a polite failure)
   function XMLHttpRequest() { this.readyState = 0; this.status = 0; this.responseText = ''; this.response = null; this._h = {}; }
   XMLHttpRequest.prototype = Object.assign(Object.create(EventTarget), {
-    open() { this.readyState = 1; }, setRequestHeader() {}, getResponseHeader() { return null; }, getAllResponseHeaders() { return ''; },
+    open(m, u) { this.readyState = 1; this._u = String(u); }, setRequestHeader() {}, getResponseHeader() { return null; }, getAllResponseHeaders() { return ''; },
     overrideMimeType() {}, abort() {},
-    send() { const x = this; setTimeout(() => { x.readyState = 4; x.status = 0;
+    send() { const x = this; netNote(x._u); setTimeout(() => { x.readyState = 4; x.status = 0;
       if (x.onreadystatechange) try { x.onreadystatechange(); } catch (e) { reportError(e); }
       if (x.onerror) try { x.onerror(new Event('error')); } catch (e) { reportError(e); }
       callOn(x, new Event('error')); callOn(x, new Event('loadend')); }, 1); },
   });
   XMLHttpRequest.UNSENT = 0; XMLHttpRequest.DONE = 4;
   win.XMLHttpRequest = XMLHttpRequest;
-  win.fetch = () => Promise.reject(new TypeError('Network requests from scripts are not supported yet'));
+  // (noted in about:console, so a page that waits on one can be explained)
+  function netNote(u) { N.note('A script tried to download ' + String(u || '?').slice(0, 120) + ' (scripts can\'t download data yet)'); }
+  win.fetch = (u) => { netNote(u && u.url ? u.url : u); return Promise.reject(new TypeError('Network requests from scripts are not supported yet')); };
   win.WebSocket = function () { throw new Error('WebSocket is not supported'); };
   win.MutationObserver = function () { return { observe() {}, disconnect() {}, takeRecords() { return []; } }; };
   win.IntersectionObserver = function (cb) { return { observe(el) { setTimeout(() => cb([{ target: el, isIntersecting: true, intersectionRatio: 1 }], this), 1); }, unobserve() {}, disconnect() {} }; };
