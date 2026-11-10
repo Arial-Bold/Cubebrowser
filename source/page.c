@@ -1592,7 +1592,9 @@ static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
         if (!cs || cs->display == D_NONE || ch->hidden) continue;
         /* empty positioned layers (decorative gradients, overlays) take no space */
         if (cs->abspos && ch->tag != TAG_IMG && !has_content(ch, 0)) continue;
-        if (ch->tag == TAG_NOSCRIPT && duplicate_noscript(c->p, ch)) continue;
+        /* with JavaScript on, a <noscript> ("please enable JavaScript") is
+         * for other browsers, as in any browser running the page's scripts */
+        if (ch->tag == TAG_NOSCRIPT && (dom_keep_scripts || duplicate_noscript(c->p, ch))) continue;
         if (ch->tag == TAG_BR) { forced_break(c, f); continue; }
         if (ch->tag == TAG_WBR) continue;
         if (ch->tag == TAG_IMG) { emit_image(c, f, ch, cs); continue; }
