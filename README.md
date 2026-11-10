@@ -7,7 +7,7 @@ CubeBrowser loads websites over a wired network connection, including secure
 files straight to your SD card, play MIDI music in the background, and
 control everything with a GameCube controller. A Game Boy Advance on the
 link cable can even be the music player's own screen and remote. It runs as a
-`.dol` program launched from Swiss, with menus designed to feel like they
+`.dol` program started from your launcher, with menus designed to feel like they
 belong on the console.
 
 ---
@@ -16,7 +16,7 @@ belong on the console.
 
 | Item | Notes |
 |---|---|
-| A GameCube that runs **Swiss** | CubeBrowser launches like any other homebrew program. |
+| A GameCube with a homebrew **launcher** | CubeBrowser starts like any other homebrew program. |
 | A **network adapter** | The official Nintendo Broadband Adapter, or a WIZnet-based adapter such as the ETH2GC, connected to your router with an Ethernet cable. |
 | An **SD card adapter** | SD2SP2 (recommended) or SD Gecko, with a FAT32 card. |
 | A **controller** | Any port. Bluetooth controllers through BlueRetro work too. |
@@ -39,10 +39,11 @@ Component cables are optional and unlock 480p video.
            ├── default.dol      the browser
            ├── opening.bnr      its banner and description in launchers
            └── gcbrowser/
-               └── cacert.pem
+               ├── cacert.pem
+               └── blocklist.txt  (optional) more sites for Block ads
    ```
 
-   This is the layout Swiss and other launchers expect.
+   This is the layout launchers expect.
    Any other folder works too, as long as `gcbrowser` stays **next to**
    `default.dol`.
 2. The `gcbrowser` folder holds your settings, bookmarks and saved logins.
@@ -51,7 +52,7 @@ Component cables are optional and unlock 480p video.
    the root are moved over automatically. You can also move it later in
    Settings > Data > Move data folder.
 
-3. Insert the SD card, plug in the network adapter, boot Swiss and launch
+3. Insert the SD card, plug in the network adapter, start your launcher and open
    CubeBrowser (`default.dol` in `apps/cubebrowser`, shown with its banner).
 
 On first start, the status bar shows the browser connecting to your router,
@@ -126,11 +127,12 @@ It can be turned off in Settings > Controls > Keyboard controller.
   button inside it while a page loads), Music (note), Bookmarks (star) and
   Settings (gear). A green lock means the site's security certificate checked
   out.
-- **Exit to Swiss:** press the Exit button twice to leave the browser and
-  start Swiss. Choose which `.dol` it starts under Settings > Data (**Find .dol
+- **Exit to Launcher:** press the Exit button twice to leave the browser and
+  start your launcher. Choose which `.dol` it starts under Settings > Data (**Find .dol
   files on SD card** lists them), or set the Exit button to **Restart console**
-  if Swiss starts automatically when your GameCube powers on. If the chosen
-  file has moved, the browser looks for a Swiss `.dol` on the card by itself.
+  if your launcher starts automatically when your GameCube powers on. If the
+  chosen file has moved, the browser looks for a known launcher's `.dol` on the
+  card by itself.
 - **Loading screen:** while a page loads, an underwater scene fills the page
   window, and the page appears all at once when its styles and the pictures
   on the first screen are in (after 8 seconds at most). Turn it off in
@@ -138,8 +140,28 @@ It can be turned off in Settings > Controls > Keyboard controller.
 - **Search results** open the real page directly, skipping the search
   engine's tracking redirect, and pages that forward you elsewhere are
   followed automatically.
-- **Pages that need JavaScript** show a short note saying so, with a **Try
-  text mode** button that asks the site for a simpler version.
+- **JavaScript:** pages' own scripts run, so drop-down menus, tabs,
+  show/hide sections, buttons, form checks and pages that write their content
+  with script work, as do libraries like jQuery and sites built from module
+  scripts (`type="module"`, with the files they import). Scripts can load
+  data from the internet (XMLHttpRequest and fetch), one request at a time
+  between the page's pictures. A script that runs too long is stopped so it can't freeze
+  the console. Turn it off in Settings > Browsing > JavaScript. Type
+  **about:js** in the address bar for a speed test of the JavaScript engine,
+  or **about:console** to see what the last page's scripts did (the files
+  they downloaded, any errors and their messages). **about:source** shows the
+  last page's HTML.
+- **Block ads** (Settings > Browsing, on by default): ads, trackers and the
+  ad pages some parked domains send visitors to aren't downloaded, from a
+  built-in list of well-known ad networks. Add your own sites to
+  `gcbrowser/blocklist.txt` on the SD card, one per line (a hosts file or
+  `||site^` lines from an ad-block list work too). Opening a blocked page
+  directly shows a screen with an **Open it anyway** link. When a page's
+  script tries to send you to a different site without you clicking
+  anything, CubeBrowser asks first.
+- **Pages that need more JavaScript** than the browser can manage show a short
+  note saying so, with a **Try text mode** button that asks the site for a
+  simpler version.
 - **Back and Forward** return instantly to your last few pages, scrolled to
   where you left them, and Back after a search takes you to your results.
 - **Bookmarks:** press Y, then **Bookmark this page**. Click a bookmark to open
@@ -258,7 +280,7 @@ CubeBrowser asks **"Save to SD card?"**, showing the file's name and size. Hold
 **Z** and press **A** to save any link this way.
 
 - Files are saved to `sd:/downloads` (changeable in Settings > Data), where
-  Swiss can launch them after you leave the browser.
+  your launcher can start them after you leave the browser.
 - The download screen shows progress, speed and time remaining. Cancel takes
   two presses, so it can't be hit by accident.
 - **Interrupted downloads continue where they stopped:** choose Retry, or open
@@ -301,7 +323,7 @@ defaults.
 | **Browsing** | Home page, search engine, how the browser identifies itself, page styles, pictures on/off, picture size, image helper, picture & style cache, picture labels, maximum page size. |
 | **Security** | Cookies on/off, keep logins after restart, certificate checking and the certificate file. |
 | **Updates** | Check for CubeBrowser updates (now, and automatically at start). |
-| **Data** | Exit button action and Swiss `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear picture & style cache, clear history, delete bookmarks, reset all settings. |
+| **Data** | Exit button action and Launcher `.dol` file, clear cookies and logins, download folder, move data folder, delete zips after unzipping, clear picture & style cache, clear history, delete bookmarks, reset all settings. |
 
 A few worth knowing about:
 
@@ -351,8 +373,8 @@ Older and hobbyist sites from the 1990s and 2000s usually display very well.
 | Problem | What to try |
 |---|---|
 | **"No network (error -1)"** | Check the Ethernet cable and that the adapter is seated firmly. If you use manual settings, check Settings > Network. Opening any page retries the connection. |
-| **"Certificate couldn't be verified"** | Usually the clock: make sure the time server in Settings > Network is reachable. If it persists, replace `gcbrowser/cacert.pem` with a fresh copy from `https://curl.se/ca/cacert.pem`. |
-| **A page is blank or nearly empty** | The site builds its content with JavaScript, which isn't supported. Try the **Try text mode** button on the note that appears, the site's mobile or "lite" version, or open it through FrogFind. |
+| **"Certificate couldn't be verified"** | Usually the clock: make sure the time server in Settings > Network is reachable. If it persists, replace `gcbrowser/cacert.pem` with the copy from the latest CubeBrowser release. (It also has Let's Encrypt's newest roots, Root YE and Root YR, which some sites now use and which aren't in other certificate lists yet.) |
+| **A page is blank or nearly empty** | The site builds its content with more JavaScript than the browser can run. Try the **Try text mode** button on the note that appears, the site's mobile or "lite" version, or open it through FrogFind. |
 | **"Low on memory: some pictures were skipped"** | A very long or picture-heavy page filled the memory. Scroll on and pictures far away are let go; stopping the music frees a little more. Skipped pictures load by themselves once there's room. |
 | **A page looks cluttered** | Turn off Settings > Browsing > Page styles. |
 | **Pictures don't appear** | Check Settings > Browsing > Load images, and leave Image helper on for best results. |
@@ -364,7 +386,7 @@ Older and hobbyist sites from the 1990s and 2000s usually display very well.
 | **A download stopped partway** | Choose Retry, or open the same link again; it continues where it stopped. |
 | **"Not enough space on the SD card"** | Free up space. FAT32 cards can't hold single files over 4 GB. |
 | **The Game Boy Advance doesn't get the music player** | Switch it on with no game inserted and plug it into port 2 (the TV says when it's sending the player). Check Settings > Music > Game Boy Advance player is on. If it was running something else, switch it off and on again with no game. |
-| **Exit doesn't find Swiss** | Use Settings > Data > Find .dol files on SD card and pick your Swiss `.dol`. |
+| **Exit doesn't find your launcher** | Use Settings > Data > Find .dol files on SD card and pick your launcher's `.dol`. |
 | **Settings or bookmarks aren't saved** | The SD card wasn't found. Check it's in the SD2SP2 and formatted FAT32. |
 | **The pointer drifts on its own** | Raise Settings > Controls > Stick dead zone. |
 | **Something's set wrong and you can't get back** | Hold L + R + START while launching to reset all settings. |
@@ -387,7 +409,11 @@ If you report a problem, please include these files and the page address.
 
 ## Limitations
 
-- **No JavaScript.** Sites that depend on it may be blank or only partly work.
+- **JavaScript is basic.** Simple and classic scripts and module scripts
+  work, and scripts can load data with GET and POST requests (not WebSockets
+  or file uploads), but big modern web apps are too large for the GameCube's
+  memory. Sites built that way may
+  be blank or only partly work.
 - **No modern multi-column layouts** (CSS flexbox and grid). Those sections are
   shown as a single column.
 - **Logins that need JavaScript** (most big sites) don't work; classic login

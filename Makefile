@@ -9,7 +9,7 @@ ifeq ($(strip $(DEVKITPPC)),)
 $(error "DEVKITPPC is not set. Use the GitHub build or the Docker command in README.md")
 endif
 
-# libogc2 (Swiss developers' fork): supports the official BBA and WIZnet-based
+# libogc2 (an extended fork of libogc): supports the official BBA and WIZnet-based
 # adapters such as ETH2GC, plus SD2SP2 and other modern accessories.
 include $(DEVKITPRO)/libogc2/gamecube_rules
 
