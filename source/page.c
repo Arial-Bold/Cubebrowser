@@ -1083,7 +1083,20 @@ static __attribute__((noinline)) void layout_float(L *c, Flow *f, Node *n, const
 
 typedef struct { Node *n; int col, span, row, rspan; float minw, maxw, h; int start, end, bg; float x, w, y; } Cell;
 
+/* An element whose children are table cells with no table or row around them
+ * (calculator keys as <span style="display:table-cell"> in a <div>): CSS makes
+ * an invisible table with that one row, so the cells sit side by side. Its
+ * other elements become cells too, so nothing in it goes missing. */
+static const Node *anon_row;
+
+static bool has_cell_child(const Node *n) {
+    for (const Node *ch = n->first; ch; ch = ch->next)
+        if (ch->type == NT_ELEM && ch->style && ch->style->display == D_CELL) return true;
+    return false;
+}
+
 static void collect_rows(Node *t, Node **rows, int *nrows, Node **caps, int *ncaps, int depth) {
+    if (t == anon_row && depth == 0) { rows[(*nrows)++] = t; return; }
     for (Node *ch = t->first; ch; ch = ch->next) {
         if (ch->type != NT_ELEM || !ch->style || ch->style->display == D_NONE) continue;
         int d = ch->style->display;
@@ -1157,6 +1170,7 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
     Node *caps[4];
     int nrows = 0, ncaps = 0;
     collect_rows(t, rows, &nrows, caps, &ncaps, 0);
+    if (nrows == 0 && has_cell_child(t)) rows[nrows++] = t;   /* cells with no row: the table is their row */
     if (nrows == 0) {
         /* A "table" with no rows, e.g. Wikipedia's picture boxes
          * (<figure> shown as a table, its caption as the table caption):
@@ -1188,7 +1202,7 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
         int col = 0;
         for (Node *ch = rows[r]->first; ch; ch = ch->next) {
             if (ch->type != NT_ELEM || !ch->style || ch->style->display == D_NONE) continue;
-            if (ch->style->display != D_CELL && ch->tag != TAG_TD && ch->tag != TAG_TH) continue;
+            if (ch->style->display != D_CELL && ch->tag != TAG_TD && ch->tag != TAG_TH && rows[r] != anon_row) continue;
             while (col < MAX_TABLE_COLS && held[col] > 0) col++;   /* skip columns taken from above */
             if (col >= MAX_TABLE_COLS) break;
             if (ncells == cap) {
@@ -1334,6 +1348,7 @@ static float table_layout(L *c, Flow *pf, Node *t, const Style *ts, float tx, fl
             L cc = *c;
             cc.depth = c->depth + 1;
             cc.tdepth = depth + 1;
+            if (node_link(ce->n) >= 0) cc.link = node_link(ce->n);   /* a cell that is a link or a script's button */
             ce->h = block_box(&cc, ce->n, ce->n->style, ce->x, ce->w, cy, NULL, &esc);
             ce->end = p->nboxes;
             if (ce->n->style->height.u == U_PX && ce->n->style->height.v > ce->h) ce->h = ce->n->style->height.v;
@@ -1587,6 +1602,27 @@ static bool is_widget(int tag) {
 }
 
 static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
+    if (s && n != anon_row && s->display != D_TABLE && s->display != D_ROW && s->display != D_ROWGROUP &&
+        s->display != D_CELL && has_cell_child(n)) {
+        /* cells straight inside an ordinary element: one invisible row */
+        Style ts = *s;
+        ts.display = D_TABLE;
+        memset(ts.margin, 0, sizeof(ts.margin));
+        memset(ts.padding, 0, sizeof(ts.padding));
+        memset(ts.border, 0, sizeof(ts.border));
+        memset(&ts.width, 0, sizeof(ts.width));
+        memset(&ts.maxw, 0, sizeof(ts.maxw));
+        memset(&ts.height, 0, sizeof(ts.height));
+        ts.has_bg = 0;
+        ts.spacing = 0;
+        ts.collapse = 0;
+        ts.fl = FL_NONE;
+        const Node *saved = anon_row;
+        anon_row = n;
+        layout_table(c, f, n, &ts);
+        anon_row = saved;
+        return;
+    }
     for (Node *ch = n->first; ch; ch = ch->next) {
         if (ch->type == NT_TEXT) { emit_text(c, f, ch, s); continue; }
         const Style *cs = ch->style;
