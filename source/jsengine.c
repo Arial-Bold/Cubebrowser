@@ -1083,6 +1083,14 @@ FN(n_set_cookie) {
 
 FN(n_ua) { UNUSED; (void)argv; return JS_NewString(c, user_agent_strings[g_set.user_agent >= 0 && g_set.user_agent <= 2 ? g_set.user_agent : 0]); }
 
+/* a note from the browser's own script part (no "console:" in front) */
+FN(n_note) {
+    UNUSED;
+    const char *s = JS_ToCString(c, argv[0]);
+    if (s) { jslog("%.170s", s); JS_FreeCString(c, s); }
+    return JS_UNDEFINED;
+}
+
 FN(n_log) {
     UNUSED;
     const char *s = JS_ToCString(c, argv[0]);
@@ -1182,7 +1190,7 @@ static const JSCFunctionListEntry n_funcs[] = {
     JS_CFUNC_DEF("currentScript", 0, n_current_script), JS_CFUNC_DEF("title", 0, n_title),
     JS_CFUNC_DEF("setTitle", 1, n_set_title), JS_CFUNC_DEF("url", 0, n_url), JS_CFUNC_DEF("resolve", 1, n_resolve),
     JS_CFUNC_DEF("cookie", 0, n_cookie), JS_CFUNC_DEF("setCookie", 1, n_set_cookie), JS_CFUNC_DEF("ua", 0, n_ua),
-    JS_CFUNC_DEF("log", 1, n_log), JS_CFUNC_DEF("alert", 1, n_alert), JS_CFUNC_DEF("now", 0, n_now),
+    JS_CFUNC_DEF("log", 1, n_log), JS_CFUNC_DEF("note", 1, n_note), JS_CFUNC_DEF("alert", 1, n_alert), JS_CFUNC_DEF("now", 0, n_now),
     JS_CFUNC_DEF("timers", 1, n_timers), JS_CFUNC_DEF("go", 2, n_go), JS_CFUNC_DEF("back", 0, n_back),
     JS_CFUNC_DEF("submit", 1, n_submit), JS_CFUNC_DEF("activate", 1, n_activate),
 };
@@ -1265,6 +1273,17 @@ static void *jm_realloc(JSMallocState *s, void *ptr, size_t size) {
     return np + JM_HEAD;
 }
 static size_t jm_size(const void *ptr) { return ptr ? *(const size_t *)((const char *)ptr - JM_HEAD) : 0; }
+/* A promise failed and nothing was waiting to catch it (in a browser this shows
+ * in the console too). Our own "can't download yet" failures are logged
+ * already, when the script asks. */
+static void promise_failed(JSContext *ctx, JSValueConst promise, JSValueConst reason, JS_BOOL handled, void *op) {
+    (void)promise; (void)op;
+    if (handled) return;
+    const char *s = JS_ToCString(ctx, reason);
+    if (s && !strstr(s, "not supported yet")) jslog("Error (in a promise): %.140s", s);
+    if (s) JS_FreeCString(ctx, s);
+}
+
 static const JSMallocFunctions jm_funcs = { jm_malloc, jm_free, jm_realloc, jm_size };
 
 static void start_context(void) {
@@ -1279,6 +1298,7 @@ static void start_context(void) {
     JS_SetMemoryLimit(J.rt, limit);
     JS_SetMaxStackSize(J.rt, JS_STACK_LIMIT);
     JS_SetInterruptHandler(J.rt, interrupt, NULL);
+    JS_SetHostPromiseRejectionTracker(J.rt, promise_failed, NULL);
     J.ctx = JS_NewContext(J.rt);
     if (!J.ctx) { J.failed = true; return; }
     JSValue global = JS_GetGlobalObject(J.ctx);
