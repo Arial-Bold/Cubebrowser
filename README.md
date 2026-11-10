@@ -425,7 +425,8 @@ If you report a problem, please include these files and the page address.
 
 Built with [libogc2](https://libogc2.org/), [mbedTLS](https://github.com/Mbed-TLS/mbedtls),
 [stb_image](https://github.com/nothings/stb), the [LZMA SDK](https://www.7-zip.org/sdk.html)
-by Igor Pavlov (for .7z files) and the DejaVu fonts. The Game Boy
+by Igor Pavlov (for .7z files), [QuickJS](https://bellard.org/quickjs/) by Fabrice Bellard
+and Charlie Gordon (JavaScript, MIT licence) and the DejaVu fonts. The Game Boy
 Advance player is built with devkitARM and [libgba](https://github.com/devkitPro/libgba);
 the way it's sent over the link cable follows the method used by FIX94's
 [GBA Link Cable Dumper](https://github.com/FIX94/gba-link-cable-dumper).

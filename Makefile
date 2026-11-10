@@ -24,12 +24,15 @@ endif
 ifeq ($(wildcard third_party/stb/stb_image.h),)
 $(error "stb_image.h not found in third_party/stb. Run ./get-mbedtls.sh first (see README.md)")
 endif
+ifeq ($(wildcard third_party/quickjs/quickjs.c),)
+$(error "QuickJS not found in third_party/quickjs. Run ./get-mbedtls.sh first (see README.md)")
+endif
 endif
 endif
 
 TARGET		:=	cubebrowser
 BUILD		:=	build
-SOURCES		:=	source $(MBEDTLS)/library
+SOURCES		:=	source $(MBEDTLS)/library third_party/quickjs
 DATA		:=
 INCLUDES	:=	source
 
@@ -66,6 +69,7 @@ export INCLUDE	:=	$(foreach dir,$(INCLUDES), -iquote $(CURDIR)/$(dir)) \
 			-I$(CURDIR)/$(MBEDTLS)/include \
 			-I$(CURDIR)/$(MBEDTLS)/library \
 			-I$(CURDIR)/third_party/stb \
+			-I$(CURDIR)/third_party/quickjs \
 			$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
 			-I$(CURDIR)/$(BUILD) \
 			-I$(LIBOGC_INC)
@@ -90,6 +94,11 @@ $(OUTPUT).dol: $(OUTPUT).elf
 $(OUTPUT).elf: $(OFILES)
 
 $(OFILES_SOURCES) : $(HFILES)
+
+# QuickJS (JavaScript): the settings it's built with (and a few warnings of
+# its own style turned off)
+quickjs.o libregexp.o libunicode.o cutils.o dtoa.o: CFLAGS += -D_GNU_SOURCE -DCONFIG_VERSION='"2026-06-04"' \
+	-Wno-sign-compare -Wno-unused-variable -Wno-unused-but-set-variable -Wno-array-bounds
 
 -include $(DEPENDS)
 
