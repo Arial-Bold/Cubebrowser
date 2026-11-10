@@ -43,7 +43,7 @@ typedef struct {
     int  update_auto;
     /* Leaving the browser */
     int  exit_action;
-    char swiss_dol[256];
+    char launcher_dol[256];
 } Settings;
 
 extern Settings g_set;

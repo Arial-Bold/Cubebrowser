@@ -73,7 +73,7 @@ static bool parse(const unsigned char *d, size_t len, DolPlan *pl, uint32_t *max
 
 static unsigned char *read_file(const char *path, size_t *len, char *err, size_t errlen) {
     FILE *f = fopen(path, "rb");
-    if (!f) { snprintf(err, errlen, "Couldn't find %s on the SD card. Check Settings > Data > Swiss .dol file.", path); return NULL; }
+    if (!f) { snprintf(err, errlen, "Couldn't find %s on the SD card. Check Settings > Data > Launcher .dol file.", path); return NULL; }
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
     fseek(f, 0, SEEK_SET);

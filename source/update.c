@@ -307,7 +307,7 @@ static bool find_new_dol(const char *dir, char *out, size_t cap) {
     return find_any_dol(dir, 0, out, cap);
 }
 
-/* Which .dol to replace: the one we were started from, if Swiss said so;
+/* Which .dol to replace: the one we were started from, if the launcher said so;
  * otherwise the only cubebrowser*.dol on the card, or apps/cubebrowser/default.dol. */
 static bool find_target(char *out, size_t cap) {
     const char *pf = storage_program_file();

@@ -31,7 +31,7 @@ typedef struct {
     const char *notes, *error;
     const char *available_text;  /* under "Version x is available!" */
     const char *installed_text;  /* under "Version x is installed." */
-    const char *done_button;     /* e.g. "EXIT TO SWISS" */
+    const char *done_button;     /* e.g. "EXIT TO LAUNCHER" */
     int state, step;             /* UpdateState, UpdateStep */
 } UpdView;
 void home_update_reset(void);

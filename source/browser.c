@@ -988,7 +988,7 @@ static void draw_download(bool interactive) {
                   song ? "It's in the music player's song list."
                        : ends_with_ci(dl_name, ".sf2") ? "Choose it under Settings > Music > Instruments."
                                                        : dl_is_gci ? "It's a GameCube save. Copy it to a memory card to use it."
-                                                                   : "You can open it from Swiss after leaving the browser.", 2);
+                                                                   : "You can open it from your launcher after leaving the browser.", 2);
         bool two = dl_is_zip || song || dl_is_gci;
         float bw = two ? (tw - 12) / 2 : tw * 0.5f, bx = two ? tx : tx + tw * 0.25f;
         if (song) {
@@ -1310,6 +1310,12 @@ static void schedule_images(float view_top, float view_h, float max_w) {
         if (k == pick || !o->url || o->state == IMG_NONE || strcmp(o->url, im->url)) continue;
         if (o->state == IMG_LOADING) return;   /* it'll be shared when that one arrives */
         share_image_result(k);
+        return;
+    }
+    if (adblock_blocked(im->url)) {   /* an ad: never asked for, and leaves no gap */
+        im->state = IMG_SKIPPED;
+        im->blocked = 1;
+        page.relayout = true;
         return;
     }
     static char req[URL_MAX];
@@ -1760,26 +1766,26 @@ static void draw_clock(float right_x, float y) {
 /* Exit button: press twice (within 3 seconds) to leave the browser. */
 static int exit_armed_until;
 
-static bool exit_to_swiss(void);
+static bool exit_to_launcher(void);
 
 static void exit_pressed(void) {
     if (ui_frame() > exit_armed_until) {
         exit_armed_until = ui_frame() + 180;
-        ui_toast(g_set.exit_action == 1 ? "Press again to restart the console" : "Press again to exit to Swiss");
+        ui_toast(g_set.exit_action == 1 ? "Press again to restart the console" : "Press again to exit to Launcher");
         return;
     }
     exit_armed_until = 0;
     settings_save();
     cookies_save_if_needed();
     if (g_set.exit_action == 1) { system_restart(); return; }
-    exit_to_swiss();
+    exit_to_launcher();
 }
 
-/* Starts Swiss (finding it on the card if it moved). False if it couldn't. */
-static bool exit_to_swiss(void) {
+/* Starts the launcher (finding it on the card if it moved). False if it couldn't. */
+static bool exit_to_launcher(void) {
     char err[256];
-    if (!dol_check(g_set.swiss_dol, err, sizeof(err))) {
-        /* not where it was set: look for a Swiss .dol and remember it */
+    if (!dol_check(g_set.launcher_dol, err, sizeof(err))) {
+        /* not where it was set: look for a known launcher's .dol and remember it */
         static char found[48][256];
         int n = storage_ok() ? dol_find("sd:/", found, 48) : 0;
         int pick = -1;
@@ -1789,14 +1795,14 @@ static bool exit_to_swiss(void) {
             if (!strncasecmp(name, "swiss", 5) && dol_check(found[i], err, sizeof(err))) pick = i;
         }
         if (pick < 0) {
-            ui_toast("Swiss .dol not found - choose it in Settings > Data");
+            ui_toast("Launcher .dol not found - choose it in Settings > Data");
             sound_play(SFX_ERROR);
             return false;
         }
-        snprintf(g_set.swiss_dol, sizeof(g_set.swiss_dol), "%s", found[pick]);
+        snprintf(g_set.launcher_dol, sizeof(g_set.launcher_dol), "%s", found[pick]);
         settings_save();
     }
-    if (!dol_launch(g_set.swiss_dol, err, sizeof(err))) {
+    if (!dol_launch(g_set.launcher_dol, err, sizeof(err))) {
         ui_toast(err);
         sound_play(SFX_ERROR);
         return false;
@@ -2061,9 +2067,9 @@ kb_done:
         else if (ua == HOME_UPDATE_STOP) fetch_cancel_update();
         else if (ua == HOME_UPDATE_RESTART) {
             /* start the new version straight away; if it can't be started
-             * from here, fall back to Swiss, where it can be */
+             * from here, fall back to the launcher, where it can be */
             char err[256];
-            if (!update_restart(err, sizeof(err)) && !exit_to_swiss()) { ui_toast(err); sound_play(SFX_ERROR); }
+            if (!update_restart(err, sizeof(err)) && !exit_to_launcher()) { ui_toast(err); sound_play(SFX_ERROR); }
         }
     } else if (on_help) {
         /* Controls & Tips draws itself too (home.c) */

@@ -43,7 +43,7 @@ bool update_restart(char *err, size_t errlen);   /* starts the newly installed .
  * that this one has started, so old versions don't pile up on the card. */
 void update_remove_old(void);
 
-/* Helpers shared with the Swiss updater: "key": "value" in GitHub's JSON,
+/* Helpers shared with other updaters: "key": "value" in GitHub's JSON,
  * and Markdown release notes tidied for plain display. */
 bool update_json_string(const char *json, const char *key, char *out, size_t cap, const char **after);
 void update_tidy_notes(char *s);

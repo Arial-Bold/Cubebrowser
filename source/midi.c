@@ -1240,7 +1240,7 @@ void midi_init(void) {
 }
 
 /* Stops the music and frees the loaded instrument samples, for jobs that
- * need a lot of memory (unpacking a Swiss update). */
+ * need a lot of memory (unpacking an update). */
 void midi_release_memory(void) {
     if (!lock_ok) return;
     thr_lock(&lock);

@@ -36,7 +36,7 @@ static bool has_settings(const char *dir) {
     return is_file(p);
 }
 
-/* argv[0] as given by Swiss or another loader, e.g. "sd:/apps/cb/cubebrowser.dol"
+/* argv[0] as given by the launcher, e.g. "sd:/apps/cb/cubebrowser.dol"
  * (the device name may differ). We only trust it if that file really is on
  * our SD card. */
 static void find_program_dir(const char *argv0) {
@@ -207,7 +207,7 @@ bool storage_move_data(bool to_root, char *msg, size_t cap) {
         snprintf(target, sizeof(target), "%s", STORAGE_ROOT_DIR);
     } else {
         if (!prog_dir[0]) {
-            snprintf(msg, cap, "Swiss didn't say which folder CubeBrowser is in. Move the gcbrowser folder on a PC.");
+            snprintf(msg, cap, "The launcher didn't say which folder CubeBrowser is in. Move the gcbrowser folder on a PC.");
             return false;
         }
         snprintf(target, sizeof(target), "%s/gcbrowser", prog_dir);

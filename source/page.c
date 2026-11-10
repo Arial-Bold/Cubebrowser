@@ -868,6 +868,7 @@ static __attribute__((noinline)) void emit_image(L *c, Flow *f, Node *n, const S
      * inside; skipped ones are invisible. */
     bool keep_box = g_set.load_images && im && (im->state == IMG_FAILED || im->state == IMG_SKIPPED) &&
                     im->decl_w > 0 && im->decl_h > 0;
+    if (im && im->blocked) return;   /* a blocked ad: no box, no description */
     if (g_set.load_images && im && im->state == IMG_SKIPPED && !keep_box) return;
     if (!keep_box && (!g_set.load_images || !im || im->state == IMG_FAILED || im->state == IMG_SKIPPED)) {
         const char *alt = dom_attr(n, "alt");

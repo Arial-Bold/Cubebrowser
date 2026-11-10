@@ -2,7 +2,7 @@
  *
  * The data folder ("gcbrowser": settings, bookmarks, cookies, cacert.pem,
  * logs) is looked for in this order:
- *   1. next to cubebrowser.dol (when Swiss tells us where that is),
+ *   1. next to cubebrowser.dol (when the launcher tells us where that is),
  *   2. one folder down from the root or from sd:/apps (e.g. sd:/apps/x/gcbrowser),
  *      when the .dol's location isn't known,
  *   3. sd:/gcbrowser at the root of the card (also the default for new cards).

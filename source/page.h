@@ -50,6 +50,7 @@ typedef struct {
     const Node *node;   /* the <img> element (valid while the page is loaded) */
     short known_w, known_h;   /* size once loaded, kept if its texture is let go off screen */
     unsigned char lowmem;     /* skipped only for lack of memory: tried again when there's room */
+    unsigned char blocked;    /* an ad (Block ads): takes no room at all */
 } PageImage;
 
 enum { SHEET_NONE, SHEET_LOADING, SHEET_DONE };

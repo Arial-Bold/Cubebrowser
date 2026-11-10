@@ -10,7 +10,7 @@
 
 typedef enum { FETCH_IDLE, FETCH_BUSY, FETCH_DONE } FetchState;
 typedef enum { JOB_PAGE, JOB_IMAGE, JOB_CSS, JOB_DOWNLOAD, JOB_UNZIP, JOB_UPDATE_CHECK, JOB_UPDATE_INSTALL,
-               JOB_SWISS_CHECK, JOB_SWISS_INSTALL, JOB_XHR } JobKind;
+               JOB_LAUNCHER_CHECK, JOB_LAUNCHER_INSTALL, JOB_XHR } JobKind;
 
 typedef struct {
     int tag;              /* caller's identifier */

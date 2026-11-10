@@ -35,7 +35,7 @@ static bool capture_armed;
 static int confirm_action = -1;   /* def index pressed once */
 static bool leave_now;            /* an action wants the browser shown */
 
-/* list picker: the Swiss .dol, or the music player's SoundFont */
+/* list picker: the launcher .dol, or the music player's SoundFont */
 #define PICK_MAX 48
 static char (*pick_list)[256];
 static int pick_count = -1;       /* -1 = closed */
@@ -273,7 +273,7 @@ static void draw_info_line(float x, float y, float w) {
     gfx_text(FONT_UI, ts, x + w - iw, y, t->text_dim, info, -1);
 }
 
-/* Lists the .dol files found; choosing one sets it as the Swiss program. */
+/* Lists the .dol files found; choosing one sets it as the launcher. */
 static void draw_picker(bool interactive) {
     const Theme *t = theme();
     float sx, sy, sw, sh;
@@ -283,7 +283,7 @@ static void draw_picker(bool interactive) {
     float px = sx + (sw - pw) * 0.5f, py = sy + (sh - ph) * 0.5f;
     ui_set_input(interactive);
     ui_panel(px, py, pw, ph, 20);
-    gfx_text(FONT_UI, 22, px + 24, py + 14, t->text, pick_sf2 ? "Choose the instruments" : "Choose the Swiss program", -1);
+    gfx_text(FONT_UI, 22, px + 24, py + 14, t->text, pick_sf2 ? "Choose the instruments" : "Choose the Launcher", -1);
     const int visible = 6;
     float row_h = 40, ly = py + 56;
     int dir = ui_dpad_unhandled();
@@ -295,7 +295,7 @@ static void draw_picker(bool interactive) {
     if (pick_scroll < 0) pick_scroll = 0;
     for (int i = pick_scroll; i < pick_count && i < pick_scroll + visible; i++) {
         const char *shown = pick_sf2 ? sf2_label(pick_list[i]) : pick_list[i] + (strncmp(pick_list[i], "sd:", 3) ? 0 : 3);
-        bool current = !strcmp(pick_list[i], pick_sf2 ? g_set.music_sf2 : g_set.swiss_dol);
+        bool current = !strcmp(pick_list[i], pick_sf2 ? g_set.music_sf2 : g_set.launcher_dol);
         if (ui_button(ui_id("pick", i), px + 20, ly + (i - pick_scroll) * (row_h + 6), pw - 40, row_h, shown, 16,
                       current ? UIB_ACCENT : UIB_FLAT)) {
             if (pick_sf2) {
@@ -311,7 +311,7 @@ static void draw_picker(bool interactive) {
             }
             char err[200];
             if (dol_check(pick_list[i], err, sizeof(err))) {
-                snprintf(g_set.swiss_dol, sizeof(g_set.swiss_dol), "%s", pick_list[i]);
+                snprintf(g_set.launcher_dol, sizeof(g_set.launcher_dol), "%s", pick_list[i]);
                 dirty = true;
                 pick_count = -1;
                 ui_toast("Exit button will start this program");
