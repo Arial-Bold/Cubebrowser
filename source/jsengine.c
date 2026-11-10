@@ -99,6 +99,7 @@ static struct {
     NetReq net[NET_MAX];
     ModFile *mods;
     int nmods, capmods;
+    int blocked;         /* downloads the ad block list stopped (scripts, data) */
     bool started;        /* the context exists */
     bool failed;         /* it couldn't start, or scripts keep getting stopped */
     Script *q;
@@ -1730,6 +1731,7 @@ static void net_job(void *arg) {
     NetReq *q = &J.net[j->slot];
     HttpResult *r = j->r;
     bool ok = r && !r->error[0] && r->status > 0;
+    if (r && r->blocked) J.blocked++;
     if (ok) {
         jslog("Got %.120s (%d, %u bytes)", q->url, r->status, (unsigned)r->body_len);
     } else {
@@ -1854,7 +1856,7 @@ void js_script_blocked(int idx) {
         J.q[idx].failed = 1;
         u = J.q[idx].url;
     }
-    if (u) jslog("Blocked (ad list): %.140s", u);
+    if (u) { jslog("Blocked (ad list): %.140s", u); J.blocked++; }
 }
 
 bool js_scripts_pending(void) {
@@ -1870,6 +1872,8 @@ static void script_event(Node *n, const char *type) {
     EventJob e = { n, type, false };
     run_with_big_stack(event_job, &e);
 }
+
+int js_blocked_count(void) { return J.page ? J.blocked : 0; }
 
 bool js_net_pending(void) {
     if (!ready()) return false;

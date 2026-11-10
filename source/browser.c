@@ -2120,7 +2120,11 @@ kb_done:
         static const char note_text_on[] =
             "This site builds its pages with scripts that need more than CubeBrowser's JavaScript can do, so some "
             "or all of it may be missing. Text mode asks the site for a simpler version, which some sites offer.";
-        const char *note_text = g_set.javascript ? note_text_on : note_text_off;
+        static const char note_text_ads[] =
+            "This page's scripts tried to fetch ads or send you through an ad service, and Block ads stopped them, "
+            "so the page may stay blank. Text mode asks the site for a simpler version, which some sites offer.";
+        const char *note_text = g_set.javascript ? (js_blocked_count() > 0 ? note_text_ads : note_text_on) : note_text_off;
+        bool note_ads = g_set.javascript && js_blocked_count() > 0;
         bool ask = ask_gen == page_gen && !loading;
         static char ask_text[400];
         if (ask) {
@@ -2185,7 +2189,7 @@ kb_done:
             }
         } else if (note) {
             ui_panel(nx, ny, nw, nh, 18);
-            gfx_text(FONT_UI, 22, nx + 24, ny + 20, t->text, "This page needs JavaScript", -1);
+            gfx_text(FONT_UI, 22, nx + 24, ny + 20, t->text, note_ads ? "Ads blocked on this page" : "This page needs JavaScript", -1);
             note_wrap(FONT_BODY, 17, nx + 24, ny + 54, nw - 48, t->text_dim, note_text, true);
             bool can_text = g_set.user_agent != 1 && strcmp(text_mode_tried, page.url) != 0;
             int nb = 1 + (can_text ? 1 : 0) + (nback > 0 ? 1 : 0), k = 0;

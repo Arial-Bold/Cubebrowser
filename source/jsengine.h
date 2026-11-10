@@ -45,7 +45,8 @@ enum { JS_NAV_NONE, JS_NAV_GO, JS_NAV_REPLACE, JS_NAV_BACK, JS_NAV_SUBMIT };
 int  js_take_navigation(char *url, size_t cap, int *field);
 const char *js_take_message(void);   /* alert() text, or a note about a stopped script */
 bool js_busy(void);
-bool js_net_pending(void);               /* data scripts asked for hasn't come yet */                  /* scripts still to run before the page is ready */
+bool js_net_pending(void);
+int  js_blocked_count(void);   /* the page's script downloads Block ads stopped */               /* data scripts asked for hasn't come yet */                  /* scripts still to run before the page is ready */
 
 /* about:console: the last page's script files, errors and console messages. */
 void js_console_html(char *out, size_t cap);
