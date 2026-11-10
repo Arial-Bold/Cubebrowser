@@ -540,8 +540,8 @@ static float help_body(float x, float y, float w, bool draw) {
     static const char *const tips_text[] = {
         "Downloads: links to files such as .dol, .iso or .zip offer to save them to the SD card. Zip files "
         "can be unzipped right away, and an interrupted download continues where it stopped.",
-        "What works: text, links, pictures, tables, lists and forms such as search boxes. JavaScript isn't "
-        "supported, so sites are shown in a simpler layout. Light, text-based sites work best.",
+        "What works: text, links, pictures, tables, lists, forms and simple JavaScript such as menus, tabs and "
+        "buttons. Big script-heavy sites won't run, and pages use a simpler layout. Light sites work best.",
         "Music: put .mid files in a folder called midi on your SD card and press the note button in the "
         "toolbar. The music keeps playing while you browse. Add a SoundFont (.sf2) there for real instruments.",
         "Every button except the D-Pad can be changed in Settings > Controls.",

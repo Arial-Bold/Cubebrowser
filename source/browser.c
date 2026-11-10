@@ -121,8 +121,9 @@ static const char help_html[] =
     "<h3>Downloads</h3><p>Links to files (such as .dol, .iso or .zip) ask to save them to the SD card. "
     "Zip and 7z files can be unpacked automatically. Interrupted downloads continue where they stopped.</p>"
     "<h3>What works</h3><p>Text, links, pictures, tables, lists, forms such as search boxes, and most "
-    "page colours, fonts and spacing. JavaScript and modern multi-column layouts aren't supported, so "
-    "sites are shown in a simpler, phone-style layout. Lightweight sites work best.</p>"
+    "page colours, fonts and spacing, and simple JavaScript (menus, tabs, buttons). Big script-heavy sites "
+    "and modern multi-column layouts don't work, so sites are shown in a simpler, phone-style layout. "
+    "Lightweight sites work best.</p>"
     "<p><a href=\"about:home\">Back to the start page</a></p>";
 
 /* ------------------------------------------------------------ bookmarks */
@@ -197,8 +198,11 @@ static void html_escape(const char *in, char *out, size_t outlen) {
 }
 
 static void show_html(const char *html, const char *url, bool plain) {
+    /* the old page's scripts go first: a big site's can fill the memory this
+     * needs (and a page that can't be shown says so, rather than staying put) */
+    js_page_end();
     char *copy = strdup(html);
-    if (!copy) return;
+    if (!copy) { ui_toast("Not enough memory to show that page"); return; }
     page_set_source(&page, copy, strlen(copy), plain, url);
     js_page_begin(&page);
     page.secure = page.verified = page.truncated = false;
@@ -341,6 +345,7 @@ static void restore_entry(HistEntry *e) {
     e->post = NULL;
     hist_unspill(e);
     if (e->src) {
+        js_page_end();   /* (the old page's scripts first, for the memory) */
         page_set_source(&page, e->src, e->len, e->plain, e->url);
         js_page_begin(&page);
         e->src = NULL;
@@ -1449,6 +1454,7 @@ static void handle_fetch_result(void) {
     free(cur_post);
     cur_post = pending_post;   /* redirects after a POST end up as GET, but re-sending is harmless here */
     pending_post = NULL;
+    js_page_end();   /* (the old page's scripts first, for the memory) */
     page_set_source(&page, r.body, r.body_len, plain, r.url);
     js_page_begin(&page);
     page.secure = r.secure;
