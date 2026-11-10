@@ -313,6 +313,17 @@
     scrollTop: { get() { return 0; }, set(v) {} },
     scrollLeft: { get() { return 0; }, set(v) {} },
     tabIndex: { get() { return parseInt(N.attr(this._h, 'tabindex') || '-1', 10); }, set(v) { N.setAttr(this._h, 'tabindex', str(v)); } },
+    // (for <script>, <link>, <iframe>, <source>...: the attribute, as an address)
+    src: { get() { const v = N.attr(this._h, 'src'); return v === null ? '' : N.resolve(v); }, set(v) { N.setAttr(this._h, 'src', str(v)); } },
+    href: { get() { const v = N.attr(this._h, 'href'); return v === null ? '' : N.resolve(v); }, set(v) { N.setAttr(this._h, 'href', str(v)); } },
+    type: attrProp('type'),
+    rel: attrProp('rel'),
+    async: boolAttr('async'),
+    defer: boolAttr('defer'),
+    charset: attrProp('charset'),
+    crossOrigin: attrProp('crossorigin'),
+    integrity: attrProp('integrity'),
+    media: attrProp('media'),
   });
   Object.assign(ElementProto, {
     getAttribute(n) { return N.attr(this._h, String(n).toLowerCase()); },
@@ -667,7 +678,7 @@
     dispatch(h, type) {
       const t = W(h);
       if (!t) return false;
-      const ev = new Event(type, { bubbles: type !== 'focus' && type !== 'blur', cancelable: true });
+      const ev = new Event(type, { bubbles: type !== 'focus' && type !== 'blur' && type !== 'load' && type !== 'error', cancelable: true });
       const ok = dispatch(t, ev);
       if (type === 'click') {
         for (let n = t; n; n = n.parentNode) {
