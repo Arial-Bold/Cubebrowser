@@ -12,6 +12,10 @@ typedef struct {
     volatile int *cancel;
     /* how long opening took, in milliseconds (for page.log) */
     int ms_dns, ms_connect, ms_tls;
+    /* the certificate chain the site sent: how many, and the last one's
+     * subject and issuer (for the message when it can't be verified) */
+    int chain_len;
+    char chain_top[96], chain_issuer[96];
 } Conn;
 
 /* One-time setup: seeds the RNG, loads the CA bundle. err gets a message on failure. */

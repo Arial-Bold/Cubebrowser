@@ -144,6 +144,25 @@ static int raw_send(Conn *c, const unsigned char *buf, size_t len) {
 static int bio_send(void *ctx, const unsigned char *buf, size_t len) { return raw_send((Conn *)ctx, buf, len); }
 static int bio_recv(void *ctx, unsigned char *buf, size_t len) { return raw_recv((Conn *)ctx, buf, len); }
 
+/* Notes the certificates as they're checked (the top of the chain first). */
+static int note_chain(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flags) {
+    (void)flags;
+    Conn *c = ctx;
+    if (depth + 1 > c->chain_len) {
+        c->chain_len = depth + 1;
+        char dn[256];
+        if (mbedtls_x509_dn_gets(dn, sizeof(dn), &crt->subject) > 0) {
+            const char *cn = strstr(dn, "CN=");
+            snprintf(c->chain_top, sizeof(c->chain_top), "%.90s", cn ? cn + 3 : dn);
+        }
+        if (mbedtls_x509_dn_gets(dn, sizeof(dn), &crt->issuer) > 0) {
+            const char *cn = strstr(dn, "CN=");
+            snprintf(c->chain_issuer, sizeof(c->chain_issuer), "%.90s", cn ? cn + 3 : dn);
+        }
+    }
+    return 0;
+}
+
 static void describe_error(int r, char *err, size_t errlen) {
     if (r == ERR_CANCELLED) { snprintf(err, errlen, "Stopped."); return; }
     if (r == MBEDTLS_ERR_SSL_TIMEOUT) { snprintf(err, errlen, "The site took too long to respond."); return; }
@@ -194,6 +213,7 @@ bool conn_open(Conn *c, const char *host, unsigned short port, bool tls, volatil
     if (r == 0) r = mbedtls_ssl_set_hostname(&c->ssl, host);   /* SNI + name check */
     if (r != 0) { describe_error(r, err, errlen); conn_close(c); return false; }
     mbedtls_ssl_set_bio(&c->ssl, c, bio_send, bio_recv, NULL);
+    mbedtls_ssl_set_verify(&c->ssl, note_chain, c);
 
     while ((r = mbedtls_ssl_handshake(&c->ssl)) != 0) {
         if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
@@ -206,7 +226,10 @@ bool conn_open(Conn *c, const char *host, unsigned short port, bool tls, volatil
             const char *clock_hint = "";
             if ((flags & (MBEDTLS_X509_BADCERT_EXPIRED | MBEDTLS_X509_BADCERT_FUTURE)) && !netio_time_synced())
                 clock_hint = " The console clock wasn't set from the network, which can cause this.";
-            snprintf(err, errlen, "This site's certificate couldn't be verified: %s.%s", info, clock_hint);
+            char chain[240] = "";
+            if ((flags & MBEDTLS_X509_BADCERT_NOT_TRUSTED) && c->chain_issuer[0])
+                snprintf(chain, sizeof(chain), " Last certificate: \"%.40s\", issued by \"%.50s\".", c->chain_top, c->chain_issuer);
+            snprintf(err, errlen, "This site's certificate couldn't be verified: %s.%s%s", info, clock_hint, chain);
         } else {
             describe_error(r, err, errlen);
         }
