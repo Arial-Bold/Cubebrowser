@@ -820,14 +820,76 @@
   win.MutationObserver = function () { return { observe() {}, disconnect() {}, takeRecords() { return []; } }; };
   win.IntersectionObserver = function (cb) { return { observe(el) { setTimeout(() => cb([{ target: el, isIntersecting: true, intersectionRatio: 1 }], this), 1); }, unobserve() {}, disconnect() {} }; };
   win.ResizeObserver = function () { return { observe() {}, unobserve() {}, disconnect() {} }; };
-  win.URLSearchParams = function (s) {
+  win.URLSearchParams = function (s, onchange) {
     const m = [];
-    String(s || '').replace(/^\?/, '').split('&').forEach((p) => { if (!p) return; const i = p.indexOf('='); m.push([decodeURIComponent((i < 0 ? p : p.slice(0, i)).replace(/\+/g, ' ')), i < 0 ? '' : decodeURIComponent(p.slice(i + 1).replace(/\+/g, ' '))]); });
-    return { get: (k) => { const e = m.find((x) => x[0] === k); return e ? e[1] : null; }, has: (k) => m.some((x) => x[0] === k),
-      getAll: (k) => m.filter((x) => x[0] === k).map((x) => x[1]), set(k, v) { const e = m.find((x) => x[0] === k); if (e) e[1] = String(v); else m.push([k, String(v)]); },
-      append(k, v) { m.push([k, String(v)]); }, delete(k) { for (let i = m.length - 1; i >= 0; i--) if (m[i][0] === k) m.splice(i, 1); },
-      toString: () => m.map((x) => encodeURIComponent(x[0]) + '=' + encodeURIComponent(x[1])).join('&'), forEach(f) { m.forEach((x) => f(x[1], x[0])); } };
+    const dec = (x) => { try { return decodeURIComponent(x.replace(/\+/g, ' ')); } catch (e) { return x; } };
+    if (s && typeof s === 'object') {
+      if (typeof s.forEach === 'function' && !Array.isArray(s)) s.forEach((v, k) => m.push([String(k), String(v)]));
+      else if (Array.isArray(s)) s.forEach((p) => m.push([String(p[0]), String(p[1])]));
+      else Object.keys(s).forEach((k) => m.push([k, String(s[k])]));
+    } else String(s || '').replace(/^\?/, '').split('&').forEach((p) => { if (!p) return; const i = p.indexOf('='); m.push([dec(i < 0 ? p : p.slice(0, i)), i < 0 ? '' : dec(p.slice(i + 1))]); });
+    const changed = () => { if (onchange) onchange(); };
+    const enc = (x) => encodeURIComponent(x).replace(/%20/g, '+');
+    const o = { get: (k) => { const e = m.find((x) => x[0] === k); return e ? e[1] : null; }, has: (k) => m.some((x) => x[0] === k),
+      getAll: (k) => m.filter((x) => x[0] === k).map((x) => x[1]),
+      set(k, v) { k = String(k); const i = m.findIndex((x) => x[0] === k); if (i < 0) m.push([k, String(v)]); else { m[i][1] = String(v); for (let j = m.length - 1; j > i; j--) if (m[j][0] === k) m.splice(j, 1); } changed(); },
+      append(k, v) { m.push([String(k), String(v)]); changed(); }, delete(k) { for (let i = m.length - 1; i >= 0; i--) if (m[i][0] === k) m.splice(i, 1); changed(); },
+      sort() { m.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)); changed(); },
+      toString: () => m.map((x) => enc(x[0]) + '=' + enc(x[1])).join('&'), forEach(f) { m.forEach((x) => f(x[1], x[0], o)); },
+      entries: () => m.map((x) => [x[0], x[1]])[Symbol.iterator](), keys: () => m.map((x) => x[0])[Symbol.iterator](), values: () => m.map((x) => x[1])[Symbol.iterator](),
+      [Symbol.iterator]: () => m.map((x) => [x[0], x[1]])[Symbol.iterator]() };
+    Object.defineProperty(o, 'size', { get: () => m.length });
+    return o;
   };
+
+  // URL: an address taken apart (and put back together as it changes)
+  const URL_RE = /^([a-z][a-z0-9+.-]*:)(?:\/\/(?:([^:@\/]*)(?::([^@\/]*))?@)?([^:\/?#]*)(?::(\d*))?)?([^?#]*)(\?[^#]*)?(#.*)?$/i;
+  function URLc(u, base) {
+    if (!(this instanceof URLc)) throw new TypeError("Constructor URL requires 'new'");
+    let h = u && u.href ? u.href : str(u);
+    if (base !== undefined && base !== null) {
+      const b = base && base.href ? base.href : str(base);
+      if (!URL_RE.test(b)) throw new TypeError('Invalid base URL: ' + b);
+      h = N.resolve(h, b);
+    } else if (!/^[a-z][a-z0-9+.-]*:/i.test(h)) throw new TypeError('Invalid URL: ' + h);
+    this._parse(h);
+  }
+  URLc.prototype = {
+    _parse(h) {
+      const r = URL_RE.exec(h);
+      if (!r) throw new TypeError('Invalid URL: ' + h);
+      this._p = r[1].toLowerCase(); this._user = r[2] || ''; this._pass = r[3] || ''; this._host = (r[4] || '').toLowerCase();
+      this._port = r[5] || ''; this._path = r[6] || ''; this._search = r[7] && r[7] !== '?' ? r[7] : ''; this._hash = r[8] && r[8] !== '#' ? r[8] : '';
+      this._slashes = /^[a-z][a-z0-9+.-]*:\/\//i.test(h);
+      if ((this._p === 'http:' && this._port === '80') || (this._p === 'https:' && this._port === '443')) this._port = '';
+      if (this._slashes && !this._path) this._path = '/';
+      this._sp = null;
+    },
+    get href() { return this._p + (this._slashes ? '//' + (this._user ? this._user + (this._pass ? ':' + this._pass : '') + '@' : '') + this.host : '') + this._path + this._search + this._hash; },
+    set href(v) { this._parse(str(v)); },
+    get protocol() { return this._p; }, set protocol(v) { v = str(v).replace(/:?$/, ':'); this._p = v.toLowerCase(); },
+    get username() { return this._user; }, set username(v) { this._user = str(v); },
+    get password() { return this._pass; }, set password(v) { this._pass = str(v); },
+    get host() { return this._host + (this._port ? ':' + this._port : ''); },
+    set host(v) { const p = str(v).split(':'); this._host = p[0].toLowerCase(); this._port = p[1] || ''; },
+    get hostname() { return this._host; }, set hostname(v) { this._host = str(v).toLowerCase(); },
+    get port() { return this._port; }, set port(v) { this._port = str(v); },
+    get pathname() { return this._path; }, set pathname(v) { v = str(v); this._path = v[0] === '/' || !this._slashes ? v : '/' + v; },
+    get search() { return this._search; }, set search(v) { v = str(v); this._search = v && v !== '?' ? (v[0] === '?' ? v : '?' + v) : ''; this._sp = null; },
+    get hash() { return this._hash; }, set hash(v) { v = str(v); this._hash = v && v !== '#' ? (v[0] === '#' ? v : '#' + v) : ''; },
+    get origin() { return this._slashes ? this._p + '//' + this.host : 'null'; },
+    get searchParams() {
+      if (!this._sp) { const u = this; this._sp = new win.URLSearchParams(this._search, () => { const q = u._sp.toString(); u._search = q ? '?' + q : ''; }); }
+      return this._sp;
+    },
+    toString() { return this.href; }, toJSON() { return this.href; },
+  };
+  URLc.canParse = (u, b) => { try { new URLc(u, b); return true; } catch (e) { return false; } };
+  URLc.parse = (u, b) => { try { return new URLc(u, b); } catch (e) { return null; } };
+  let blobN = 0;
+  URLc.createObjectURL = () => 'blob:' + N.url().split('/').slice(0, 3).join('/') + '/' + (++blobN);
+  URLc.revokeObjectURL = () => {};
+  win.URL = URLc;
 
   // ------------------------------------------------------------ for the browser
   return {
