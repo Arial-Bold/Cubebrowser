@@ -1072,7 +1072,11 @@ FN(n_set_cookie) {
     UNUSED;
     const char *s = JS_ToCString(c, argv[0]);
     Url u;
-    if (s && page_url(&u)) cookies_set_by_script(u.host, u.path, !strcmp(u.scheme, "https"), s, time(NULL));
+    if (s && page_url(&u)) {
+        cookies_set_by_script(u.host, u.path, !strcmp(u.scheme, "https"), s, time(NULL));
+        const char *eq = strchr(s, '=');
+        jslog("A script set the cookie \"%.*s\"", eq ? (int)(eq - s > 40 ? 40 : eq - s) : 40, s);
+    }
     if (s) JS_FreeCString(c, s);
     return JS_UNDEFINED;
 }
@@ -1120,6 +1124,7 @@ FN(n_go) {
     if (s && *s && strncasecmp(s, "javascript:", 11)) {
         snprintf(J.nav_url, sizeof(J.nav_url), "%s", s);
         J.nav = JS_ToBool(c, argv[1]) ? JS_NAV_REPLACE : JS_NAV_GO;
+        jslog("A script opened %.140s", s);
     }
     if (s) JS_FreeCString(c, s);
     return JS_UNDEFINED;
@@ -1305,10 +1310,13 @@ static void run_script_job(void *arg) {
     J.deadline = now_ms() + LOAD_TIME_LIMIT;
     char name[128];
     snprintf(name, sizeof(name), "%.120s", s->url ? s->url : "<page>");
+    double t0 = now_ms();
     JSValue r = JS_Eval(J.ctx, code, len, name, JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(r)) report_exception();
     JS_FreeValue(J.ctx, r);
     run_jobs();
+    if (s->url) jslog("Ran %.120s (%.0f ms)", s->url, now_ms() - t0);
+    else jslog("Ran a script in the page (%u bytes, %.0f ms)", (unsigned)len, now_ms() - t0);
     J.cur_script = J.write_after = NULL;
 }
 
@@ -1431,13 +1439,16 @@ void js_page_end(void) { if (J.page || J.rt) run_with_big_stack(end_job, NULL); 
 
 void js_page_begin(Page *p) {
     js_page_end();
+    if (p && strncasecmp(p->url, "about:", 6)) {   /* (about: pages, like the log itself, keep the last one) */
+        log_count = 0;
+        snprintf(log_page, sizeof(log_page), "%s", p->url);
+        if (!g_set.javascript) jslog("JavaScript is turned off (Settings > Browsing)");
+    }
     if (!g_set.javascript || !p || !p->dom || !dom_keep_scripts) return;
     J.page = p;
     J.arena_start = p->dom->arena.used;
-    if (strncasecmp(p->url, "about:", 6)) {   /* (about: pages, like the log itself, keep the last one) */
-        log_count = 0;
-        snprintf(log_page, sizeof(log_page), "%s", p->url);
-    }
+    if (strncasecmp(p->url, "about:", 6))
+        jslog("The page has %d script%s", p->dom->nscript_nodes, p->dom->nscript_nodes == 1 ? "" : "s");
     for (int i = 0; i < p->dom->nscript_nodes; i++) queue_add_at(p->dom->scripts[i], -1);
 }
 

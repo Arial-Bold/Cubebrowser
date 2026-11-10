@@ -380,6 +380,45 @@ static void start_load(const char *url, const char *post) {
             home_update_reset();
             if (update_state() == UPD_NONE || update_state() == UPD_CHECK_FAILED) update_request_check(false);
         }
+        else if (!strcasecmp(url, "about:source")) {   /* the last page's HTML, as it arrived */
+            static char html[48 * 1024];
+            size_t k = 0;
+            /* (going to a new address put the page's source into Back) */
+            const char *src = page.src, *su = page.url;
+            size_t slen = page.src_len;
+            if (!src && nback > 0 && back_stack[nback - 1].src) {
+                src = back_stack[nback - 1].src;
+                slen = back_stack[nback - 1].len;
+                su = back_stack[nback - 1].url;
+            }
+            if (has_page && src && strncasecmp(su, "about:", 6)) {
+                k += (size_t)snprintf(html, sizeof(html), "<title>Page source</title><h2>Page source</h2><p>");
+                for (const char *c = su; *c && k + 8 < 600; c++) {
+                    if (*c == '<' || *c == '>' || *c == '&') html[k++] = '?'; else html[k++] = *c;
+                }
+                k += (size_t)snprintf(html + k, sizeof(html) - k, " (%u bytes%s)</p><pre>", (unsigned)slen,
+                                      slen > 40000 ? ", the first 40 KB" : "");
+                int col = 0;
+                for (size_t i = 0; i < slen && i < 40000 && k + 12 < sizeof(html); i++) {
+                    char c = src[i];
+                    /* wrap long lines so all of it fits on screen */
+                    if (c == '\n') col = 0;
+                    else if (c != '\r' && ++col > 58) { html[k++] = '\n'; col = 1; }
+                    if (c == '\t') c = ' ';
+                    if (c == '<') k += (size_t)snprintf(html + k, sizeof(html) - k, "&lt;");
+                    else if (c == '>') k += (size_t)snprintf(html + k, sizeof(html) - k, "&gt;");
+                    else if (c == '&') k += (size_t)snprintf(html + k, sizeof(html) - k, "&amp;");
+                    else if (c == '\r') continue;
+                    else html[k++] = c;
+                }
+                html[k] = 0;
+                if (k + 40 < sizeof(html)) k += (size_t)snprintf(html + k, sizeof(html) - k, "</pre>");
+            } else {
+                snprintf(html, sizeof(html), "<title>Page source</title><h2>Page source</h2>"
+                         "<p>Open a web page first, then type about:source to see its HTML.</p>");
+            }
+            show_html(html, "about:source", false);
+        }
         else if (!strcasecmp(url, "about:console")) {   /* the last page's script log */
             static char html[12288];
             js_console_html(html, sizeof(html));
