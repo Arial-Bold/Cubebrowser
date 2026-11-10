@@ -32,9 +32,12 @@ if [ ! -f third_party/quickjs/quickjs.c ]; then
              libunicode.c libunicode.h libunicode-table.h cutils.c cutils.h dtoa.c dtoa.h list.h LICENSE; do
         cp "third_party/quickjs-src/$f" third_party/quickjs/
     done
-    # the GameCube has no OS threads for Atomics, and no malloc_usable_size()
-    sed -i 's/^#define CONFIG_ATOMICS$/#if !defined(__GEKKO__)\n#define CONFIG_ATOMICS\n#endif/; s/^#elif defined(__EMSCRIPTEN__)$/#elif defined(__EMSCRIPTEN__) || defined(__GEKKO__)/' third_party/quickjs/quickjs.c
-    grep -q 'defined(__GEKKO__)' third_party/quickjs/quickjs.c || { echo "Couldn't adapt QuickJS for the GameCube"; exit 1; }
+    # the GameCube has no OS threads (for Atomics), no malloc_usable_size()
+    # and no time zones
+    sed -i -e 's/^#define CONFIG_ATOMICS$/#if !defined(GEKKO)\n#define CONFIG_ATOMICS\n#endif/' \
+           -e 's/^#elif defined(__EMSCRIPTEN__)$/#elif defined(__EMSCRIPTEN__) || defined(GEKKO)/' \
+           -e 's|^        res = -tm.tm_gmtoff / 60;$|#if defined(GEKKO)\n        res = 0;\n#else\n        res = -tm.tm_gmtoff / 60;\n#endif|' third_party/quickjs/quickjs.c
+    [ "$(grep -c 'defined(GEKKO)' third_party/quickjs/quickjs.c)" -ge 3 ] || { echo "Couldn't adapt QuickJS for the GameCube"; exit 1; }
     rm -rf third_party/quickjs-src third_party/quickjs.tar.gz
 fi
 echo "Done. Now run: make"
