@@ -544,7 +544,7 @@
 
   const nav = { userAgent: N.ua(), appName: 'Netscape', appVersion: '5.0', platform: 'GameCube', language: 'en-US', languages: ['en-US', 'en'],
     cookieEnabled: true, onLine: true, vendor: '', product: 'Gecko', maxTouchPoints: 0, hardwareConcurrency: 1,
-    javaEnabled() { return false; }, sendBeacon(u) { netNote(u); return true; } };
+    webdriver: false, javaEnabled() { return false; }, sendBeacon(u, d) { netStart('POST', u, d == null ? '' : String(d), 'text/plain;charset=UTF-8', '', false, () => {}); return true; } };
   win.navigator = nav;
   win.screen = { width: 640, height: 480, availWidth: 640, availHeight: 480, colorDepth: 24, pixelDepth: 24, orientation: { type: 'landscape-primary', angle: 0 } };
   win.innerWidth = 480; win.innerHeight = 640; win.outerWidth = 640; win.outerHeight = 480;
@@ -644,21 +644,178 @@
   win.atob = (s) => { s = String(s).replace(/[^A-Za-z0-9+/]/g, ''); let o = ''; for (let i = 0; i < s.length; i += 4) { const a = B64.indexOf(s[i]), b = B64.indexOf(s[i + 1]), c = B64.indexOf(s[i + 2]), d = B64.indexOf(s[i + 3]);
     o += String.fromCharCode((a << 2) | (b >> 4)); if (c >= 0 && s[i + 2]) o += String.fromCharCode(((b & 15) << 4) | (c >> 2)); if (d >= 0 && s[i + 3]) o += String.fromCharCode(((c & 3) << 6) | d); } return o; };
 
-  // network: not yet (scripts that ask get a polite failure)
-  function XMLHttpRequest() { this.readyState = 0; this.status = 0; this.responseText = ''; this.response = null; this._h = {}; }
+  // network: scripts' downloads go through the browser's own downloader, one
+  // at a time between the page's pictures (N.net queues one; api.net answers)
+  const netWaiting = {};
+  function netStart(method, url, body, ctype, accept, creds, done) {
+    const id = N.net(String(method || 'GET').toUpperCase(), str(url), body == null ? null : String(body), ctype || '', accept || '', !!creds);
+    if (id < 0) { setTimeout(() => done(0, '', '', ''), 1); return; }
+    netWaiting[id] = done;
+  }
+  function netAnswer(id, status, ctype, url, text) {
+    const f = netWaiting[id];
+    delete netWaiting[id];
+    if (f) f(status, ctype, url, text);
+  }
+  const statusTexts = { 200: 'OK', 201: 'Created', 204: 'No Content', 301: 'Moved Permanently', 302: 'Found', 304: 'Not Modified',
+    400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 429: 'Too Many Requests', 500: 'Internal Server Error', 503: 'Service Unavailable' };
+
+  function XMLHttpRequest() {
+    this.readyState = 0; this.status = 0; this.statusText = ''; this.responseText = ''; this.response = ''; this.responseURL = '';
+    this.responseType = ''; this.timeout = 0; this.withCredentials = false; this._q = {}; this._ct = ''; this.upload = Object.create(EventTarget);
+  }
   XMLHttpRequest.prototype = Object.assign(Object.create(EventTarget), {
-    open(m, u) { this.readyState = 1; this._u = String(u); }, setRequestHeader() {}, getResponseHeader() { return null; }, getAllResponseHeaders() { return ''; },
-    overrideMimeType() {}, abort() {},
-    send() { const x = this; netNote(x._u); setTimeout(() => { x.readyState = 4; x.status = 0;
-      if (x.onreadystatechange) try { x.onreadystatechange(); } catch (e) { reportError(e); }
-      if (x.onerror) try { x.onerror(new Event('error')); } catch (e) { reportError(e); }
-      callOn(x, new Event('error')); callOn(x, new Event('loadend')); }, 1); },
+    open(m, u) { this._m = String(m || 'GET'); this._u = N.resolve(str(u)); this._q = {}; this.readyState = 1; this.status = 0; this.responseText = ''; this._fire('readystatechange'); },
+    setRequestHeader(k, v) { this._q[String(k).toLowerCase()] = String(v); },
+    getResponseHeader(k) { return String(k).toLowerCase() === 'content-type' && this._ct ? this._ct : null; },
+    getAllResponseHeaders() { return this._ct ? 'content-type: ' + this._ct + '\r\n' : ''; },
+    overrideMimeType() {}, abort() { this._aborted = true; this.readyState = 0; },
+    _fire(type) {
+      const ev = new Event(type);
+      const f = this['on' + type];
+      if (typeof f === 'function') try { f.call(this, ev); } catch (e) { reportError(e); }
+      ev.target = this; callOn(this, ev);
+    },
+    send(body) {
+      const x = this;
+      x._aborted = false;
+      if (body != null && typeof body === 'object' && typeof body.toString === 'function' && !(body instanceof String)) {
+        if (body._fd) { body = body.toString(); if (!x._q['content-type']) x._q['content-type'] = 'application/x-www-form-urlencoded'; }
+        else if (typeof body !== 'string') body = String(body);
+      }
+      const m = x._m === 'GET' || x._m === 'HEAD' ? x._m : x._m;
+      netStart(m, x._u, m === 'GET' || m === 'HEAD' ? null : (body == null ? '' : body), x._q['content-type'], x._q['accept'], x.withCredentials,
+        (status, ctype, url, text) => {
+          if (x._aborted) return;
+          x.status = status; x.statusText = statusTexts[status] || ''; x._ct = ctype; x.responseURL = url || x._u;
+          x.responseText = text;
+          if (x.responseType === 'json') { try { x.response = JSON.parse(text); } catch (e) { x.response = null; } }
+          else if (x.responseType === 'arraybuffer') x.response = new TextEncoder().encode(text).buffer;
+          else if (x.responseType === 'document') x.response = null;
+          else x.response = text;
+          x.readyState = 2; x._fire('readystatechange');
+          x.readyState = 3; x._fire('readystatechange');
+          x.readyState = 4; x._fire('readystatechange');
+          x._fire(status ? 'load' : 'error');
+          x._fire('loadend');
+        });
+    },
   });
-  XMLHttpRequest.UNSENT = 0; XMLHttpRequest.DONE = 4;
+  XMLHttpRequest.UNSENT = 0; XMLHttpRequest.OPENED = 1; XMLHttpRequest.HEADERS_RECEIVED = 2; XMLHttpRequest.LOADING = 3; XMLHttpRequest.DONE = 4;
   win.XMLHttpRequest = XMLHttpRequest;
-  // (noted in about:console, so a page that waits on one can be explained)
-  function netNote(u) { N.note('A script tried to download ' + String(u || '?').slice(0, 120) + ' (scripts can\'t download data yet)'); }
-  win.fetch = (u) => { netNote(u && u.url ? u.url : u); return Promise.reject(new TypeError('Network requests from scripts are not supported yet')); };
+  // (sent the way a form is: name=value&...)
+  win.FormData = function (form) {
+    const m = [];
+    this._fd = true; this._m = m;
+    if (form && form.elements) for (const el of form.elements) { const n = el.getAttribute && el.getAttribute('name'); if (n && !el.disabled && ((el.type !== 'checkbox' && el.type !== 'radio') || el.checked)) m.push([n, str(el.value)]); }
+  };
+  win.FormData.prototype = { append(k, v) { this._m.push([String(k), String(v)]); }, set(k, v) { this.delete(k); this.append(k, v); },
+    get(k) { const e = this._m.find((x) => x[0] === k); return e ? e[1] : null; }, getAll(k) { return this._m.filter((x) => x[0] === k).map((x) => x[1]); },
+    has(k) { return this._m.some((x) => x[0] === k); }, delete(k) { for (let i = this._m.length - 1; i >= 0; i--) if (this._m[i][0] === k) this._m.splice(i, 1); },
+    entries() { return this._m[Symbol.iterator](); }, forEach(f) { this._m.forEach((x) => f(x[1], x[0], this)); },
+    toString() { return this._m.map((x) => encodeURIComponent(x[0]) + '=' + encodeURIComponent(x[1])).join('&'); } };
+
+  function Headers(init) {
+    const m = {};
+    if (init) { if (init._m) Object.assign(m, init._m); else if (Array.isArray(init)) init.forEach((p) => { m[String(p[0]).toLowerCase()] = String(p[1]); });
+      else Object.keys(init).forEach((k) => { m[k.toLowerCase()] = String(init[k]); }); }
+    this._m = m;
+  }
+  Headers.prototype = { get(k) { const v = this._m[String(k).toLowerCase()]; return v === undefined ? null : v; }, has(k) { return String(k).toLowerCase() in this._m; },
+    set(k, v) { this._m[String(k).toLowerCase()] = String(v); }, append(k, v) { this.set(k, v); }, delete(k) { delete this._m[String(k).toLowerCase()]; },
+    forEach(f) { Object.keys(this._m).forEach((k) => f(this._m[k], k, this)); }, entries() { return Object.entries(this._m)[Symbol.iterator](); },
+    [Symbol.iterator]() { return Object.entries(this._m)[Symbol.iterator](); } };
+  win.Headers = Headers;
+  function Response(text, init) {
+    init = init || {};
+    this.status = init.status === undefined ? 200 : init.status; this.ok = this.status >= 200 && this.status < 300;
+    this.statusText = init.statusText || statusTexts[this.status] || ''; this.url = init.url || ''; this.redirected = false; this.type = 'basic';
+    this.headers = new Headers(init.headers); this._t = text == null ? '' : String(text); this.bodyUsed = false;
+  }
+  Response.prototype = { text() { this.bodyUsed = true; return Promise.resolve(this._t); }, json() { this.bodyUsed = true; return new Promise((ok) => ok(JSON.parse(this._t))); },
+    arrayBuffer() { return Promise.resolve(new TextEncoder().encode(this._t).buffer); }, blob() { return Promise.resolve({ size: this._t.length, type: this.headers.get('content-type') || '', text: () => Promise.resolve(this._t) }); },
+    clone() { return new Response(this._t, { status: this.status, statusText: this.statusText, url: this.url, headers: this.headers }); } };
+  win.Response = Response;
+  function Request(u, init) { init = init || {}; this.url = N.resolve(str(u && u.url ? u.url : u)); this.method = String(init.method || (u && u.method) || 'GET').toUpperCase();
+    this.headers = new Headers(init.headers || (u && u.headers)); this.body = init.body !== undefined ? init.body : (u && u.body); this.credentials = init.credentials || 'same-origin'; }
+  win.Request = Request;
+  win.fetch = function (input, init) {
+    const rq = new Request(input, init);
+    let body = rq.body;
+    if (body && body._fd) { body = body.toString(); if (!rq.headers.has('content-type')) rq.headers.set('content-type', 'application/x-www-form-urlencoded'); }
+    return new Promise((resolve, reject) => {
+      netStart(rq.method, rq.url, rq.method === 'GET' || rq.method === 'HEAD' ? null : (body == null ? '' : body), rq.headers.get('content-type'), rq.headers.get('accept'),
+        rq.credentials === 'include', (status, ctype, url, text) => {
+          if (!status) { reject(new TypeError('Failed to fetch')); return; }
+          resolve(new Response(text, { status, url: url || rq.url, headers: ctype ? { 'content-type': ctype } : {} }));
+        });
+    });
+  };
+  win.AbortController = function () { this.signal = { aborted: false, addEventListener() {}, removeEventListener() {} }; this.abort = () => { this.signal.aborted = true; }; };
+
+  // text <-> bytes (UTF-8)
+  win.TextEncoder = function () { this.encoding = 'utf-8'; };
+  win.TextEncoder.prototype.encode = function (s) {
+    s = s === undefined ? '' : String(s);
+    const o = [];
+    for (let i = 0; i < s.length; i++) {
+      let c = s.charCodeAt(i);
+      if (c >= 0xD800 && c < 0xDC00 && i + 1 < s.length) { const d = s.charCodeAt(i + 1); if (d >= 0xDC00 && d < 0xE000) { c = 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00); i++; } }
+      if (c < 0x80) o.push(c);
+      else if (c < 0x800) o.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+      else if (c < 0x10000) o.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      else o.push(0xF0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return new Uint8Array(o);
+  };
+  win.TextDecoder = function (label) { this.encoding = String(label || 'utf-8').toLowerCase(); };
+  win.TextDecoder.prototype.decode = function (b) {
+    if (b == null) return '';
+    const a = b instanceof ArrayBuffer ? new Uint8Array(b) : (ArrayBuffer.isView(b) ? new Uint8Array(b.buffer, b.byteOffset, b.byteLength) : new Uint8Array(0));
+    let o = '';
+    if (this.encoding !== 'utf-8' && this.encoding !== 'utf8') { for (let i = 0; i < a.length; i++) o += String.fromCharCode(a[i]); return o; }
+    for (let i = 0; i < a.length;) {
+      const c = a[i];
+      let cp = 0xFFFD, n = 1;
+      if (c < 0x80) cp = c;
+      else if (c >= 0xC2 && c < 0xE0 && i + 1 < a.length) { cp = ((c & 31) << 6) | (a[i + 1] & 63); n = 2; }
+      else if (c >= 0xE0 && c < 0xF0 && i + 2 < a.length) { cp = ((c & 15) << 12) | ((a[i + 1] & 63) << 6) | (a[i + 2] & 63); n = 3; }
+      else if (c >= 0xF0 && c < 0xF5 && i + 3 < a.length) { cp = ((c & 7) << 18) | ((a[i + 1] & 63) << 12) | ((a[i + 2] & 63) << 6) | (a[i + 3] & 63); n = 4; }
+      o += String.fromCodePoint(cp);
+      i += n;
+    }
+    return o;
+  };
+
+  // a little of Intl (QuickJS has none): enough for the questions sites ask
+  if (typeof globalThis.Intl === 'undefined') {
+    const tzName = () => { const m = N.tz(); return m === 0 ? 'UTC' : (m % 60 ? 'UTC' : 'Etc/GMT' + (m > 0 ? '-' : '+') + Math.abs(m / 60)); };
+    const group = (n, d) => { const p = Number(n).toFixed(d).split('.'); p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ','); return p.join('.'); };
+    function DateTimeFormat(loc, opt) { if (!(this instanceof DateTimeFormat)) return new DateTimeFormat(loc, opt); this._o = opt || {}; }
+    DateTimeFormat.prototype = {
+      resolvedOptions() { return { locale: 'en-US', calendar: 'gregory', numberingSystem: 'latn', timeZone: this._o.timeZone || tzName() }; },
+      format(d) { d = d === undefined ? new Date() : new Date(d); return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear(); },
+      formatToParts(d) { d = d === undefined ? new Date() : new Date(d);
+        return [{ type: 'month', value: String(d.getMonth() + 1) }, { type: 'literal', value: '/' }, { type: 'day', value: String(d.getDate()) }, { type: 'literal', value: '/' }, { type: 'year', value: String(d.getFullYear()) }]; },
+    };
+    DateTimeFormat.supportedLocalesOf = () => ['en-US'];
+    function NumberFormat(loc, opt) { if (!(this instanceof NumberFormat)) return new NumberFormat(loc, opt); this._o = opt || {}; }
+    NumberFormat.prototype = {
+      resolvedOptions() { return { locale: 'en-US', numberingSystem: 'latn', style: this._o.style || 'decimal' }; },
+      format(n) { const o = this._o, d = o.maximumFractionDigits !== undefined ? o.maximumFractionDigits : (o.style === 'currency' ? 2 : (Number.isInteger(+n) ? 0 : 3));
+        let s = group(n, d); if (o.style !== 'currency' && d > 0) s = s.replace(/\.?0+$/, '');
+        if (o.style === 'percent') return group(n * 100, 0) + '%';
+        return o.style === 'currency' ? (o.currency === 'EUR' ? '€' : o.currency === 'GBP' ? '£' : '$') + s : s; },
+    };
+    function Collator() { if (!(this instanceof Collator)) return new Collator(); }
+    Collator.prototype = { compare: (a, b) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0), resolvedOptions: () => ({ locale: 'en-US' }) };
+    function PluralRules() { if (!(this instanceof PluralRules)) return new PluralRules(); }
+    PluralRules.prototype = { select: (n) => (n === 1 ? 'one' : 'other') };
+    function RelativeTimeFormat() { if (!(this instanceof RelativeTimeFormat)) return new RelativeTimeFormat(); }
+    RelativeTimeFormat.prototype = { format: (v, u) => (v < 0 ? -v + ' ' + u + (v === -1 ? '' : 's') + ' ago' : 'in ' + v + ' ' + u + (v === 1 ? '' : 's')) };
+    globalThis.Intl = { DateTimeFormat, NumberFormat, Collator, PluralRules, RelativeTimeFormat, getCanonicalLocales: (l) => [].concat(l || []) };
+  }
+
   win.WebSocket = function () { throw new Error('WebSocket is not supported'); };
   win.MutationObserver = function () { return { observe() {}, disconnect() {}, takeRecords() { return []; } }; };
   win.IntersectionObserver = function (cb) { return { observe(el) { setTimeout(() => cb([{ target: el, isIntersecting: true, intersectionRatio: 1 }], this), 1); }, unobserve() {}, disconnect() {} }; };
@@ -675,6 +832,7 @@
   // ------------------------------------------------------------ for the browser
   return {
     timers: runTimers,
+    net: netAnswer,
     // an event on an element (from the browser): true if the page stopped
     // what the browser would do (followed a link, sent a form...)
     dispatch(h, type) {
