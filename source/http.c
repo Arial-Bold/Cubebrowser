@@ -368,7 +368,8 @@ static int fetch_once(const char *url, const char *post, const char *accept, Htt
                      accept ? accept : DEFAULT_ACCEPT, extra);
     if (post && n < (int)sizeof(req))
         n += snprintf(req + n, sizeof(req) - n,
-                      "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %u\r\n",
+                      "Content-Type: %s\r\nContent-Length: %u\r\n",
+                      hooks && hooks->content_type ? hooks->content_type : "application/x-www-form-urlencoded",
                       (unsigned)strlen(post));
     if (n < (int)sizeof(req)) n += snprintf(req + n, sizeof(req) - n, "\r\n");
     if (n >= (int)sizeof(req)) {

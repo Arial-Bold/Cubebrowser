@@ -518,7 +518,6 @@ void ui_draw_cursor(void) {
                 bx + (17 + grow * 1.7f) * s, by + (16 + grow * 0.6f) * s, c);
         gfx_line(bx + 7 * s, by + 15 * s, bx + 12 * s, by + 26 * s, 5 + grow * 1.8f, c);
     }
-    gfx_tri(x + 3 * s, y + 5 * s, x + 3 * s, y + 13 * s, x + 8 * s, y + 11 * s, color_alpha(t->accent, 0.55f));
 }
 
 void ui_toast(const char *msg) {

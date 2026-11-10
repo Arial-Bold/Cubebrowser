@@ -26,6 +26,7 @@ typedef struct {
     bool (*want_body)(const char *url, const char *content_type);
     bool no_cookies;            /* e.g. pictures sent through the image helper */
     const char *referer;        /* page this request comes from, or NULL */
+    const char *content_type;   /* what a POST body is (NULL: a form) */
 } HttpHooks;
 
 /* post_body may be NULL (GET); accept may be NULL for the default page types.

@@ -1242,6 +1242,14 @@ static void schedule_images(float view_top, float view_h, float max_w) {
             if (!fetch_start_css(su, TAG_MAKE(TAG_SCRIPT_BIT | ji))) js_script_loaded(ji, NULL, 0);
             return;
         }
+        JsRequest rq;   /* data the scripts asked for */
+        int ri = js_next_request(&rq);
+        if (ri >= 0) {
+            fetch_set_referer(page.url);
+            if (!fetch_start_xhr(rq.url, rq.post, rq.post ? rq.content_type : NULL, rq.accept, rq.cookies, TAG_MAKE(ri)))
+                js_request_done(ri, NULL);
+            return;
+        }
     }
     if (!g_set.load_images) return;
     if (page.image_bytes >= IMAGE_BUDGET) {
@@ -1381,6 +1389,14 @@ static void handle_fetch_result(void) {
     if (fetch_job_kind() == JOB_IMAGE) {
         ImageResult ir;
         if (fetch_take_image(&ir)) apply_image(&ir);
+        return;
+    }
+    if (fetch_job_kind() == JOB_XHR) {
+        HttpResult r;
+        int tag;
+        if (!fetch_take_xhr(&r, &tag)) return;
+        if (TAG_CURRENT(tag) && has_page) js_request_done(TAG_IDX(tag), &r);
+        http_result_free(&r);
         return;
     }
     if (fetch_job_kind() == JOB_CSS) {
@@ -1938,7 +1954,7 @@ kb_done:
         const char *jm = js_take_message();
         if (jm) ui_toast(jm);
         /* "This page needs JavaScript": decided once its scripts have had their go */
-        if (script_note_check == page_gen && !js_busy()) {
+        if (script_note_check == page_gen && !js_busy() && !js_net_pending()) {
             script_note_check = -1;
             script_note_gen = page_needs_script(&page) ? page_gen : -1;
         }

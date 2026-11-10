@@ -65,11 +65,24 @@ typedef struct {
     unsigned char failed;    /* its file couldn't be downloaded */
 } Script;
 
+/* Data a script asked for (XMLHttpRequest, fetch), waiting for the
+ * browser's downloader or being downloaded. */
+#define NET_MAX 12
+#define NET_BODY_MAX (1536u * 1024)   /* bigger answers are cut off here */
+enum { NET_FREE, NET_QUEUED, NET_LOADING };
+typedef struct {
+    unsigned char state;
+    bool cookies;
+    char *url, *body;
+    char ctype[96], accept[96];
+} NetReq;
+
 static struct {
     Page *page;
     JSRuntime *rt;
     JSContext *ctx;
-    JSValue fn_timers, fn_dispatch, fn_loaded;
+    JSValue fn_timers, fn_dispatch, fn_loaded, fn_net;
+    NetReq net[NET_MAX];
     bool started;        /* the context exists */
     bool failed;         /* it couldn't start, or scripts keep getting stopped */
     Script *q;
@@ -1057,6 +1070,56 @@ FN(n_resolve) {
     return JS_NewString(c, out);
 }
 
+static bool page_url(Url *u);
+
+/* N.net(method, url, body, contentType, accept, withCredentials): queues a
+ * download for the browser; its number, or -1 if it can't be done. */
+FN(n_net) {
+    UNUSED;
+    if (argc < 6 || !J.page) return JS_NewInt32(c, -1);
+    const char *m = JS_ToCString(c, argv[0]), *s = JS_ToCString(c, argv[1]);
+    const char *b = JS_IsNull(argv[2]) || JS_IsUndefined(argv[2]) ? NULL : JS_ToCString(c, argv[2]);
+    const char *ct = JS_ToCString(c, argv[3]), *ac = JS_ToCString(c, argv[4]);
+    bool creds = JS_ToBool(c, argv[5]);
+    int slot = -1;
+    char abs[URL_MAX] = "";
+    if (m && s) url_resolve(J.page->base, s, abs, sizeof(abs));
+    Url u, pu;
+    bool web = abs[0] && url_parse(abs, &u) && (!strcmp(u.scheme, "http") || !strcmp(u.scheme, "https"));
+    bool post = m && !strcasecmp(m, "POST");
+    if (!m || !web) {
+        jslog("A script asked for %.120s, which CubeBrowser can't download", s ? s : "?");
+    } else if (strcasecmp(m, "GET") && strcasecmp(m, "POST") && strcasecmp(m, "HEAD")) {
+        jslog("A script asked to %.10s %.110s (only GET and POST are supported)", m, abs);
+    } else {
+        for (int i = 0; i < NET_MAX; i++) if (J.net[i].state == NET_FREE) { slot = i; break; }
+        if (slot < 0) jslog("Too many downloads at once from scripts: %.120s skipped", abs);
+    }
+    if (slot >= 0) {
+        NetReq *r = &J.net[slot];
+        r->url = strdup(abs);
+        r->body = post ? strdup(b ? b : "") : NULL;
+        if (!r->url || (post && !r->body)) { free(r->url); free(r->body); r->url = r->body = NULL; slot = -1; }
+        else {
+            snprintf(r->ctype, sizeof(r->ctype), "%s", ct && *ct ? ct : "text/plain;charset=UTF-8");
+            snprintf(r->accept, sizeof(r->accept), "%s", ac && *ac ? ac : "*/*");
+            /* the page's own site gets its cookies; others only when asked */
+            r->cookies = creds || (page_url(&pu) && !strcasecmp(pu.host, u.host) && !strcmp(pu.scheme, u.scheme) && pu.port == u.port);
+            r->state = NET_QUEUED;
+            jslog("A script asked for %.140s", abs);
+        }
+    }
+    if (m) JS_FreeCString(c, m);
+    if (s) JS_FreeCString(c, s);
+    if (b) JS_FreeCString(c, b);
+    if (ct) JS_FreeCString(c, ct);
+    if (ac) JS_FreeCString(c, ac);
+    return JS_NewInt32(c, slot);
+}
+
+/* the time zone set in Settings, in minutes east of UTC (with daylight saving) */
+FN(n_tz) { UNUSED; (void)argv; return JS_NewInt32(c, g_set.tz_minutes + (g_set.dst ? 60 : 0)); }
+
 static bool page_url(Url *u) { return J.page && url_parse(J.page->url, u) && (!strcmp(u->scheme, "http") || !strcmp(u->scheme, "https")); }
 
 FN(n_cookie) {
@@ -1164,6 +1227,12 @@ FN(n_activate) {
     if (n->tag == TAG_A && n->index >= 0) {
         const char *u = page_link_url(J.page, n->index);
         if (u && *u && strncasecmp(u, "javascript:", 11)) { snprintf(J.nav_url, sizeof(J.nav_url), "%s", u); J.nav = JS_NAV_GO; }
+    } else if (n->tag == TAG_A && dom_attr(n, "href")) {   /* a link a script made */
+        const char *h = dom_attr(n, "href");
+        if (*h && strncasecmp(h, "javascript:", 11) && h[0] != '#') {
+            url_resolve(J.page->base, h, J.nav_url, sizeof(J.nav_url));
+            J.nav = JS_NAV_GO;
+        }
     } else if (f >= 0) {
         Field *fd = &J.page->fields[f];
         if (fd->type == FIELD_SUBMIT && !fd->button) { J.nav = JS_NAV_SUBMIT; J.nav_field = f; }
@@ -1190,7 +1259,7 @@ static const JSCFunctionListEntry n_funcs[] = {
     JS_CFUNC_DEF("currentScript", 0, n_current_script), JS_CFUNC_DEF("title", 0, n_title),
     JS_CFUNC_DEF("setTitle", 1, n_set_title), JS_CFUNC_DEF("url", 0, n_url), JS_CFUNC_DEF("resolve", 1, n_resolve),
     JS_CFUNC_DEF("cookie", 0, n_cookie), JS_CFUNC_DEF("setCookie", 1, n_set_cookie), JS_CFUNC_DEF("ua", 0, n_ua),
-    JS_CFUNC_DEF("log", 1, n_log), JS_CFUNC_DEF("note", 1, n_note), JS_CFUNC_DEF("alert", 1, n_alert), JS_CFUNC_DEF("now", 0, n_now),
+    JS_CFUNC_DEF("log", 1, n_log), JS_CFUNC_DEF("note", 1, n_note), JS_CFUNC_DEF("net", 6, n_net), JS_CFUNC_DEF("tz", 0, n_tz), JS_CFUNC_DEF("alert", 1, n_alert), JS_CFUNC_DEF("now", 0, n_now),
     JS_CFUNC_DEF("timers", 1, n_timers), JS_CFUNC_DEF("go", 2, n_go), JS_CFUNC_DEF("back", 0, n_back),
     JS_CFUNC_DEF("submit", 1, n_submit), JS_CFUNC_DEF("activate", 1, n_activate),
 };
@@ -1311,6 +1380,7 @@ static void start_context(void) {
     J.fn_timers = JS_GetPropertyStr(J.ctx, api, "timers");
     J.fn_dispatch = JS_GetPropertyStr(J.ctx, api, "dispatch");
     J.fn_loaded = JS_GetPropertyStr(J.ctx, api, "loaded");
+    J.fn_net = JS_GetPropertyStr(J.ctx, api, "net");
     JS_FreeValue(J.ctx, api);
     JS_FreeValue(J.ctx, global);
 }
@@ -1443,10 +1513,12 @@ static void free_all(void) {
         JS_FreeValue(J.ctx, J.fn_timers);
         JS_FreeValue(J.ctx, J.fn_dispatch);
         JS_FreeValue(J.ctx, J.fn_loaded);
+        JS_FreeValue(J.ctx, J.fn_net);
         JS_FreeContext(J.ctx);
     }
     if (J.rt) JS_FreeRuntime(J.rt);
     for (int i = 0; i < J.nq; i++) { free(J.q[i].url); free(J.q[i].code); }
+    for (int i = 0; i < NET_MAX; i++) { free(J.net[i].url); free(J.net[i].body); }
     free(J.q);
     free(J.reg);
     memset(&J, 0, sizeof(J));
@@ -1456,6 +1528,62 @@ static void end_job(void *arg) { (void)arg; free_all(); }
 
 /* (QuickJS lets go on the thread it ran on: the big stack's) */
 void js_page_end(void) { if (J.page || J.rt) run_with_big_stack(end_job, NULL); }
+
+int js_next_request(JsRequest *out) {
+    if (!J.page) return -1;
+    for (int i = 0; i < NET_MAX; i++) {
+        NetReq *r = &J.net[i];
+        if (r->state != NET_QUEUED) continue;
+        r->state = NET_LOADING;
+        out->url = r->url;
+        out->post = r->body;
+        out->content_type = r->ctype;
+        out->accept = r->accept;
+        out->cookies = r->cookies;
+        return i;
+    }
+    return -1;
+}
+
+typedef struct { int slot; HttpResult *r; } NetJob;
+
+static void net_job(void *arg) {
+    NetJob *j = arg;
+    NetReq *q = &J.net[j->slot];
+    HttpResult *r = j->r;
+    bool ok = r && !r->error[0] && r->status > 0;
+    if (ok) {
+        jslog("Got %.120s (%d, %u bytes)", q->url, r->status, (unsigned)r->body_len);
+    } else {
+        jslog("Couldn't download %.100s: %.60s", q->url, r && r->error[0] ? r->error : "no answer");
+    }
+    free(q->url); free(q->body);
+    q->url = q->body = NULL;
+    q->state = NET_FREE;
+    if (!J.started || J.failed) return;
+    J.deadline = now_ms() + EVENT_TIME_LIMIT;
+    size_t len = ok && r->body ? r->body_len : 0;
+    if (len > NET_BODY_MAX) len = NET_BODY_MAX;
+    JSValue args[5] = {
+        JS_NewInt32(J.ctx, j->slot),
+        JS_NewInt32(J.ctx, ok ? r->status : 0),
+        JS_NewString(J.ctx, ok ? r->content_type : ""),
+        JS_NewString(J.ctx, ok ? r->url : ""),
+        JS_NewStringLen(J.ctx, ok && r->body ? r->body : "", len),
+    };
+    JSValue res = JS_Call(J.ctx, J.fn_net, JS_UNDEFINED, 5, args);
+    if (JS_IsException(res)) report_exception();
+    JS_FreeValue(J.ctx, res);
+    for (int i = 0; i < 5; i++) JS_FreeValue(J.ctx, args[i]);
+    run_jobs();
+}
+
+void js_request_done(int slot, HttpResult *r) {
+    if (slot < 0 || slot >= NET_MAX || J.net[slot].state != NET_LOADING) return;
+    NetJob j = { slot, r };
+    run_with_big_stack(net_job, &j);
+    apply_changes(true);
+}
 
 void js_page_begin(Page *p) {
     js_page_end();
@@ -1514,6 +1642,12 @@ static void script_event(Node *n, const char *type) {
     if (!J.started || J.failed || !n) return;
     EventJob e = { n, type, false };
     run_with_big_stack(event_job, &e);
+}
+
+bool js_net_pending(void) {
+    if (!ready()) return false;
+    for (int i = 0; i < NET_MAX; i++) if (J.net[i].state != NET_FREE) return true;
+    return false;
 }
 
 bool js_busy(void) { return ready() && (J.next < J.nq || (!J.loaded && J.nq)); }

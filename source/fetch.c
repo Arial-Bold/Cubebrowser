@@ -66,6 +66,8 @@ bool is_download_name(const char *url) {
 /* Page downloads stop before the body if it isn't something we can display. */
 static volatile bool job_force_save;
 static char job_referer[URL_MAX];
+static char job_ctype[96], job_accept[96];
+static bool job_cookies;
 
 static bool page_wants_body(const char *url, const char *ct) {
     if (job_force_save) return false;
@@ -165,6 +167,16 @@ static void *worker_main(void *arg) {
                     task_ok = sevenz_file(task_path, task_dest, &uz_progress, &cancel_flag, task_err, sizeof(task_err));
                 else
                     task_ok = unzip_file(task_path, task_dest, &uz_progress, &cancel_flag, task_err, sizeof(task_err));
+            } else if (kind == JOB_XHR) {
+                diag_note(DIAG_WORKER, "script download %.120s", job_url);
+                HttpHooks hooks = { &cancel_flag, &progress, no_stage, NULL, !job_cookies,
+                                    job_referer[0] ? job_referer : NULL, job_ctype[0] ? job_ctype : NULL };
+                HttpResult r;
+                if (!http_fetch(job_url, job_post, job_accept[0] ? job_accept : "*/*", &r, &hooks) && !r.error[0])
+                    snprintf(r.error, sizeof(r.error), "failed");
+                free(job_post);
+                job_post = NULL;
+                result = r;
             } else if (kind == JOB_CSS) {
                 diag_note(DIAG_WORKER, "downloading stylesheet %.120s", job_url);
                 HttpResult r;
@@ -268,6 +280,32 @@ bool fetch_start_css(const char *url, int tag) {
 
 bool fetch_take_css(HttpResult *out, int *tag) {
     if (state != FETCH_DONE || kind != JOB_CSS) return false;
+    *out = result;
+    *tag = job_tag;
+    memset(&result, 0, sizeof(result));
+    state = FETCH_IDLE;
+    return true;
+}
+
+bool fetch_start_xhr(const char *url, const char *post_body, const char *content_type,
+                     const char *accept, bool cookies, int tag) {
+    if (state != FETCH_IDLE || !net_ready || strlen(url) >= sizeof(job_url)) return false;
+    snprintf(job_url, sizeof(job_url), "%s", url);
+    job_post = post_body ? strdup(post_body) : NULL;
+    snprintf(job_ctype, sizeof(job_ctype), "%s", content_type ? content_type : "");
+    snprintf(job_accept, sizeof(job_accept), "%s", accept ? accept : "");
+    job_cookies = cookies;
+    job_tag = tag;
+    kind = JOB_XHR;
+    cancel_flag = 0;
+    progress = 0;
+    state = FETCH_BUSY;
+    job_pending = 1;
+    return true;
+}
+
+bool fetch_take_xhr(HttpResult *out, int *tag) {
+    if (state != FETCH_DONE || kind != JOB_XHR) return false;
     *out = result;
     *tag = job_tag;
     memset(&result, 0, sizeof(result));

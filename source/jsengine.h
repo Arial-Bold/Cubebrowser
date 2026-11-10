@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "page.h"
+#include "http.h"
 
 /* A new page is showing (after page_set_source): its scripts are queued.
  * Does nothing with JavaScript off. js_page_end lets the old page go. */
@@ -20,6 +21,13 @@ void js_page_end(void);
 int  js_next_script(char *url, size_t cap);
 void js_script_loaded(int idx, char *body, size_t len);
 bool js_scripts_pending(void);   /* still downloading scripts the page needs */
+
+/* Data the page's scripts asked for: the next one to download (its number,
+ * the fields filled in, pointing into the engine's copy) or -1; then its
+ * answer (NULL if it couldn't be sent). */
+typedef struct { const char *url, *post, *content_type, *accept; bool cookies; } JsRequest;
+int  js_next_request(JsRequest *out);
+void js_request_done(int idx, HttpResult *r);
 
 /* Once a frame: runs the scripts whose turn it is, then the page's timers. */
 void js_frame(void);
@@ -35,7 +43,8 @@ bool js_event(Node *n, const char *type);
 enum { JS_NAV_NONE, JS_NAV_GO, JS_NAV_REPLACE, JS_NAV_BACK, JS_NAV_SUBMIT };
 int  js_take_navigation(char *url, size_t cap, int *field);
 const char *js_take_message(void);   /* alert() text, or a note about a stopped script */
-bool js_busy(void);                  /* scripts still to run before the page is ready */
+bool js_busy(void);
+bool js_net_pending(void);               /* data scripts asked for hasn't come yet */                  /* scripts still to run before the page is ready */
 
 /* about:console: the last page's script files, errors and console messages. */
 void js_console_html(char *out, size_t cap);

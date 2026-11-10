@@ -10,7 +10,7 @@
 
 typedef enum { FETCH_IDLE, FETCH_BUSY, FETCH_DONE } FetchState;
 typedef enum { JOB_PAGE, JOB_IMAGE, JOB_CSS, JOB_DOWNLOAD, JOB_UNZIP, JOB_UPDATE_CHECK, JOB_UPDATE_INSTALL,
-               JOB_SWISS_CHECK, JOB_SWISS_INSTALL } JobKind;
+               JOB_SWISS_CHECK, JOB_SWISS_INSTALL, JOB_XHR } JobKind;
 
 typedef struct {
     int tag;              /* caller's identifier */
@@ -34,6 +34,11 @@ bool        fetch_take(HttpResult *out);          /* page result; back to IDLE *
 bool        fetch_take_image(ImageResult *out);   /* image result; back to IDLE */
 bool        fetch_start_css(const char *url, int tag);
 bool        fetch_take_css(HttpResult *out, int *tag);
+/* Data a page's script asked for (XMLHttpRequest, fetch): post_body NULL for
+ * a GET; cookies only when the script may send them. Never from the SD cache. */
+bool        fetch_start_xhr(const char *url, const char *post_body, const char *content_type,
+                            const char *accept, bool cookies, int tag);
+bool        fetch_take_xhr(HttpResult *out, int *tag);
 void        fetch_discard(void);                  /* drop whatever finished */
 bool        fetch_net_ready(void);
 bool        fetch_start_download(const char *url, const char *dest_path);
