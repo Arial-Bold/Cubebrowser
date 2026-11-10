@@ -1,6 +1,7 @@
 /* osk.c - chunky rounded on-screen keyboard.
  * Pointer or D-pad (snaps key to key) to type; shortcuts:
- * B backspace, Y space, X shift, L/R move caret, START accept. */
+ * B backspace, Y space, X shift, L/R move caret, START accept; the x at
+ * the end of the box clears it. */
 #include "osk.h"
 #include "ui.h"
 #include "gfx.h"
@@ -90,7 +91,9 @@ static void draw_field(float x, float y, float w, float h, float ts) {
         gfx_rrect(x, y, w, h, 10, t->field_bg);
         gfx_rrect_outline(x, y, w, h, 10, 2, t->accent);
     }
-    float pad = 12, fw = w - pad * 2;
+    /* a clear button at the right end while there's text */
+    float clear_w = len > 0 ? h : 0;
+    float pad = 12, fw = w - pad * 2 - clear_w;
     char shown[TEXT_MAX];
     for (int i = 0; i <= len; i++) shown[i] = (mode == OSK_PASSWORD && i < len) ? '*' : text[i];
     if (caret < view_start) view_start = caret;
@@ -98,13 +101,19 @@ static void draw_field(float x, float y, float w, float h, float ts) {
         view_start++;
     int vis = gfx_text_fit(FONT_BODY, ts, shown + view_start, len - view_start, fw);
     float ty = y + (h - gfx_line_height(FONT_BODY, ts)) * 0.5f;
-    gfx_set_clip(x + 4, y, w - 8, h);
+    gfx_set_clip(x + 4, y, w - 8 - clear_w, h);
     gfx_text(FONT_BODY, ts, x + pad, ty, t->field_text, shown + view_start, vis);
     float cx = x + pad + gfx_text_width(FONT_BODY, ts, shown + view_start, caret - view_start);
     if ((ui_frame() / 20) % 2 == 0) gfx_rect(cx, ty + 2, 2, gfx_line_height(FONT_BODY, ts) - 4, t->accent);
     gfx_clear_clip();
     /* click inside the field to move the caret */
-    if (ui_click(ui_id("osk-field", 0), x, y, w, h)) {
+    if (clear_w > 0 && ui_icon_button(ui_id("osk-clear", 0), x + w - h * 0.5f - 2, y + h * 0.5f, h * 0.3f, ICON_CLOSE, true)) {
+        text[0] = 0;
+        len = caret = view_start = 0;
+        sound_play(SFX_KEY);
+        return;
+    }
+    if (ui_click(ui_id("osk-field", 0), x, y, w - clear_w, h)) {
         float rel = input_cursor_x() - (x + pad);
         caret = view_start + gfx_text_fit(FONT_BODY, ts, shown + view_start, len - view_start, rel);
     }
