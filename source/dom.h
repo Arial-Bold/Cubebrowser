@@ -42,6 +42,7 @@ typedef struct Node {
     int index;                      /* link / field / image / form index, -1 if none */
     int sub;                        /* extra index (e.g. form of a field) */
     unsigned char hidden;           /* skip when laying out (duplicate content) */
+    unsigned char jsclick;          /* a script listens for clicks on it: sub is its link index */
     struct Style *style;
 } Node;
 
@@ -61,13 +62,35 @@ typedef struct {
     char title[128];
     DomSheet sheets[DOM_MAX_SHEETS];
     int nsheets;
-    int nscripts;       /* <script> elements (their content isn't kept) */
+    int nscripts;       /* <script> elements */
+    /* with JavaScript on (dom_keep_scripts): the <script> elements, in order,
+     * each with its code in text/len (raw, not converted to ASCII) */
+    Node **scripts;
+    int nscript_nodes, capscripts;
 } Dom;
+
+#define DOM_MAX_SCRIPTS 96
+
+/* Keep <script> elements and their code, and script handlers (onclick...)
+ * in full, in the documents parsed from now on (JavaScript on). */
+extern bool dom_keep_scripts;
 
 Dom *dom_parse(const char *src, size_t len, bool plain);
 void dom_free(Dom *d);
 const char *dom_attr(const Node *n, const char *name);
 int dom_tag_id(const char *lowercase_name);
+
+/* Changing the tree (for JavaScript). New nodes come from the document's
+ * own memory, which is let go with it. */
+Node *dom_create_elem(Dom *d, const char *name);
+Node *dom_create_text(Dom *d, const char *utf8, size_t len);
+void dom_append(Node *parent, Node *n);
+void dom_insert_before(Node *parent, Node *n, Node *ref);   /* ref NULL: at the end */
+void dom_detach(Node *n);
+bool dom_set_attr(Dom *d, Node *n, const char *name, const char *value);   /* value NULL: removes it */
+/* Parses an HTML fragment into parent (after its existing children). */
+void dom_parse_fragment(Dom *d, Node *parent, const char *src, size_t len);
+Node *dom_clone(Dom *d, const Node *n, bool deep);
 
 /* Text conversion shared with other modules */
 void dom_decode_inplace(char *s, size_t cap);   /* entities + UTF-8 -> ASCII */

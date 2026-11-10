@@ -18,5 +18,10 @@ void cookies_receive(const char *host, const char *path, bool secure, const char
 /* Builds the Cookie header value for a request (empty string if none). */
 void cookies_for(const char *host, const char *path, bool secure, time_t now, char *out, size_t cap);
 
+/* For pages' scripts (document.cookie): the same, leaving out HttpOnly
+ * cookies, which only the site's server may see or change. */
+void cookies_set_by_script(const char *host, const char *path, bool secure, const char *text, time_t now);
+void cookies_for_script(const char *host, const char *path, bool secure, time_t now, char *out, size_t cap);
+
 /* Parses an HTTP date (several historic formats). Returns 0 if unreadable. */
 time_t cookies_parse_date(const char *s);

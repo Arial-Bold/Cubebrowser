@@ -7,6 +7,8 @@
 #include <strings.h>
 
 #define MAX_NODES 30000
+
+bool dom_keep_scripts;
 #define MAX_DEPTH 256
 
 /* ----------------------------------------------------------------- arena */
@@ -406,7 +408,7 @@ static Attr *parse_attrs(Arena *a, const char *s, int len) {
          * so [data-x] style selectors still match */
         if (k && vlen > 48 &&
             ((!strncmp(k, "data-", 5) && strcmp(k, "data-src") && strcmp(k, "data-srcset") && strcmp(k, "data-original")) ||
-             (!strncmp(k, "on", 2) && strcmp(k, "onchange")) ||
+             (!strncmp(k, "on", 2) && strcmp(k, "onchange") && !dom_keep_scripts) ||
              (!strncmp(k, "aria-", 5) && strcmp(k, "aria-label")))) {
             v = "";
             vlen = 0;
@@ -517,6 +519,9 @@ static void close_elem(P *ps, int tag, const char *name) {
     pop_to(ps, tag, inline_like ? stop_cell : stop_none);
 }
 
+static void parse_into(P *ps, const char *src, size_t len);
+static void keep_script(P *ps, const char *attrs, int alen, const char *code, size_t clen);
+
 Dom *dom_parse(const char *src, size_t len, bool plain) {
     Dom *d = calloc(1, sizeof(Dom));
     if (!d) return NULL;
@@ -535,12 +540,19 @@ Dom *dom_parse(const char *src, size_t len, bool plain) {
         add_text(&ps, src, len, false);
         return d;
     }
+    parse_into(&ps, src, len);
+    return d;
+}
 
+/* The HTML parser proper: src into the open element on top of ps's stack. */
+static void parse_into(P *pstate, const char *src, size_t len) {
+    P *ps = pstate;
+    Dom *d = ps->d;
     size_t i = 0, text_start = 0;
-    while (i < len && !ps.full) {
+    while (i < len && !ps->full) {
         if (src[i] != '<') { i++; continue; }
         /* flush text before the tag */
-        if (i > text_start) add_text(&ps, src + text_start, i - text_start, true);
+        if (i > text_start) add_text(ps, src + text_start, i - text_start, true);
         if (i + 3 < len && src[i + 1] == '!' && src[i + 2] == '-' && src[i + 3] == '-') {
             const char *end = NULL;
             for (size_t k = i + 4; k + 2 < len; k++)
@@ -583,7 +595,7 @@ Dom *dom_parse(const char *src, size_t len, bool plain) {
         i = after;
         text_start = after;
 
-        if (closing) { close_elem(&ps, tag, name); continue; }
+        if (closing) { close_elem(ps, tag, name); continue; }
 
         /* elements whose content is not parsed as HTML */
         if (tag == TAG_SCRIPT || tag == TAG_TEMPLATE || tag == TAG_SVG || tag == TAG_MATH ||
@@ -591,6 +603,7 @@ Dom *dom_parse(const char *src, size_t len, bool plain) {
             tag == TAG_IFRAME || tag == TAG_OBJECT || tag == TAG_VIDEO || tag == TAG_AUDIO || tag == TAG_CANVAS) {
             size_t c = selfclose ? after : find_close(src, len, after, name);
             if (tag == TAG_SCRIPT) d->nscripts++;
+            if (tag == TAG_SCRIPT && dom_keep_scripts) keep_script(ps, src + as, alen, src + after, c - after);
             if (tag == TAG_STYLE && d->nsheets < DOM_MAX_SHEETS) {
                 Node tmp;
                 memset(&tmp, 0, sizeof(tmp));
@@ -613,12 +626,12 @@ Dom *dom_parse(const char *src, size_t len, bool plain) {
                 }
                 d->title[o] = 0;
             } else if (tag == TAG_TEXTAREA || tag == TAG_XMP) {
-                open_elem(&ps, tag, name, src + as, alen, false);
-                add_text(&ps, src + after, c - after, tag == TAG_TEXTAREA);
-                if (top(&ps)->tag == tag) ps.depth--;
+                open_elem(ps, tag, name, src + as, alen, false);
+                add_text(ps, src + after, c - after, tag == TAG_TEXTAREA);
+                if (top(ps)->tag == tag) ps->depth--;
             } else if (tag == TAG_IFRAME || tag == TAG_VIDEO || tag == TAG_AUDIO || tag == TAG_OBJECT) {
                 /* keep a placeholder element (fallback content isn't shown) */
-                open_elem(&ps, tag, name, src + as, alen, true);
+                open_elem(ps, tag, name, src + as, alen, true);
             }
             i = skip_tag_end(src, len, c);
             text_start = i;
@@ -637,18 +650,164 @@ Dom *dom_parse(const char *src, size_t len, bool plain) {
             continue;
         }
         if (tag == TAG_PLAINTEXT) {
-            open_elem(&ps, TAG_PRE, "pre", "", 0, false);
-            add_text(&ps, src + after, len - after, false);
+            open_elem(ps, TAG_PRE, "pre", "", 0, false);
+            add_text(ps, src + after, len - after, false);
             break;
         }
-        open_elem(&ps, tag, name, src + as, alen, selfclose);
+        open_elem(ps, tag, name, src + as, alen, selfclose);
     }
-    if (!ps.full && text_start < len && i >= len) add_text(&ps, src + text_start, len - text_start, true);
-    return d;
+    if (!ps->full && text_start < len && i >= len) add_text(ps, src + text_start, len - text_start, true);
 }
 
 void dom_free(Dom *d) {
     if (!d) return;
     arena_free(&d->arena);
     free(d);
+}
+
+/* ------------------------------------------------------------- scripts */
+
+/* A <script> element, kept (with its code) for JavaScript. */
+static void keep_script(P *ps, const char *attrs, int alen, const char *code, size_t clen) {
+    Dom *d = ps->d;
+    open_elem(ps, TAG_SCRIPT, "script", attrs, alen, true);
+    Node *n = top(ps)->last;
+    if (!n || n->tag != TAG_SCRIPT || n->text) return;
+    n->text = arena_strndup(&d->arena, code, clen);
+    n->len = n->text ? (int)clen : 0;
+    if (d->nscript_nodes >= DOM_MAX_SCRIPTS) return;
+    if (d->nscript_nodes == d->capscripts) {
+        int nc = d->capscripts ? d->capscripts * 2 : 16;
+        Node **ns = arena_alloc(&d->arena, sizeof(Node *) * (size_t)nc);
+        if (!ns) return;
+        if (d->scripts) memcpy(ns, d->scripts, sizeof(Node *) * (size_t)d->nscript_nodes);
+        d->scripts = ns;
+        d->capscripts = nc;
+    }
+    d->scripts[d->nscript_nodes++] = n;
+}
+
+/* ---------------------------------------------------- changing the tree */
+
+Node *dom_create_elem(Dom *d, const char *name) {
+    P ps;
+    memset(&ps, 0, sizeof(ps));
+    ps.d = d;
+    Node *n = new_node(&ps, NT_ELEM);
+    if (!n) return NULL;
+    char low[32];
+    size_t k = 0;
+    for (; name[k] && k < sizeof(low) - 1; k++) low[k] = (char)tolower((unsigned char)name[k]);
+    low[k] = 0;
+    int tag = dom_tag_id(low);
+    n->tag = (unsigned char)tag;
+    n->name = tag ? tag_names[tag] : arena_strndup(&d->arena, low, k);
+    return n;
+}
+
+Node *dom_create_text(Dom *d, const char *utf8, size_t len) {
+    P ps;
+    memset(&ps, 0, sizeof(ps));
+    ps.d = d;
+    Node *t = new_node(&ps, NT_TEXT);
+    if (!t) return NULL;
+    char *tmp = malloc(len * 3 + 8);
+    if (!tmp) return t;
+    int n = (int)decode_text(utf8, len, tmp, len * 3 + 8, false);   /* to the fonts' ASCII */
+    t->text = arena_strndup(&d->arena, tmp, (size_t)n);
+    t->len = t->text ? n : 0;
+    free(tmp);
+    if (!t->text) t->text = "";
+    return t;
+}
+
+void dom_detach(Node *n) {
+    Node *p = n->parent;
+    if (!p) return;
+    if (n->prev) n->prev->next = n->next; else p->first = n->next;
+    if (n->next) n->next->prev = n->prev; else p->last = n->prev;
+    n->parent = n->prev = n->next = NULL;
+}
+
+void dom_append(Node *parent, Node *n) {
+    dom_detach(n);
+    append(parent, n);
+}
+
+void dom_insert_before(Node *parent, Node *n, Node *ref) {
+    if (!ref || ref->parent != parent) { dom_append(parent, n); return; }
+    if (ref == n) return;
+    dom_detach(n);
+    n->parent = parent;
+    n->next = ref;
+    n->prev = ref->prev;
+    if (ref->prev) ref->prev->next = n; else parent->first = n;
+    ref->prev = n;
+}
+
+bool dom_set_attr(Dom *d, Node *n, const char *name, const char *value) {
+    Attr *prev = NULL, *a = n->attrs;
+    while (a && strcmp(a->name, name)) { prev = a; a = a->next; }
+    if (!value) {
+        if (!a) return false;
+        if (prev) prev->next = a->next; else n->attrs = a->next;
+    } else {
+        char *v = arena_strndup(&d->arena, value, strlen(value));
+        if (!v) return false;
+        if (a) a->value = v;
+        else {
+            a = arena_alloc(&d->arena, sizeof(Attr));
+            char *k = arena_strndup(&d->arena, name, strlen(name));
+            if (!a || !k) return false;
+            for (char *c = k; *c; c++) *c = (char)tolower((unsigned char)*c);
+            a->name = k;
+            a->value = v;
+            a->next = NULL;
+            if (prev) prev->next = a; else n->attrs = a;
+        }
+    }
+    if (!strcmp(name, "class") || !strcmp(name, "id")) {
+        n->classes = NULL;
+        n->nclasses = 0;
+        n->id = NULL;
+        set_classes(&d->arena, n);
+    }
+    return true;
+}
+
+void dom_parse_fragment(Dom *d, Node *parent, const char *src, size_t len) {
+    P *ps = calloc(1, sizeof(P));   /* (its stack is big) */
+    if (!ps) return;
+    ps->d = d;
+    ps->stack[ps->depth++] = parent;
+    parse_into(ps, src, len);
+    free(ps);
+}
+
+Node *dom_clone(Dom *d, const Node *n, bool deep) {
+    P ps;
+    memset(&ps, 0, sizeof(ps));
+    ps.d = d;
+    Node *c = new_node(&ps, n->type);
+    if (!c) return NULL;
+    c->tag = n->tag;
+    c->name = n->name;
+    c->text = n->text;
+    c->len = n->len;
+    Attr *tail = NULL;
+    for (const Attr *a = n->attrs; a; a = a->next) {
+        Attr *b = arena_alloc(&d->arena, sizeof(Attr));
+        if (!b) break;
+        b->name = a->name;
+        b->value = a->value;
+        if (tail) tail->next = b; else c->attrs = b;
+        tail = b;
+    }
+    if (n->type == NT_ELEM) set_classes(&d->arena, c);
+    if (deep)
+        for (const Node *k = n->first; k; k = k->next) {
+            Node *kc = dom_clone(d, k, true);
+            if (kc) append(c, kc);
+        }
+    return c;
 }

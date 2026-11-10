@@ -29,6 +29,7 @@ typedef struct {
     time_t expires;       /* 0 = until the browser closes */
     unsigned last_used;
     bool host_only, secure, used;
+    bool httponly;        /* hidden from pages' scripts */
 } Cookie;
 
 static Cookie *jar;
@@ -163,7 +164,14 @@ static Cookie *free_slot(void) {
     return &jar[oldest];   /* full: replace the least recently used */
 }
 
+static void receive(const char *host, const char *req_path, bool secure, const char *header, time_t now, bool from_script);
 void cookies_receive(const char *host, const char *req_path, bool secure, const char *header, time_t now) {
+    receive(host, req_path, secure, header, now, false);
+}
+void cookies_set_by_script(const char *host, const char *path, bool secure, const char *text, time_t now) {
+    receive(host, path, secure, text, now, true);
+}
+static void receive(const char *host, const char *req_path, bool secure, const char *header, time_t now, bool from_script) {
     if (!g_set.cookies || !ensure_jar()) return;
     char buf[1400];
     snprintf(buf, sizeof(buf), "%s", header);
@@ -181,7 +189,7 @@ void cookies_receive(const char *host, const char *req_path, bool secure, const 
     if (!name[0] || strlen(eq + 1) >= sizeof(value)) return;
 
     char domain[128] = "", path[128] = "";
-    bool is_secure = false, have_maxage = false;
+    bool is_secure = false, have_maxage = false, http_only = false;
     time_t expires = 0;
     long maxage = 0;
     while (attrs && *attrs) {
@@ -194,6 +202,7 @@ void cookies_receive(const char *host, const char *req_path, bool secure, const 
         if (!strcasecmp(k, "domain")) { while (*v == '.') v++; snprintf(domain, sizeof(domain), "%s", v); }
         else if (!strcasecmp(k, "path") && v[0] == '/') snprintf(path, sizeof(path), "%s", v);
         else if (!strcasecmp(k, "secure")) is_secure = true;
+        else if (!strcasecmp(k, "httponly")) http_only = true;
         else if (!strcasecmp(k, "max-age")) { have_maxage = true; maxage = atol(v); }
         else if (!strcasecmp(k, "expires")) expires = cookies_parse_date(v);
         attrs = next;
@@ -208,6 +217,7 @@ void cookies_receive(const char *host, const char *req_path, bool secure, const 
 
     jar_lock();
     Cookie *c = find(name, domain, path);
+    if (from_script && c && c->httponly) { jar_unlock(); return; }   /* a page's script can't touch these */
     if (expires && expires <= now) {   /* the site is deleting it */
         if (c) { c->used = false; dirty = true; }
         jar_unlock();
@@ -221,6 +231,7 @@ void cookies_receive(const char *host, const char *req_path, bool secure, const 
     snprintf(c->path, sizeof(c->path), "%s", path);
     c->expires = expires;
     c->secure = is_secure;
+    c->httponly = http_only && !from_script;
     c->host_only = host_only;
     c->used = true;
     c->last_used = ++use_counter;
@@ -228,7 +239,14 @@ void cookies_receive(const char *host, const char *req_path, bool secure, const 
     jar_unlock();
 }
 
+static void cookies_list(const char *host, const char *path, bool secure, time_t now, char *out, size_t cap, bool script);
 void cookies_for(const char *host, const char *path, bool secure, time_t now, char *out, size_t cap) {
+    cookies_list(host, path, secure, now, out, cap, false);
+}
+void cookies_for_script(const char *host, const char *path, bool secure, time_t now, char *out, size_t cap) {
+    cookies_list(host, path, secure, now, out, cap, true);
+}
+static void cookies_list(const char *host, const char *path, bool secure, time_t now, char *out, size_t cap, bool script) {
     out[0] = 0;
     if (!g_set.cookies || !jar) return;
     size_t o = 0;
@@ -240,6 +258,7 @@ void cookies_for(const char *host, const char *path, bool secure, time_t now, ch
             if (!c->used || (int)strlen(c->path) != pass) continue;
             if (c->expires && c->expires <= now) { c->used = false; dirty = true; continue; }
             if (c->secure && !secure) continue;
+            if (script && c->httponly) continue;
             if (c->host_only ? strcasecmp(host, c->domain) : !domain_match(host, c->domain)) continue;
             if (!path_match(path, c->path)) continue;
             size_t need = strlen(c->name) + strlen(c->value) + 3;
@@ -274,7 +293,7 @@ void cookies_save_if_needed(void) {
         Cookie *c = &jar[i];
         if (!c->used) continue;
         n += (size_t)snprintf(buf + n, cap - n, "%s\t%d\t%s\t%d\t%lld\t%s\t%s\n", c->domain, c->host_only ? 1 : 0, c->path,
-                              c->secure ? 1 : 0, (long long)c->expires, c->name, c->value);
+                              (c->secure ? 1 : 0) | (c->httponly ? 2 : 0), (long long)c->expires, c->name, c->value);
     }
     dirty = false;
     jar_unlock();
@@ -308,7 +327,8 @@ void cookies_init(void) {
         snprintf(c->domain, sizeof(c->domain), "%s", f[0]);
         c->host_only = atoi(f[1]) != 0;
         snprintf(c->path, sizeof(c->path), "%s", f[2]);
-        c->secure = atoi(f[3]) != 0;
+        c->secure = (atoi(f[3]) & 1) != 0;
+        c->httponly = (atoi(f[3]) & 2) != 0;   /* (2: HttpOnly) */
         c->expires = (time_t)atoll(f[4]);
         snprintf(c->name, sizeof(c->name), "%s", f[5]);
         snprintf(c->value, sizeof(c->value), "%s", f[6]);

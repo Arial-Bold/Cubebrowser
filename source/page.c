@@ -62,7 +62,7 @@ static Box *box_new(Page *p) {
     return b;
 }
 
-static int link_add(Page *p, const char *url) {
+static int link_add(Page *p, const char *url, Node *node) {
     if (p->nlinks == p->caplinks) {
         int nc = p->caplinks ? p->caplinks * 2 : 128;
         char **nl = realloc(p->links, sizeof(char *) * (size_t)nc);
@@ -71,12 +71,26 @@ static int link_add(Page *p, const char *url) {
         unsigned char *nd = realloc(p->link_dl, (size_t)nc);
         if (!nd) return -1;
         p->link_dl = nd;
+        Node **nn = realloc(p->link_node, sizeof(Node *) * (size_t)nc);
+        if (!nn) return -1;
+        p->link_node = nn;
         p->caplinks = nc;
     }
     p->links[p->nlinks] = strdup(url);
     if (!p->links[p->nlinks]) return -1;
     p->link_dl[p->nlinks] = 0;
+    p->link_node[p->nlinks] = node;
     return p->nlinks++;
+}
+
+Node *page_link_node(Page *p, int link) {
+    return link >= 0 && link < p->nlinks && p->link_node ? p->link_node[link] : NULL;
+}
+
+/* the link index layout gives an element's boxes, or -1 */
+static inline int node_link(const Node *n) {
+    if (n->tag == TAG_A) return n->index;
+    return n->jsclick ? n->sub : -1;
 }
 
 bool page_link_is_download(Page *p, int link) {
@@ -115,6 +129,7 @@ static void text_of(const Node *n, char *out, size_t cap) {
     while (o && out[o - 1] == ' ') out[--o] = 0;
 }
 
+static const Node *field_node;   /* the element field_add() is adding (prepass_elem sets it) */
 static int field_add(Page *p, int form, int type, const char *name, const char *value) {
     if (p->nfields >= PAGE_MAX_FIELDS) return -1;
     Field *f = &p->fields[p->nfields];
@@ -123,6 +138,7 @@ static int field_add(Page *p, int form, int type, const char *name, const char *
     f->type = (unsigned char)type;
     snprintf(f->name, sizeof(f->name), "%s", name ? name : "");
     snprintf(f->value, sizeof(f->value), "%s", value ? value : "");
+    f->node = field_node;
     return p->nfields++;
 }
 
@@ -180,6 +196,11 @@ static char scratch_url[URL_MAX];   /* prepass helpers run one at a time */
 /* Handles one element. Kept out of line so the recursive prepass() stays tiny. */
 static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) {
         const char *v;
+        field_node = c;
+        /* with JavaScript on: an element with a click handler is clickable */
+        if (dom_keep_scripts && c->tag != TAG_A && !c->jsclick && dom_attr(c, "onclick") && c->tag != TAG_INPUT &&
+            c->tag != TAG_BUTTON && c->tag != TAG_SELECT && c->tag != TAG_TEXTAREA && c->tag != TAG_FRAME)
+            page_make_clickable(p, c);
         if (dom_attr(c, "style") || dom_attr(c, "bgcolor") || (c->tag == TAG_FONT && dom_attr(c, "color")))
             p->has_author_styles = true;
         switch (c->tag) {
@@ -190,8 +211,10 @@ static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) 
             if ((v = dom_attr(c, "href")) && *v && strncasecmp(v, "javascript:", 11) && strncasecmp(v, "mailto:", 7) &&
                 strncasecmp(v, "tel:", 4)) {
                 url_resolve(p->base, v, scratch_url, sizeof(scratch_url));
-                c->index = link_add(p, scratch_url);
+                c->index = link_add(p, scratch_url, c);
                 if (c->index >= 0 && dom_attr(c, "download")) p->link_dl[c->index] = 1;
+            } else if (dom_keep_scripts && ((v && !strncasecmp(v, "javascript:", 11)) || dom_attr(c, "onclick"))) {
+                c->index = link_add(p, v ? v : "javascript:", c);   /* a link only a script handles */
             }
             break;
         case TAG_IMG:
@@ -201,7 +224,7 @@ static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) 
         case TAG_IFRAME:
             if (c->tag == TAG_FRAME && (v = dom_attr(c, "src")) && *v && strncasecmp(v, "javascript:", 11)) {
                 url_resolve(p->base, v, scratch_url, sizeof(scratch_url));
-                c->index = link_add(p, scratch_url);
+                c->index = link_add(p, scratch_url, c);
                 c->sub = ++p->nframes;
             }
             break;
@@ -232,6 +255,7 @@ static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) 
             if (c->index >= 0) {
                 Field *f = &p->fields[c->index];
                 f->checked = dom_attr(c, "checked") != NULL;
+                f->button = type && !strcasecmp(type, "button");
                 if (t == FIELD_SUBMIT)
                     snprintf(f->label, sizeof(f->label), "%s", val && *val ? val : (type && !strcasecmp(type, "image") ? "Go" : "Submit"));
                 if (t == FIELD_TEXT || t == FIELD_PASSWORD) {
@@ -259,9 +283,11 @@ static __attribute__((noinline)) void prepass_elem(Page *p, Node *c, int *form) 
         }
         case TAG_BUTTON: {
             const char *type = dom_attr(c, "type");
-            if (type && strcasecmp(type, "submit")) break;
+            bool script_button = type && !strcasecmp(type, "button") && dom_keep_scripts;
+            if (type && strcasecmp(type, "submit") && !script_button) break;
             c->index = field_add(p, *form, FIELD_SUBMIT, dom_attr(c, "name"), dom_attr(c, "value"));
             if (c->index >= 0) {
+                p->fields[c->index].button = script_button;
                 text_of(c, p->fields[c->index].label, sizeof(p->fields[c->index].label));
                 if (!p->fields[c->index].label[0]) snprintf(p->fields[c->index].label, 64, "Submit");
             }
@@ -304,6 +330,49 @@ static void prepass(Page *p, Node *n, int *form) {
         prepass(p, c, form);
         if (c->tag == TAG_FORM && c->first) *form = saved;   /* properly nested forms end here */
     }
+}
+
+/* the form an element is inside (its index), or -1 */
+static int form_of(const Node *n) {
+    for (const Node *a = n->parent; a; a = a->parent)
+        if (a->tag == TAG_FORM && a->index >= 0) return a->index;
+    return -1;
+}
+
+/* new elements only: ones already seen keep their link, picture or field */
+static void prepass_new(Page *p, Node *n, int *form) {
+    for (Node *c = n->first; c; c = c->next) {
+        if (c->type != NT_ELEM) continue;
+        if (c->index < 0 && c->tag != TAG_SCRIPT) prepass_elem(p, c, form);
+        if (c->tag == TAG_SELECT || c->tag == TAG_BUTTON || c->tag == TAG_TEXTAREA) continue;
+        int saved = *form;
+        if (c->tag == TAG_FORM && c->index >= 0) *form = c->index;
+        prepass_new(p, c, form);
+        *form = saved;
+    }
+}
+
+void page_dom_added(Page *p, Node *n) {
+    if (!p->dom || !n) return;
+    int form = form_of(n);
+    if (n->type == NT_ELEM) {
+        if (n->index < 0 && n->tag != TAG_SCRIPT) prepass_elem(p, n, &form);
+        if (n->tag == TAG_FORM && n->index >= 0) form = n->index;
+        prepass_new(p, n, &form);
+    }
+    p->restyle = true;
+}
+
+void page_make_clickable(Page *p, Node *n) {
+    if (!n || n->type != NT_ELEM || n->jsclick || n->tag == TAG_ROOT || n->tag == TAG_HTML || n->tag == TAG_BODY) return;
+    if (n->tag == TAG_A && n->index >= 0) return;   /* a link already */
+    if (n->index >= 0 && n->tag != TAG_A) return;   /* a form field, picture... (clicks on those are handled already) */
+    if (n->tag == TAG_FRAME || n->tag == TAG_IFRAME) return;
+    int l = link_add(p, "javascript:", n);
+    if (l < 0) return;
+    if (n->tag == TAG_A) n->index = l;
+    else { n->sub = l; n->jsclick = 1; }
+    p->relayout = true;
 }
 
 /* ================================================================ sheets */
@@ -1546,7 +1615,7 @@ static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
         case D_INLINE: {
             if (c->depth > 100) { flow_children(c, f, ch, cs); break; }
             int saved = c->link;
-            if (ch->tag == TAG_A && ch->index >= 0) c->link = ch->index;
+            if (node_link(ch) >= 0) c->link = node_link(ch);
             float pl = css_len(cs->padding[3], 0, cs->fsize, 0) + css_len(cs->margin[3], 0, cs->fsize, 0) + cs->border[3];
             float pr = css_len(cs->padding[1], 0, cs->fsize, 0) + css_len(cs->margin[1], 0, cs->fsize, 0) + cs->border[1];
             if (pl > 0 && pl < 40 && !f->at_start) f->x += pl;
@@ -1564,9 +1633,9 @@ static void flow_children(L *c, Flow *f, Node *n, const Style *s) {
                 finish_line(c, f);
                 break;
             }
-            if (ch->tag == TAG_A && ch->index >= 0) {
+            if (node_link(ch) >= 0) {
                 int saved = c->link;
-                c->link = ch->index;
+                c->link = node_link(ch);
                 layout_block(c, f, ch, cs);
                 c->link = saved;
             } else {
@@ -1787,8 +1856,52 @@ void page_set_source(Page *p, char *src, size_t len, bool plain, const char *url
     p->nframes = 0;
     p->scroll = p->scroll_target = 0;
     p->dom = NULL;
+    dom_keep_scripts = g_set.javascript != 0 && !plain;   /* (scripts and their handlers are kept for jsengine.c) */
     run_with_big_stack(parse_job, p);
     p->restyle = true;
+}
+
+/* A script changed a link's address. */
+void page_set_link_url(Page *p, Node *n) {
+    if (n->tag != TAG_A) return;
+    const char *v = dom_attr(n, "href");
+    if (!v || !*v) return;
+    char abs[URL_MAX];
+    if (!strncasecmp(v, "javascript:", 11)) snprintf(abs, sizeof(abs), "%s", v);
+    else url_resolve(p->base, v, abs, sizeof(abs));
+    if (n->index < 0) { n->index = link_add(p, abs, n); p->relayout = true; return; }
+    if (n->index >= p->nlinks) return;
+    char *u = strdup(abs);
+    if (!u) return;
+    free(p->links[n->index]);
+    p->links[n->index] = u;
+}
+
+/* A script changed a picture's address (slideshows, rollovers). */
+void page_image_changed(Page *p, Node *n) {
+    if (n->tag != TAG_IMG) return;
+    int i = n->index;
+    bool shared = false;
+    if (i >= 0 && i < p->nimages)
+        for (int k = 0; k < p->nimages; k++)
+            if (p->images[k].share == i) { shared = true; break; }
+    if (i >= 0 && i < p->nimages && !shared) {
+        /* reuse its entry: let the old picture go */
+        PageImage *im = &p->images[i];
+        free(im->url);
+        if (im->share < 0 && im->state == IMG_READY) {
+            size_t bytes = (size_t)im->img.tex_w * im->img.tex_h * 2;
+            p->image_bytes = p->image_bytes > bytes ? p->image_bytes - bytes : 0;
+        }
+        if (im->share < 0) gfx_image_free(&im->img);
+        int saved = p->nimages;
+        p->nimages = i;
+        image_add(p, n);   /* (fills entry i again) */
+        p->nimages = saved;
+    } else {
+        n->index = image_add(p, n);
+    }
+    p->relayout = true;
 }
 
 /* ------------------------------------------------------- on-screen boxes */
@@ -1911,6 +2024,7 @@ void page_free(Page *p) {
     free(p->arena);
     free(p->links);
     free(p->link_dl);
+    free(p->link_node);
     memset(p, 0, sizeof(*p));
 }
 
@@ -2303,7 +2417,10 @@ bool page_needs_script(const Page *p) {
         while (n && !n->next) n = n->parent;
         if (n) n = n->next;
     }
-    /* a page that is all script and no words, or one that says so itself */
+    /* a page that is all script and no words, or one that says so itself
+     * (with JavaScript on, its scripts have run by now: only a page that's
+     * still nearly empty) */
+    if (g_set.javascript) return scripts > 0 && text < 40 && links < 2;
     if (scripts > 0 && text < 120 && links < 4) return true;
     if (asks && text < 400) return true;
     return false;

@@ -200,6 +200,7 @@ static void show_html(const char *html, const char *url, bool plain) {
     char *copy = strdup(html);
     if (!copy) return;
     page_set_source(&page, copy, strlen(copy), plain, url);
+    js_page_begin(&page);
     page.secure = page.verified = page.truncated = false;
     has_page = true;
     page_gen++;
@@ -341,6 +342,7 @@ static void restore_entry(HistEntry *e) {
     hist_unspill(e);
     if (e->src) {
         page_set_source(&page, e->src, e->len, e->plain, e->url);
+        js_page_begin(&page);
         e->src = NULL;
         page.secure = e->secure;
         page.verified = e->verified;
@@ -412,6 +414,7 @@ static void start_load(const char *url, const char *post) {
 
 /* "This page needs JavaScript" card: shown for page_gen == script_note_gen */
 static int script_note_gen = -1;
+static int script_note_check = -1;   /* page_gen of a page to check once its scripts have run */
 static bool text_mode_load;              /* the page loading now was asked for in text mode */
 static char text_mode_tried[URL_MAX];    /* last page tried in text mode */
 
@@ -979,6 +982,7 @@ static void draw_download(bool interactive) {
 #define TAG_MAKE(idx) ((int)(((page_gen & 0x1FFFFF) << 10) | ((idx) & 0x3FF)))
 #define TAG_IDX(tag) ((tag) & 0x3FF)
 #define TAG_CURRENT(tag) ((((unsigned)(tag)) >> 10) == (page_gen & 0x1FFFFF))
+#define TAG_SCRIPT_BIT 0x200   /* a script file (fetched like a style sheet) */
 
 /* Gives every other copy of the same picture on the page the same result,
  * so a picture used many times (spacers, tabs, icons) is downloaded once. */
@@ -1187,6 +1191,14 @@ static void schedule_images(float view_top, float view_h, float max_w) {
         }
         if (sheets_pending()) return;
     }
+    if (g_set.javascript) {   /* then the page's script files */
+        char su[URL_MAX];
+        int ji = js_next_script(su, sizeof(su));
+        if (ji >= 0) {
+            if (!fetch_start_css(su, TAG_MAKE(TAG_SCRIPT_BIT | ji))) js_script_loaded(ji, NULL, 0);
+            return;
+        }
+    }
     if (!g_set.load_images) return;
     if (page.image_bytes >= IMAGE_BUDGET) {
         /* the pictures around here alone fill the budget: skip the rest of
@@ -1287,7 +1299,7 @@ static void veil_update(float view_h) {
         bool done = !g_set.load_screen || now_ms() - veil.start > VEIL_MAX_MS;
         if (!done && !loading && !queued) {
             if (!has_page || page_gen == veil.gen0) done = true;   /* stopped, failed, or a download */
-            else if (last_layout_w != 0 && !page.restyle && !page.relayout && !sheets_pending() &&
+            else if (last_layout_w != 0 && !page.restyle && !page.relayout && !sheets_pending() && !js_busy() &&
                      first_screen_pictures(view_h) == 0)
                 done = true;
         }
@@ -1332,7 +1344,10 @@ static void handle_fetch_result(void) {
         int tag;
         if (!fetch_take_css(&r, &tag)) return;
         int idx = TAG_IDX(tag);
-        if (TAG_CURRENT(tag) && has_page) {
+        if (TAG_CURRENT(tag) && has_page && (idx & TAG_SCRIPT_BIT)) {
+            js_script_loaded(idx & ~TAG_SCRIPT_BIT, r.status < 400 ? r.body : NULL, r.body_len);   /* takes the text */
+            if (r.status < 400) r.body = NULL;
+        } else if (TAG_CURRENT(tag) && has_page) {
             page_sheet_loaded(&page, idx, r.body, r.body_len);   /* takes the text */
             r.body = NULL;
         }
@@ -1375,6 +1390,7 @@ static void handle_fetch_result(void) {
     cur_post = pending_post;   /* redirects after a POST end up as GET, but re-sending is harmless here */
     pending_post = NULL;
     page_set_source(&page, r.body, r.body_len, plain, r.url);
+    js_page_begin(&page);
     page.secure = r.secure;
     page.verified = r.verified;
     page.truncated = r.truncated;
@@ -1384,7 +1400,8 @@ static void handle_fetch_result(void) {
     last_layout_w = 0;
     if (r.truncated) ui_toast("This page was too big and has been cut short");
     sound_play(SFX_LOADED);
-    script_note_gen = page_needs_script(&page) ? page_gen : -1;
+    script_note_gen = -1;
+    script_note_check = page_gen;   /* (once its scripts have run: see browser_frame) */
     if (was_text_mode) snprintf(text_mode_tried, sizeof(text_mode_tried), "%s", page.url);
     /* a page that forwards somewhere else (often instead of using script) */
     int delay;
@@ -1425,9 +1442,20 @@ static void open_address_bar_typed(char first) {
     osk_open("Address or search", s, URL_MAX - 1, OSK_URL, address_done, NULL);
 }
 
+/* the <form> element a field is in */
+static Node *form_node(int field) {
+    if (field < 0 || field >= page.nfields || !page.fields[field].node) return NULL;
+    for (Node *a = page.fields[field].node->parent; a; a = a->parent)
+        if (a->tag == TAG_FORM) return a;
+    return NULL;
+}
+
 static void submit_form(int field, int submit_field) {
     char url[URL_MAX];
     char *post = NULL;
+    Node *fn = form_node(field);
+    if (fn && js_event(fn, "submit")) return;   /* a script stopped it (and did its own thing) */
+    if (field >= page.nfields) return;
     if (!page_build_submit(&page, field, submit_field, url, sizeof(url), &post)) return;
     navigate(url, post, true);
     free(post);
@@ -1438,6 +1466,11 @@ static void field_done(bool ok, const char *text, void *user) {
     int gen = packed >> 8, f = packed & 0xFF;
     if (!ok || gen != (page_gen & 0xFFFFFF) || f >= page.nfields) return;
     snprintf(page.fields[f].value, sizeof(page.fields[f].value), "%s", text);
+    if (page.fields[f].node) {   /* scripts hear about it */
+        js_event((Node *)page.fields[f].node, "input");
+        js_event((Node *)page.fields[f].node, "change");
+        if (f >= page.nfields) return;
+    }
     /* a form with a single text box (e.g. search) submits right away */
     int texts = 0;
     for (int i = 0; i < page.nfields; i++)
@@ -1563,6 +1596,8 @@ static void choose_select(int i) {
     sel_field = -1;
     char url[URL_MAX];
     int r = page_select_choose(&page, f, &sel_opts[i], url, sizeof(url));
+    if (page.fields[f].node && js_event((Node *)page.fields[f].node, "change")) return;
+    if (page.fields[f].node && g_set.javascript && dom_attr(page.fields[f].node, "onchange")) return;   /* (its script decides) */
     if (r == SELECT_GO) navigate(url, NULL, true);
     else if (r == SELECT_SUBMIT) submit_form(f, -1);
 }
@@ -1841,6 +1876,29 @@ kb_done:
         page.relayout = true;
     }
     if (page.styled_author != (g_set.page_styles != 0)) page.restyle = true;
+    /* the page's scripts (their turn, then timers), and what they ask for */
+    if (has_page && !loading) {
+        js_frame();
+        char ju[URL_MAX];
+        int jf = -1;
+        int nav = js_take_navigation(ju, sizeof(ju), &jf);
+        if (nav == JS_NAV_GO) navigate(ju, NULL, true);
+        else if (nav == JS_NAV_REPLACE) start_load(ju, NULL);
+        else if (nav == JS_NAV_BACK) go_back();
+        else if (nav == JS_NAV_SUBMIT && jf >= 0 && jf < page.nfields) {
+            char url[URL_MAX];
+            char *post = NULL;
+            if (page_build_submit(&page, jf, page.fields[jf].type == FIELD_SUBMIT ? jf : -1, url, sizeof(url), &post)) navigate(url, post, true);
+            free(post);
+        }
+        const char *jm = js_take_message();
+        if (jm) ui_toast(jm);
+        /* "This page needs JavaScript": decided once its scripts have had their go */
+        if (script_note_check == page_gen && !js_busy()) {
+            script_note_check = -1;
+            script_note_gen = page_needs_script(&page) ? page_gen : -1;
+        }
+    }
     /* Laying out a big page takes a while, and nothing moves meanwhile, so
      * the extra layouts while a page fills in are spaced out: the page's
      * stylesheets are applied together once all have arrived, and pictures
@@ -1938,9 +1996,13 @@ kb_done:
 
         /* the "needs JavaScript" card sits over the bottom of the page */
         bool note = script_note_gen == page_gen && !loading;
-        static const char note_text[] =
-            "This site builds its pages with scripts, which CubeBrowser can't run, so some or all of it "
-            "may be missing. Text mode asks the site for a simpler version, which some sites offer.";
+        static const char note_text_off[] =
+            "This site builds its pages with scripts, and JavaScript is turned off in Settings, so some or all "
+            "of it may be missing. Text mode asks the site for a simpler version, which some sites offer.";
+        static const char note_text_on[] =
+            "This site builds its pages with scripts that need more than CubeBrowser's JavaScript can do, so some "
+            "or all of it may be missing. Text mode asks the site for a simpler version, which some sites offer.";
+        const char *note_text = g_set.javascript ? note_text_on : note_text_off;
         float nw = fminf(cw - 40, 600), nx = cx + (cw - nw) * 0.5f;
         float ntext_h = note ? note_wrap(FONT_BODY, 17, 0, 0, nw - 48, t->text, note_text, false) : 0;
         float nh = 24 + 30 + ntext_h + 14 + 40 + 20, ny = cy + ch - nh - 14;
@@ -2017,14 +2079,25 @@ kb_done:
             sound_play(SFX_SELECT);
             if (hover_field >= 0) {
                 int ft = page.fields[hover_field].type;
-                if (ft == FIELD_SUBMIT) submit_form(hover_field, hover_field);
-                else if (ft == FIELD_CHECK || ft == FIELD_RADIO) page_toggle_field(&page, hover_field);
-                else if (ft == FIELD_SELECT) open_select(hover_field);
+                Node *fnode = (Node *)page.fields[hover_field].node;
+                int gen = page_gen;
+                if (ft == FIELD_SUBMIT) {
+                    bool stopped = js_click(fnode);   /* a script's button, or one it handles */
+                    if (!stopped && gen == page_gen && hover_field < page.nfields && !page.fields[hover_field].button)
+                        submit_form(hover_field, hover_field);
+                } else if (ft == FIELD_CHECK || ft == FIELD_RADIO) {
+                    page_toggle_field(&page, hover_field);
+                    if (fnode) { js_click(fnode); if (gen == page_gen) js_event(fnode, "change"); }
+                } else if (ft == FIELD_SELECT) open_select(hover_field);
                 else edit_field(hover_field);
-            } else if (page_link_is_download(&page, hover_link) || input_held(ACT_SLOW)) {
-                save_link(page_link_url(&page, hover_link));
             } else {
-                navigate(page_link_url(&page, hover_link), NULL, true);
+                Node *lnode = page_link_node(&page, hover_link);
+                const char *lurl = page_link_url(&page, hover_link);
+                bool script_link = !strncasecmp(lurl, "javascript:", 11);
+                if (lnode && js_click(lnode)) { /* a script dealt with it */ }
+                else if (script_link) { /* (only a script could follow it) */ }
+                else if (page_link_is_download(&page, hover_link) || input_held(ACT_SLOW)) save_link(page_link_url(&page, hover_link));
+                else navigate(page_link_url(&page, hover_link), NULL, true);
             }
         }
     }

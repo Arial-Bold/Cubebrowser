@@ -128,6 +128,8 @@ const SetDef g_setdefs[] = {
       "Some sites send simpler pages to text browsers." },
     { CAT_BROWSING, "web.css", "Page styles", ST_BOOL, O(page_styles), 0, 1, 1, NULL, NULL,
       "Use each site's own colours, fonts and layout. Off shows plain pages." },
+    { CAT_BROWSING, "web.js", "JavaScript", ST_BOOL, O(javascript), 0, 1, 1, NULL, NULL,
+      "Run pages' scripts: menus, tabs and other things that need them. Off makes pages load a little faster." },
     { CAT_BROWSING, "web.images", "Load images", ST_BOOL, O(load_images), 0, 1, 1, NULL, NULL,
       "Show pictures on pages. Turn off for faster loading." },
     { CAT_BROWSING, "web.imgsize", "Picture size", ST_CHOICE, O(img_size), 0, 2, 1, img_size_names, NULL,
@@ -235,6 +237,7 @@ void settings_defaults(Settings *s) {
     s->show_alt = 1;
     s->load_images = 1;
     s->page_styles = 1;
+    s->javascript = 1;
     s->img_size = 1;
     s->image_proxy = 1;
     s->pic_cache = 3;

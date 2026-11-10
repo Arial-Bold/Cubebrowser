@@ -29,7 +29,8 @@ typedef struct {
     char name[64];
     char value[256];
     char label[64];     /* submit/select caption */
-    const Node *node;   /* <select>: its element, for the choices (valid while the page is loaded) */
+    const Node *node;   /* its element (<select>: for the choices; valid while the page is loaded) */
+    unsigned char button;   /* <input type=button> / <button type=button>: only a script does something */
 } Field;
 
 typedef struct {
@@ -96,6 +97,7 @@ typedef struct {
     int arena_len, arena_cap;
     char **links;
     unsigned char *link_dl;   /* <a download>: save rather than open */
+    Node **link_node;         /* the element each link belongs to (for scripts' click handlers) */
     int nlinks, caplinks;
     int nframes;
     Field fields[PAGE_MAX_FIELDS];
@@ -127,6 +129,14 @@ void page_draw(Page *p, float x, float y, float w, float h, int hover_link, int 
 int  page_hit(Page *p, float px, float py, int *field_out);
 const char *page_link_url(Page *p, int link);
 bool page_link_is_download(Page *p, int link);
+/* The element a link belongs to (NULL if none), for scripts' click handlers. */
+Node *page_link_node(Page *p, int link);
+/* A script changed the page: new elements under n get their links, pictures
+ * and form fields; a click handler makes an element clickable. */
+void page_dom_added(Page *p, Node *n);
+void page_make_clickable(Page *p, Node *n);
+void page_set_link_url(Page *p, Node *n);   /* its href changed */
+void page_image_changed(Page *p, Node *n);  /* its src changed */
 /* <meta http-equiv="refresh" content="N; url=..."> in the page: the address
  * it sends you to (resolved) and the delay in seconds. False if none. */
 bool page_meta_refresh(const Page *p, char *url_out, size_t url_len, int *delay);
